@@ -1,0 +1,25 @@
+services:
+  backend:
+    environment:
+      OMNIROUTE_API_KEY: ""
+      OMNIROUTE_API_KEY_FILE: /run/secrets/b_agent_omniroute_api_key
+      OMNIROUTE_ALLOWED_PROVIDERS: ${OMNIROUTE_ALLOWED_PROVIDERS:?Set a JSON provider allowlist}
+    secrets:
+      - b_agent_omniroute_api_key
+
+  celery_worker:
+    environment:
+      OMNIROUTE_API_KEY: ""
+      OMNIROUTE_API_KEY_FILE: /run/secrets/b_agent_omniroute_api_key
+      OMNIROUTE_ALLOWED_PROVIDERS: ${OMNIROUTE_ALLOWED_PROVIDERS:?Set a JSON provider allowlist}
+    secrets:
+      - b_agent_omniroute_api_key
+
+  omniroute:
+    # Production must use a promoted internal artifact, never an on-host source build.
+    image: ${OMNIROUTE_IMAGE:?Set an immutable internal image reference ending in @sha256:<digest>}
+    build: !reset null
+
+secrets:
+  b_agent_omniroute_api_key:
+    file: ${B_AGENT_OMNIROUTE_API_KEY_FILE:?Set the path to the B-agent gateway key file}

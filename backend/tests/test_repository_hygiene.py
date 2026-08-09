@@ -121,7 +121,7 @@ def test_gateway_production_overlay_requires_digest_and_secret():
 
     assert "OMNIROUTE_IMAGE" in overlay
     assert "@sha256" in overlay
-    assert "build: null" in overlay
+    assert "build: !reset null" in overlay
     assert "OMNIROUTE_API_KEY_FILE" in overlay
     assert "/run/secrets/b_agent_omniroute_api_key" in overlay
 
