@@ -1462,6 +1462,98 @@ class AgentMemoryPurgeJob(Base):
     )
 
 
+class KnowledgeDocument(Base):
+    """Immutable version of one tenant-owned knowledge document."""
+
+    __tablename__ = "knowledge_documents"
+
+    record_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), nullable=False)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    version = Column(Integer, nullable=False)
+    source_ref = Column(String(500), nullable=False)
+    title = Column(String(300), nullable=False)
+    authority = Column(String(60), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    acl_policy_version = Column(String(64), nullable=False)
+    index_version = Column(String(64), nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False, default="active")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "version",
+            name="uq_knowledge_document_version",
+        ),
+        Index(
+            "idx_knowledge_document_org_status_source",
+            "org_id",
+            "status",
+            "source_ref",
+        ),
+    )
+
+
+class KnowledgeChunk(Base):
+    """Searchable text unit belonging to an immutable document version."""
+
+    __tablename__ = "knowledge_chunks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_record_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_documents.record_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    chunk_id = Column(String(100), nullable=False)
+    content = Column(Text, nullable=False)
+    source_ref = Column(String(600), nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_record_id",
+            "chunk_id",
+            name="uq_knowledge_chunk_document_chunk",
+        ),
+        Index("idx_knowledge_chunk_document", "document_record_id"),
+    )
+
+
+class KnowledgeDocumentGrant(Base):
+    """Version-bound role or user grant used by authoritative ACL checks."""
+
+    __tablename__ = "knowledge_document_grants"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_record_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_documents.record_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    principal_type = Column(String(20), nullable=False)
+    principal_value = Column(String(100), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_record_id",
+            "principal_type",
+            "principal_value",
+            name="uq_knowledge_document_grant",
+        ),
+        Index(
+            "idx_knowledge_grant_document_principal",
+            "document_record_id",
+            "principal_type",
+            "principal_value",
+        ),
+    )
+
+
 class StatsDaily(Base):
     """Daily statistics model"""
     __tablename__ = "stats_daily"
