@@ -95,3 +95,71 @@ async def test_hunter_email_verifier_preserves_retry_and_legal_semantics(
     assert error.value.legal_restriction is legal_restriction
     assert "hunter-secret" not in str(error.value)
 
+
+@pytest.mark.asyncio
+async def test_hunter_domain_search_maps_business_filters_and_pagination():
+    requests = []
+
+    def handler(request: httpx.Request):
+        requests.append(request)
+        return hunter_response(
+            200,
+            {"data": {"domain": "acme.com", "organization": "Acme", "emails": []}},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        await HunterClient("hunter-secret", http_client=http_client).domain_search(
+            domain="acme.com",
+            limit=25,
+            offset=50,
+            contact_type="personal",
+            seniorities=["executive", "senior"],
+            departments=["sales", "management"],
+            decision_maker=True,
+            verification_statuses=["valid"],
+        )
+
+    params = requests[0].url.params
+    assert params["domain"] == "acme.com"
+    assert params["limit"] == "25"
+    assert params["offset"] == "50"
+    assert params["type"] == "personal"
+    assert params["seniority"] == "executive,senior"
+    assert params["department"] == "sales,management"
+    assert params["decision_maker"] == "true"
+    assert params["verification_status"] == "valid"
+    assert "linkedin_handle" not in params
+
+
+@pytest.mark.asyncio
+async def test_hunter_email_finder_supports_named_person_without_linkedin_input():
+    requests = []
+
+    def handler(request: httpx.Request):
+        requests.append(request)
+        return hunter_response(
+            200,
+            {
+                "data": {
+                    "email": "buyer@acme.com",
+                    "first_name": "Ada",
+                    "last_name": "Buyer",
+                    "verification": {"status": "valid"},
+                }
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        result = await HunterClient("hunter-secret", http_client=http_client).email_finder(
+            domain="acme.com",
+            first_name="Ada",
+            last_name="Buyer",
+            max_duration=12,
+        )
+
+    assert result["email"] == "buyer@acme.com"
+    params = requests[0].url.params
+    assert params["max_duration"] == "12"
+    assert "linkedin_handle" not in params
