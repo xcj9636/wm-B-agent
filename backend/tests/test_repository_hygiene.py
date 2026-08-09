@@ -96,6 +96,19 @@ def test_compose_runs_migrations_before_database_consumers():
     assert compose.count("condition: service_completed_successfully") >= 3
 
 
+def test_compose_uses_the_installed_postgresql_driver():
+    requirements = (
+        REPOSITORY_ROOT / "backend" / "requirements.txt"
+    ).read_text(encoding="utf-8")
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "pg8000" in requirements
+    assert "postgresql+pg8000://" in compose
+    assert "postgresql://admin:password@db:5432/trade_ai" not in compose
+
+
 def test_ci_covers_backend_frontend_and_compose_gates():
     workflow = (
         REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
