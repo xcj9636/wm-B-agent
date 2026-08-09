@@ -3,43 +3,44 @@ import { ref, watch } from 'vue'
 
 export const useThemeStore = defineStore('theme', () => {
   const isDark = ref(false)
+  const initialized = ref(false)
+
+  function applySavedPreference() {
+    const saved = localStorage.getItem('theme') || 'auto'
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    isDark.value = saved === 'dark' || (saved === 'auto' && prefersDark)
+  }
 
   function toggleTheme() {
-    isDark.value = !isDark.value
+    setTheme(!isDark.value)
   }
 
   function setTheme(dark: boolean) {
     isDark.value = dark
+    localStorage.setItem('theme', dark ? 'dark' : 'light')
+  }
+
+  function useSystemTheme() {
+    localStorage.setItem('theme', 'auto')
+    applySavedPreference()
   }
 
   function initialize() {
-    // Check system preference
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    if (initialized.value) return
+    initialized.value = true
+    applySavedPreference()
 
-    // Check saved preference
-    const saved = localStorage.getItem('theme')
-
-    if (saved === 'dark' || (saved === 'auto' && prefersDark)) {
-      isDark.value = true
-    }
-
-    // Listen for system changes
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-      if (localStorage.getItem('theme') === 'auto') {
-        isDark.value = e.matches
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
+      if ((localStorage.getItem('theme') || 'auto') === 'auto') {
+        isDark.value = event.matches
       }
     })
   }
 
-  // Apply theme to document
   watch(
     isDark,
     (dark) => {
-      if (dark) {
-        document.documentElement.classList.add('dark')
-      } else {
-        document.documentElement.classList.remove('dark')
-      }
+      document.documentElement.classList.toggle('dark', dark)
     },
     { immediate: true }
   )
@@ -48,6 +49,7 @@ export const useThemeStore = defineStore('theme', () => {
     isDark,
     toggleTheme,
     setTheme,
+    useSystemTheme,
     initialize,
   }
 })

@@ -11,17 +11,27 @@
       @click="mobileOpen = false"
     />
 
-    <aside class="console-sidebar">
-      <div class="brand">
-        <div class="brand-mark">
-          B
+    <aside class="console-sidebar sidebar-material apple-glass">
+      <div class="sidebar-titlebar">
+        <div
+          class="window-controls"
+          aria-hidden="true"
+        >
+          <span class="window-control window-control--close" />
+          <span class="window-control window-control--minimize" />
+          <span class="window-control window-control--expand" />
         </div>
         <div
           v-if="!isCollapsed"
-          class="brand-copy"
+          class="brand"
         >
-          <strong>B-agent</strong>
-          <span>Revenue operations</span>
+          <div class="brand-mark">
+            B
+          </div>
+          <div class="brand-copy">
+            <strong>B-agent</strong>
+            <span>Revenue operations</span>
+          </div>
         </div>
       </div>
 
@@ -135,6 +145,7 @@
             placement="bottom"
           >
             <el-button
+              class="toolbar-button"
               circle
               text
               :aria-label="isDark ? 'Use light theme' : 'Use dark theme'"
@@ -147,7 +158,7 @@
           <el-dropdown trigger="click">
             <button
               type="button"
-              class="user-control"
+              class="user-control apple-glass"
             >
               <el-avatar :size="32">
                 {{ userInitial }}
@@ -213,7 +224,9 @@ async function logout() {
 <style lang="scss" scoped>
 .console-shell {
   min-height: 100dvh;
-  background: var(--el-bg-color-page);
+  background:
+    radial-gradient(circle at 76% -10%, color-mix(in srgb, var(--apple-blue) 7%, transparent), transparent 34%),
+    var(--surface-canvas);
 }
 
 .console-sidebar {
@@ -221,32 +234,45 @@ async function logout() {
   inset: 0 auto 0 0;
   z-index: 30;
   display: flex;
-  width: 232px;
+  width: 248px;
   flex-direction: column;
-  border-right: 1px solid var(--el-border-color-lighter);
-  background: var(--el-bg-color);
-  transition: width 180ms ease, transform 180ms ease;
+  border-width: 0 1px 0 0;
+  border-radius: 0;
+  background: var(--surface-sidebar);
+  box-shadow: inset -1px 0 0 var(--border-highlight);
+  -webkit-backdrop-filter: blur(32px) saturate(170%);
+  backdrop-filter: blur(32px) saturate(170%);
+  transition: width 260ms var(--motion-spring), transform 260ms var(--motion-spring);
+}
+
+.sidebar-titlebar {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border-hairline);
 }
 
 .brand {
   display: flex;
-  min-height: 64px;
+  min-width: 0;
   align-items: center;
-  gap: 11px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  gap: 9px;
 }
 
 .brand-mark {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 8px;
-  color: #f7fbff;
-  background: #255c99;
-  font-weight: 800;
+  color: #fff;
+  background: var(--apple-blue);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 2px 6px rgb(0 122 255 / 0.2);
+  font-size: 14px;
+  font-weight: 720;
 }
 
 .brand-copy {
@@ -256,7 +282,9 @@ async function logout() {
 }
 
 .brand-copy strong {
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .brand-copy span {
@@ -271,36 +299,72 @@ async function logout() {
   flex: 1;
   overflow-y: auto;
   border-right: 0;
-  padding: 10px 8px;
+  padding: 12px 10px;
+  background: transparent;
 }
 
 .console-menu:not(.el-menu--collapse) {
   width: 100%;
 }
 
+.console-menu :deep(.el-menu-item),
+.console-menu :deep(.el-sub-menu__title) {
+  height: 38px;
+  margin: 2px 0;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  line-height: 38px;
+}
+
+.console-menu :deep(.el-menu-item:hover),
+.console-menu :deep(.el-menu-item:focus) {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.console-menu :deep(.el-menu-item.is-active) {
+  color: var(--text-primary);
+  background: var(--surface-selected);
+  font-weight: 590;
+}
+
+.console-menu :deep(.el-menu-item.is-active .el-icon) {
+  color: var(--apple-blue);
+}
+
+.console-menu :deep(.el-menu-item-group__title) {
+  padding: 16px 12px 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .collapse-control {
   display: flex;
-  min-height: 48px;
+  min-height: 52px;
   align-items: center;
   gap: 10px;
   padding: 0 20px;
   border: 0;
-  border-top: 1px solid var(--el-border-color-lighter);
-  color: var(--el-text-color-secondary);
+  border-top: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
 }
 
 .collapse-control:hover,
 .collapse-control:focus-visible {
-  color: var(--el-color-primary);
+  color: var(--apple-blue);
+  background: var(--surface-hover);
   outline: none;
 }
 
 .console-content {
   min-width: 0;
-  margin-left: 232px;
-  transition: margin-left 180ms ease;
+  margin-left: 248px;
+  transition: margin-left 260ms var(--motion-spring);
 }
 
 .console-header {
@@ -308,14 +372,16 @@ async function logout() {
   top: 0;
   z-index: 20;
   display: flex;
-  min-height: 64px;
+  min-height: 68px;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: color-mix(in srgb, var(--el-bg-color) 94%, transparent);
-  backdrop-filter: blur(12px);
+  padding: 0 26px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: color-mix(in srgb, var(--surface-glass) 90%, transparent);
+  box-shadow: inset 0 1px 0 var(--border-highlight);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
 }
 
 .header-title,
@@ -332,32 +398,41 @@ async function logout() {
 
 .header-title span,
 .user-copy small {
-  color: var(--el-text-color-secondary);
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
 .header-title strong {
   font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }
 
 .header-actions {
-  gap: 8px;
+  gap: 7px;
+}
+
+.toolbar-button {
+  width: 34px;
+  height: 34px;
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
 }
 
 .user-control {
   gap: 9px;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: var(--console-radius);
-  color: var(--el-text-color-primary);
-  background: transparent;
+  min-height: 40px;
+  padding: 3px 9px 3px 4px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  background: var(--surface-glass);
   font: inherit;
   cursor: pointer;
 }
 
 .user-control:hover,
 .user-control:focus-visible {
-  background: var(--el-fill-color-light);
+  background: color-mix(in srgb, var(--surface-glass) 68%, var(--surface-hover));
   outline: none;
 }
 
@@ -369,20 +444,26 @@ async function logout() {
 
 .user-copy strong {
   font-size: 13px;
+  font-weight: 610;
 }
 
 .console-main {
   width: min(100%, 1520px);
   margin: 0 auto;
-  padding: 24px;
+  padding: 28px clamp(20px, 3vw, 40px) 44px;
 }
 
 .is-collapsed .console-sidebar {
-  width: 72px;
+  width: 82px;
 }
 
 .is-collapsed .console-content {
-  margin-left: 72px;
+  margin-left: 82px;
+}
+
+.is-collapsed .sidebar-titlebar {
+  justify-content: center;
+  padding: 0;
 }
 
 .is-collapsed .collapse-control {
@@ -420,7 +501,9 @@ async function logout() {
     inset: 0;
     z-index: 25;
     border: 0;
-    background: rgb(15 23 42 / 0.38);
+    background: rgb(15 15 17 / 0.42);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
   }
 
   .collapse-control {
@@ -428,11 +511,11 @@ async function logout() {
   }
 
   .console-main {
-    padding: 18px 14px;
+    padding: 20px 14px 36px;
   }
 
   .console-header {
-    padding: 0 12px;
+    padding: 0 14px;
   }
 
   .user-copy {

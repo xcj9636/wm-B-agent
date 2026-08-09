@@ -30,14 +30,14 @@ onMounted(() => {
 
 <style lang="scss">
 #app {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .auth-wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  background: var(--el-bg-color-page);
+  min-height: 100dvh;
+  background: var(--surface-canvas);
 }
 </style>
