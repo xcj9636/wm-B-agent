@@ -80,3 +80,15 @@ def test_celery_beat_does_not_reference_django_scheduler():
 
     assert "django_celery_beat" not in compose
     assert "celerybeat-schedule" in compose
+
+
+def test_gateway_architecture_decisions_and_notice_are_recorded():
+    adr_dir = REPOSITORY_ROOT / "docs" / "adr"
+
+    assert (adr_dir / "0001-omniroute-shared-gateway.md").is_file()
+    assert (adr_dir / "0002-single-organization-trust-boundary.md").is_file()
+    notice = (REPOSITORY_ROOT / "THIRD_PARTY_NOTICES.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Copyright (c) 2026 diegosouzapw" in notice
+    assert "MIT License" in notice
