@@ -11,8 +11,25 @@ from app.models.schemas import (
     UserCreate, UserResponse, AccountCreate, AccountUpdate, AccountResponse
 )
 from app.api.v1.auth import get_current_active_user
+from app.services.llm.status import (
+    GatewayReadiness,
+    GatewayStatusService,
+    get_gateway_status_service,
+)
 
 router = APIRouter()
+
+
+@router.get("/ai-gateway/status", response_model=GatewayReadiness)
+async def get_ai_gateway_status(
+    current_user: User = Depends(get_current_active_user),
+    status_service: GatewayStatusService = Depends(get_gateway_status_service),
+):
+    """Return a secret-free gateway readiness report for administrators."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return await status_service.check()
 
 
 @router.get("/users", response_model=List[UserResponse])

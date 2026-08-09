@@ -108,3 +108,8 @@ class GatewayStatusService:
             missing_models=missing_models,
             issues=issues,
         )
+
+
+def get_gateway_status_service() -> GatewayStatusService:
+    """FastAPI dependency seam for the gateway management plane."""
+    return GatewayStatusService()
