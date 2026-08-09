@@ -23,6 +23,13 @@ from app.services.agent_runtime.context import (
 )
 from app.services.agent_runtime.prompts import get_default_prompt_registry
 from app.services.agent_runtime.turns import AgentTurnCoordinator
+from app.services.agent_concurrency import (
+    ConcurrencyLease,
+    ConcurrencyRequest,
+    ConcurrencyUnavailable,
+    DistributedConcurrencyLimiter,
+    get_agent_concurrency_limiter,
+)
 from app.services.agent_runs import (
     AgentRunCommand,
     AgentRunService,
@@ -72,9 +79,16 @@ class AIChatService:
     SAFETY_MARGIN_TOKENS = 512
     RUN_LEASE_SECONDS = 300
 
-    def __init__(self, db: Session, runtime: AIRuntimeService) -> None:
+    def __init__(
+        self,
+        db: Session,
+        runtime: AIRuntimeService,
+        *,
+        concurrency: DistributedConcurrencyLimiter,
+    ) -> None:
         self._db = db
         self._runtime = runtime
+        self._concurrency = concurrency
 
     def list_sessions(self, user_id: int) -> List[AIChatSessionResponse]:
         rows = (
@@ -134,6 +148,7 @@ class AIChatService:
         run_service = AgentRunService(self._db)
         run: Optional[AgentRun] = None
         run_worker_id = f"api-chat:{turn.id}"
+        concurrency_lease: Optional[ConcurrencyLease] = None
         try:
             classification = SensitiveDataClassifier().classify(
                 content,
@@ -154,6 +169,14 @@ class AIChatService:
                 lease_seconds=self.RUN_LEASE_SECONDS,
             )
             self._enforce_current_input_policy(classification.sensitivity)
+            concurrency_lease = await self._concurrency.acquire(
+                ConcurrencyRequest(
+                    org_id=run.org_id,
+                    user_id=user_id,
+                ),
+                now=datetime.now(timezone.utc),
+                lease_seconds=settings.AGENT_CONCURRENCY_LEASE_SECONDS,
+            )
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.flush()
@@ -220,6 +243,8 @@ class AIChatService:
         finally:
             if redaction_vault is not None:
                 redaction_vault.purge(run_id=str(turn.id))
+            if concurrency_lease is not None:
+                await self._release_concurrency(concurrency_lease)
             if backend is not None:
                 await self._close_backend(backend)
 
@@ -258,6 +283,7 @@ class AIChatService:
         run_service = AgentRunService(self._db)
         run: Optional[AgentRun] = None
         run_worker_id = f"api-chat:{turn.id}"
+        concurrency_lease: Optional[ConcurrencyLease] = None
         try:
             classification = SensitiveDataClassifier().classify(
                 content,
@@ -278,6 +304,14 @@ class AIChatService:
                 lease_seconds=self.RUN_LEASE_SECONDS,
             )
             self._enforce_current_input_policy(classification.sensitivity)
+            concurrency_lease = await self._concurrency.acquire(
+                ConcurrencyRequest(
+                    org_id=run.org_id,
+                    user_id=user_id,
+                ),
+                now=datetime.now(timezone.utc),
+                lease_seconds=settings.AGENT_CONCURRENCY_LEASE_SECONDS,
+            )
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.flush()
@@ -354,6 +388,8 @@ class AIChatService:
         finally:
             if redaction_vault is not None:
                 redaction_vault.purge(run_id=str(turn.id))
+            if concurrency_lease is not None:
+                await self._release_concurrency(concurrency_lease)
             if backend is not None:
                 await self._close_backend(backend)
         yield {
@@ -575,6 +611,15 @@ class AIChatService:
                 extra={"error_type": type(exc).__name__},
             )
 
+    async def _release_concurrency(self, lease: ConcurrencyLease) -> None:
+        try:
+            await self._concurrency.release(lease)
+        except ConcurrencyUnavailable as exc:
+            logger.warning(
+                "Agent concurrency lease release deferred to TTL",
+                extra={"error_type": type(exc).__name__},
+            )
+
     def _session_response(
         self, row: AIChatSession, *, include_messages: bool = True
     ) -> AIChatSessionResponse:
@@ -611,4 +656,8 @@ class AIChatService:
 
 
 def get_ai_chat_service(db: Session = Depends(get_db)) -> AIChatService:
-    return AIChatService(db, AIRuntimeService(db))
+    return AIChatService(
+        db,
+        AIRuntimeService(db),
+        concurrency=get_agent_concurrency_limiter(),
+    )

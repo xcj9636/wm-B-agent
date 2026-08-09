@@ -7,7 +7,10 @@ from typing import List, Optional, Protocol, Tuple
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
+
+from app.config import settings
 
 
 _ACQUIRE_SCRIPT = """
@@ -300,3 +303,39 @@ class DistributedConcurrencyLimiter:
         if value.tzinfo is None:
             raise ValueError("Concurrency lease timestamps must be timezone-aware")
         return value.astimezone(timezone.utc)
+
+
+_redis_client: Optional[Redis] = None
+_default_limiter: Optional[DistributedConcurrencyLimiter] = None
+
+
+def get_agent_concurrency_limiter() -> DistributedConcurrencyLimiter:
+    """Return one process-wide Redis pool and limiter configuration."""
+    global _redis_client, _default_limiter
+    if _default_limiter is None:
+        _redis_client = Redis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=2,
+        )
+        _default_limiter = DistributedConcurrencyLimiter(
+            _redis_client,
+            limits=ConcurrencyLimits(
+                global_limit=settings.AGENT_CONCURRENCY_GLOBAL_LIMIT,
+                org_limit=settings.AGENT_CONCURRENCY_ORG_LIMIT,
+                user_limit=settings.AGENT_CONCURRENCY_USER_LIMIT,
+                provider_limit=settings.AGENT_CONCURRENCY_PROVIDER_LIMIT,
+                tool_limit=settings.AGENT_CONCURRENCY_TOOL_LIMIT,
+            ),
+        )
+    return _default_limiter
+
+
+async def close_agent_concurrency_limiter() -> None:
+    """Close the process-wide Redis pool during application shutdown."""
+    global _redis_client, _default_limiter
+    if _redis_client is not None:
+        await _redis_client.aclose()
+    _redis_client = None
+    _default_limiter = None

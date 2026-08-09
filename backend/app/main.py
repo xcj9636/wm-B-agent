@@ -33,8 +33,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     from app.services.llm.factory import close_llm_service
     from app.services.llm.runtime_pool import close_runtime_backend_pool
+    from app.services.agent_concurrency import close_agent_concurrency_limiter
     await close_llm_service()
     await close_runtime_backend_pool()
+    await close_agent_concurrency_limiter()
     print("Shutting down...")
 
 
