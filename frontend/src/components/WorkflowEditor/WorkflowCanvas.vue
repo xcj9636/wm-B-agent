@@ -130,7 +130,7 @@
     <!-- Node properties panel -->
     <el-drawer
       v-model="showProperties"
-      direction="right"
+      direction="rtl"
       size="350px"
     >
       <template #header>

@@ -239,7 +239,7 @@ const showDetails = ref(false)
 const selectedExecution = ref<Execution | null>(null)
 
 const activeExecutions = computed(() =>
-  executions.value.filter((e) => e.status === 'running' || e.status === 'paused')
+  executions.value.filter((e) => e.status === 'running' || e.status === 'paused').length
 )
 
 async function fetchExecutions() {
