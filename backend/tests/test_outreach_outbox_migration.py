@@ -115,12 +115,6 @@ async def test_auto_sender_queues_instead_of_opening_smtp(
     monkeypatch,
 ):
     customer_id, account_id = create_customer_and_account(session_factory)
-
-    class ForbiddenSMTP:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("AutoSender must not open SMTP")
-
-    monkeypatch.setattr(skill_auto_sender.smtplib, "SMTP", ForbiddenSMTP)
     context = ExecutionContext(
         workflow_id="workflow-1",
         execution_id="execution-1",

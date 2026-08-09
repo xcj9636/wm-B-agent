@@ -11,13 +11,9 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import random
-import smtplib
-from email.message import EmailMessage
-import httpx
 
 from app.core.skill_base import BaseSkill, register_skill
 from app.core.context import ExecutionContext
-from app.config import settings
 from app.db import SessionLocal
 from app.services.outreach_queue import (
     OutreachQueueService,
@@ -321,84 +317,6 @@ class AutoSenderSkill(BaseSkill):
             result["error"] = str(e)
 
         return result
-
-    async def _send_email(
-        self,
-        customer: Dict[str, Any],
-        message: Dict[str, Any],
-        account: Optional[Dict[str, Any]],
-        dry_run: bool,
-    ):
-        """Send email"""
-        email = customer.get("email")
-        if not email:
-            raise ValueError("Customer has no email")
-
-        if dry_run:
-            # Simulate sending
-            await asyncio.sleep(0.1)
-            return
-
-        # Get SMTP settings from account or config
-        smtp_host = account.get("smtp_host") if account else settings.SMTP_HOST
-        smtp_port = account.get("smtp_port", settings.SMTP_PORT) if account else settings.SMTP_PORT
-        smtp_user = account.get("smtp_user") if account else settings.SMTP_USER
-        smtp_password = account.get("smtp_password") if account else settings.SMTP_PASSWORD
-
-        # Create message
-        msg = EmailMessage()
-        msg["From"] = smtp_user
-        msg["To"] = email
-        msg["Subject"] = message.get("subject", "")
-        msg.set_content(message.get("body", ""))
-
-        # Send
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-
-    async def _send_whatsapp(
-        self,
-        customer: Dict[str, Any],
-        message: Dict[str, Any],
-        account: Optional[Dict[str, Any]],
-        dry_run: bool,
-    ):
-        """Send WhatsApp message"""
-        phone = customer.get("whatsapp")
-        if not phone:
-            raise ValueError("Customer has no WhatsApp number")
-
-        if dry_run:
-            # Simulate sending
-            await asyncio.sleep(0.1)
-            return
-
-        # Get WhatsApp API settings
-        phone_number_id = account.get("phone_number_id") if account else settings.WHATSAPP_PHONE_NUMBER_ID
-        access_token = account.get("access_token") if account else settings.WHATSAPP_ACCESS_TOKEN
-
-        # WhatsApp Business API
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
-
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": phone,
-            "type": "text",
-            "text": {
-                "body": message.get("whatsapp_message") or message.get("body", "")
-            }
-        }
-
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
 
     def _get_next_account(self, channel: str, customer: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Get next account from rotation pool"""

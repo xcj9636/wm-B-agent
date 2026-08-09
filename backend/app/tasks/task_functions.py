@@ -17,10 +17,9 @@ from app.models.database import (
     OutreachLog,
     OutreachStatus,
     OutboxStatus,
-    TaskQueue,
 )
 from app.core.agent import get_agent
-from app.services.outbox import DeliveryFailureKind, OutboxService
+from app.services.outbox import OutboxService
 from app.services.outbox_delivery import (
     DeliveryResult,
     get_outbox_delivery_router,
@@ -388,26 +387,6 @@ def _calculate_send_time(customer: Customer, schedule_config: Dict[str, Any]) ->
     # Simple implementation - return now
     # In production, would consider timezone and business hours
     return datetime.utcnow()
-
-
-def _schedule_task(
-    db: SessionLocal,
-    customer_id: int,
-    channel: str,
-    template_id: str,
-    send_time: datetime
-):
-    """调度任务"""
-    task = TaskQueue(
-        task_type="outreach",
-        payload_json={
-            "customer_id": customer_id,
-            "channel": channel,
-            "template_id": template_id
-        },
-        scheduled_at=send_time
-    )
-    db.add(task)
 
 
 def _sync_outreach_result(
