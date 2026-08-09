@@ -54,6 +54,20 @@ test('application shell and login use macOS window conventions without legacy pu
   assert.match(theme, /localStorage\.setItem\('theme'/)
 })
 
+test('B-agent brand mark is shared by the browser, login, and application shell', () => {
+  const index = source('index.html')
+  const layout = source('src/layouts/MainLayout.vue')
+  const login = source('src/views/Login.vue')
+  const logo = source('public/b-agent-logo.svg')
+
+  assert.match(index, /href="\/b-agent-logo\.svg"/)
+  assert.match(index, /href="\/apple-touch-icon\.png"/)
+  assert.match(layout, /src="\/b-agent-logo\.svg"/)
+  assert.match(login, /src="\/b-agent-logo\.svg"/)
+  assert.match(logo, /viewBox="0 0 64 64"/)
+  assert.match(logo, /#007aff/i)
+})
+
 test('visible console copy contains no forbidden dash typography', () => {
   const files = [
     'src/layouts/MainLayout.vue',
