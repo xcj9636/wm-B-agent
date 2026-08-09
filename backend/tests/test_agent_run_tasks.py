@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from app.models.database import AgentRun
+from app.services.agent_concurrency import ConcurrencyLimitExceeded
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.agent_runs import AgentRunService
 from app.tasks import task_functions
@@ -100,6 +101,69 @@ def test_agent_chat_queue_runner_claims_only_supported_runs(
     assert resumed == [(chat_run_id, "chat-worker-1", 1)]
     assert db_session.get(AgentRun, chat_run_id).status == "completed"
     assert db_session.get(AgentRun, other_run_id).status == "queued"
+
+
+def test_agent_chat_queue_runner_reports_retryable_requeue(
+    db_session,
+    monkeypatch,
+):
+    now = datetime.utcnow()
+    run, _ = AgentRunService(db_session).create(
+        command(
+            idempotency_key="agent-run:queue:capacity-retry",
+            use_case="live_reply",
+            deadline_at=now + timedelta(hours=1),
+        )
+    )
+    run_id = run.id
+
+    class CapacityLimitedChatService:
+        def __init__(self, db, runtime, *, concurrency):
+            pass
+
+        async def resume_claimed(self, run_id, *, worker_id, fencing_token):
+            AgentRunService(db_session).requeue(
+                run_id,
+                worker_id=worker_id,
+                fencing_token=fencing_token,
+                now=datetime.utcnow(),
+                error_code="agent_capacity_exhausted",
+            )
+            raise ConcurrencyLimitExceeded("user")
+
+    async def close_limiter():
+        return None
+
+    monkeypatch.setattr(task_functions, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(
+        task_functions,
+        "AIChatService",
+        CapacityLimitedChatService,
+    )
+    monkeypatch.setattr(
+        task_functions,
+        "get_agent_concurrency_limiter",
+        lambda: SimpleNamespace(name="test-limiter"),
+    )
+    monkeypatch.setattr(
+        task_functions,
+        "close_agent_concurrency_limiter",
+        close_limiter,
+    )
+
+    result = task_functions.run_agent_chat_runs_task.run(
+        worker_id="chat-worker-capacity",
+        batch_size=10,
+    )
+
+    assert result == {
+        "claimed": 1,
+        "completed": 0,
+        "requeued": 1,
+        "failed": 0,
+        "lease_conflict": 0,
+    }
+    assert db_session.get(AgentRun, run_id).status == "queued"
 
 
 def test_agent_run_sweeper_requeues_expired_safe_work(
