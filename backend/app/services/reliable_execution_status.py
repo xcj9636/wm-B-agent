@@ -1,6 +1,7 @@
 """Secret-free operational summary for reliable execution state."""
 from datetime import datetime
-from typing import Dict, Optional
+import re
+from typing import Dict, List, Optional
 
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,21 @@ class ReliableExecutionStatus(BaseModel):
     expired_outbox_leases: int
     oldest_pending_at: Optional[datetime] = None
     checked_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DeadLetterSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    aggregate_type: str
+    aggregate_id: str
+    event_type: str
+    channel: str
+    attempt_count: int
+    max_attempts: int
+    error_code: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class ReliableExecutionStatusService:
@@ -76,9 +92,48 @@ class ReliableExecutionStatusService:
             checked_at=now,
         )
 
+    def list_dead_letters(
+        self,
+        *,
+        channel: Optional[str],
+        limit: int,
+    ) -> List[DeadLetterSummary]:
+        query = self._session.query(OutboxEvent).filter(
+            OutboxEvent.status == OutboxStatus.DEAD_LETTER
+        )
+        if channel is not None:
+            query = query.filter(OutboxEvent.channel == channel)
+        events = (
+            query.order_by(OutboxEvent.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            DeadLetterSummary(
+                id=str(event.id),
+                aggregate_type=event.aggregate_type,
+                aggregate_id=event.aggregate_id,
+                event_type=event.event_type,
+                channel=event.channel,
+                attempt_count=event.attempt_count,
+                max_attempts=event.max_attempts,
+                error_code=self._public_error_code(event.last_error),
+                created_at=event.created_at,
+                updated_at=event.updated_at,
+            )
+            for event in events
+        ]
+
     @staticmethod
     def _enum_value(value) -> str:
         return value.value if hasattr(value, "value") else str(value)
+
+    @staticmethod
+    def _public_error_code(value: Optional[str]) -> str:
+        normalized = (value or "delivery_failure").strip().lower()
+        if re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,99}", normalized):
+            return normalized
+        return "delivery_failure"
 
 
 def get_reliable_execution_status_service(

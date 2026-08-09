@@ -1,7 +1,7 @@
 """
 管理后台API
 """
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from app.services.llm.status import (
     get_gateway_status_service,
 )
 from app.services.reliable_execution_status import (
+    DeadLetterSummary,
     ReliableExecutionStatus,
     ReliableExecutionStatusService,
     get_reliable_execution_status_service,
@@ -52,6 +53,25 @@ async def get_reliable_execution_status(
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return status_service.get_status()
+
+
+@router.get(
+    "/reliable-execution/dead-letters",
+    response_model=List[DeadLetterSummary],
+)
+async def list_reliable_execution_dead_letters(
+    channel: Optional[str] = Query(None, min_length=1, max_length=50),
+    limit: int = Query(50, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    status_service: ReliableExecutionStatusService = Depends(
+        get_reliable_execution_status_service
+    ),
+):
+    """List secret-free dead-letter metadata for incident response."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return status_service.list_dead_letters(channel=channel, limit=limit)
 
 
 @router.get("/users", response_model=List[UserResponse])
