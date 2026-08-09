@@ -72,6 +72,9 @@ Celery Beat 每 10 秒触发 `dispatch_outbox_task`。Worker 用 `FOR UPDATE SKI
 
 ## 6. 死信处置
 
+超级管理员可从前端 `/operations/dead-letters` 进入处置台；直接调用以下接口时仍需
+使用超级管理员令牌。前端和 API 都不会显示投递 payload 或 business key。
+
 1. 暂停相关生产者或 channel，使用死信列表取得事件 ID，保留租约 token、attempt count、business key 和时间线；payload 不得复制到工单。
 2. 判断上游是否已经接受消息；优先使用上游审计记录或 provider message ID 核对，并把不含密钥/正文的工单或审计路径作为 `evidence_reference`。
 3. `permanent` 先修正配置或数据；`unknown_after_send` 在无法证明“未发送”时不得补发。

@@ -5,6 +5,8 @@ import os
 import uuid
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
@@ -45,7 +47,10 @@ def postgres_session_factory():
         revision = connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
-    assert revision == "0004_outbox_resolution_approvals"
+    expected_revision = ScriptDirectory.from_config(
+        Config("alembic.ini")
+    ).get_current_head()
+    assert revision == expected_revision
 
     yield session_factory
     engine.dispose()
