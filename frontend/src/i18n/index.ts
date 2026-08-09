@@ -150,6 +150,7 @@ const zhMessages: Record<string, string> = {
   'Every value must include a public HTTP(S) source.': '每个字段都必须附带公开的 HTTP(S) 来源。',
   'Add profile evidence': '添加画像证据',
   'Observed value': '观察到的值',
+  'Observed date': '观察日期',
   Remove: '移除',
   'Market signals': '市场信号',
   'Record a specific event, its date and the original source.': '记录具体事件、发生时间和原始来源。',

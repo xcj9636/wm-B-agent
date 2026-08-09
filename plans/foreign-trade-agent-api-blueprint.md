@@ -1,7 +1,7 @@
 # B-agent 外贸业务链路与 API 实施蓝图
 
 > 日期：2026-08-09  
-> 状态：Phase 1 AI control plane、Sprint B1/B2 Hunter 获客链路、B3 可恢复批量补全与 B4 可解释 ICP 排序已实现
+> 状态：Phase 1 AI control plane、Sprint B1-B4 获客与 ICP 链路、B5 证据化企业调研与触达草稿已实现
 > 范围：单组织部署。浏览器只调用 B-agent API，所有第三方凭据、OAuth token、Webhook secret 和 OmniRoute key 都由后端保管。
 
 ## 1. 产品目标
@@ -299,12 +299,20 @@ AI 只负责理解、生成和辅助决策。抓取、发送、报价、承诺�
 | POST | `/api/v1/prospecting/searches/{id}/score` | 按冻结 profile version 对搜索候选人生成可解释排序 |
 | GET | `/api/v1/prospecting/searches/{id}/ranking` | 读取分项分数、推荐等级、理由、缺失信号与过期标志 |
 | PATCH | `/api/v1/prospecting/scores/{id}/review` | 人工标记合格/不合格、调分和复核理由 |
+| GET/POST | `/api/v1/agent/research-jobs` | 读取或创建当前用户的企业调研队列 |
+| GET | `/api/v1/agent/research-jobs/{id}` | 读取带版本、缺失字段、来源证据和草稿的调研档案 |
+| PUT | `/api/v1/agent/research-jobs/{id}/evidence` | 写入带 HTTP(S) 来源、观察日期和置信度的企业画像与市场信号 |
+| POST | `/api/v1/agent/research-jobs/{id}/review` | 人工批准档案或要求修改；未批准档案不能生成草稿 |
+| POST | `/api/v1/agent/research-jobs/{id}/drafts` | 通过固定 `message_draft` 路由生成引用已批准 evidence ID 的幂等草稿 |
+| PATCH | `/api/v1/agent/outreach-drafts/{id}/review` | 人工批准或拒绝草稿；仅记录结论，不触发外发 |
 
 Email Finder 的人名只用于本次供应商请求，不写入搜索查询记录；Hunter 451 响应只保留错误码，不持久化候选联系人。浏览器不提供 LinkedIn identifier 输入。`accept_all`、`unknown`、`invalid` 等非 `valid` 结果即使人工导入，也会写入 `contact_suppressed=true`，不能绕过外发门禁。
 
 批量任务只接受公司域名，不持久化人名。B-agent 按 Hunter Domain Search 的 `limit/offset` 分页，每页成功后才提交下一 offset；任务切片调用免费的 Usage 接口做额度预检，并同时执行本地请求预算。Usage 值作为供应商快照展示，不用本地请求数伪造扣减；真实额度阻断以预检和供应商 429 为准。读取任务的过期 lease 可以恢复，但每次 claim 都递增 fencing version，迟到 Worker 不能覆盖新 Worker 的游标；周期性扫描会重新入队 `queued`、到期重试和过期租约，覆盖 Broker 短暂故障与 Worker 崩溃。Worker 仅使用创建任务时冻结的 connector version；如果运行前配置已轮换，任务 fail-closed 并显示 `connector_version_changed`，不会静默切换密钥。429、451、可重试错误和永久错误分别进入额度阻断、法律限制、指数退避和失败状态。
 
 ICP 排序不调用 LLM 猜测总分，而是按版本化策略计算角色匹配、联系质量和证据质量三项分数。未知值作为 `missing_signals` 显示，不伪装成已核实信号；人工复核和调分与机器基础分分开保存，重新评分不覆盖人的结论。ICP 策略变更后旧排序返回 `stale=true` 并 fail-closed 取消自动推荐；用户批准导入时，分数、tier、分项证据、缺失信号、过期状态和复核理由会进入 Customer 上下文，供 Agent 下游决策使用。
+
+企业调研队列不内置无授权抓取器，也不让 OmniRoute 猜测企业事实。画像字段和市场信号必须携带来源 URL、观察日期和置信度，带凭据的 URL 会被拒绝；每次修改都会递增档案版本并让旧草稿过期。只有档案已人工批准、ICP 当前有效且联系方式未被抑制时，后端才调用热加载的 `message_draft` 固定路由。模型返回的 evidence ID 必须属于当前批准档案，客户名称、岗位、目标和证据共同进入幂等哈希；草稿批准只进入后续投递准备状态，不会直接发送。
 
 ## 5. 交付顺序
 
@@ -321,6 +329,7 @@ ICP 排序不调用 LLM 猜测总分，而是按版本化策略计算角色匹�
 - Hunter Domain Search / Email Finder、证据持久化、选择性导入、邮箱去重和用户级访问隔离，已完成 B2 核心链路。
 - 大批量异步 enrichment job、Usage 配额门禁、请求预算、分页断点续跑和 lease fencing，已完成 B3。
 - 版本化 ICP、可解释分项评分、排序过期标记、人工校准和 Customer 上下文传递，已完成 B4。
+- 带来源的企业画像与市场信号、版本化 Agent 调研队列、OmniRoute 证据约束草稿、过期门禁和人工审批，已完成 B5。
 - Gmail + Microsoft 发送/回复 Webhook。
 - 外发审批、outbox、退订和邮箱核验。
 - 客户时间线、回复意图、AI 草稿。
