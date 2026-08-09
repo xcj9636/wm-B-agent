@@ -5,7 +5,11 @@ from app.services.llm.contracts import (
     LLMResponse,
     LLMUseCase,
 )
-from app.services.llm.service import DirectProviderAdapter, LLMService
+from app.services.llm.service import (
+    DirectProviderAdapter,
+    LLMService,
+    StreamingUnavailable,
+)
 
 
 class FakeBackend:
@@ -24,6 +28,11 @@ class FakeDirectProvider:
     async def chat_completion(self, messages):
         self.messages = messages
         return "direct reply"
+
+    async def chat_completion_with_stream(self, messages):
+        self.messages = messages
+        yield "direct "
+        yield "reply"
 
 
 @pytest.mark.asyncio
@@ -55,3 +64,37 @@ async def test_direct_adapter_preserves_the_same_response_contract():
     assert response.content == "direct reply"
     assert response.request_id == request.request_id
     assert provider.messages == [{"role": "user", "content": "Hello"}]
+
+
+@pytest.mark.asyncio
+async def test_direct_adapter_uses_true_provider_stream_chunks():
+    provider = FakeDirectProvider()
+    service = LLMService(DirectProviderAdapter(provider))
+
+    chunks = [
+        chunk
+        async for chunk in service.stream(
+            LLMUseCase.LIVE_REPLY,
+            [{"role": "user", "content": "Hello"}],
+        )
+    ]
+
+    assert [chunk.delta for chunk in chunks] == ["direct ", "reply"]
+    assert chunks[0].request_id == chunks[1].request_id
+
+
+@pytest.mark.asyncio
+async def test_backend_without_stream_fails_capability_check_without_fake_delta():
+    backend = FakeBackend()
+    service = LLMService(backend)
+
+    with pytest.raises(StreamingUnavailable):
+        _ = [
+            chunk
+            async for chunk in service.stream(
+                LLMUseCase.LIVE_REPLY,
+                [{"role": "user", "content": "Hello"}],
+            )
+        ]
+
+    assert backend.requests == []
