@@ -27,10 +27,39 @@ from app.services.prospecting_jobs import (
     ProspectingJobResume,
     ProspectingJobService,
 )
+from app.services.prospecting_scoring import (
+    IcpProfileResponse,
+    IcpProfileUpdate,
+    ProspectRankingResponse,
+    ProspectScoreResponse,
+    ProspectScoreReview,
+    ProspectingScoreNotFound,
+    ProspectingScoringService,
+)
 from app.tasks.task_functions import enqueue_prospecting_job
 
 
 router = APIRouter()
+
+
+@router.get("/icp-profile", response_model=IcpProfileResponse)
+async def get_icp_profile(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return ProspectingScoringService(db).get_profile(user_id=current_user.id)
+
+
+@router.put("/icp-profile", response_model=IcpProfileResponse)
+async def update_icp_profile(
+    command: IcpProfileUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return ProspectingScoringService(db).update_profile(
+        command,
+        user_id=current_user.id,
+    )
 
 
 @router.post(
@@ -176,6 +205,62 @@ async def get_search(
             user_id=current_user.id,
         )
     except ProspectingRecordNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/searches/{search_id}/score",
+    response_model=ProspectRankingResponse,
+)
+async def score_search(
+    search_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ProspectingScoringService(db).score_search(
+            search_id,
+            user_id=current_user.id,
+        )
+    except ProspectingScoreNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/searches/{search_id}/ranking",
+    response_model=ProspectRankingResponse,
+)
+async def get_search_ranking(
+    search_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ProspectingScoringService(db).get_ranking(
+            search_id,
+            user_id=current_user.id,
+        )
+    except ProspectingScoreNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/scores/{score_id}/review",
+    response_model=ProspectScoreResponse,
+)
+async def review_score(
+    score_id: UUID,
+    command: ProspectScoreReview,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ProspectingScoringService(db).review_score(
+            score_id,
+            command,
+            user_id=current_user.id,
+        )
+    except ProspectingScoreNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 

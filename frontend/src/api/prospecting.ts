@@ -118,7 +118,78 @@ export interface ProspectingJobCreate {
   verification_statuses: string[]
 }
 
+export interface IcpWeights {
+  role_fit: number
+  contact_quality: number
+  evidence_quality: number
+}
+
+export interface IcpProfile {
+  id: string
+  name: string
+  target_departments: string[]
+  target_seniorities: string[]
+  title_keywords: string[]
+  preferred_contact_types: string[]
+  weights: IcpWeights
+  minimum_score: number
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export type IcpProfileUpdate = Omit<IcpProfile, 'id' | 'version' | 'created_at' | 'updated_at'>
+
+export interface ProspectScore {
+  id: string
+  contact_id: string
+  email: string
+  name: string
+  company?: string
+  domain?: string
+  position?: string
+  department?: string
+  seniority?: string
+  profile_version: number
+  base_score: number
+  score_adjustment: number
+  final_score: number
+  tier: 'A' | 'B' | 'C' | 'D'
+  stale: boolean
+  recommended: boolean
+  factor_scores: Record<string, number>
+  reasons: string[]
+  missing_signals: string[]
+  review_status: 'unreviewed' | 'qualified' | 'disqualified'
+  review_reason?: string
+  reviewed_at?: string
+  scored_at: string
+}
+
+export interface ProspectRanking {
+  search_id: string
+  profile_id: string
+  profile_version: number
+  minimum_score: number
+  stale: boolean
+  scores: ProspectScore[]
+}
+
+export interface ProspectScoreReview {
+  review_status: 'unreviewed' | 'qualified' | 'disqualified'
+  score_adjustment: number
+  review_reason?: string
+}
+
 export const prospectingApi = {
+  async getIcpProfile() {
+    const response = await api.get<IcpProfile>('/api/v1/prospecting/icp-profile')
+    return response.data
+  },
+  async updateIcpProfile(payload: IcpProfileUpdate) {
+    const response = await api.put<IcpProfile>('/api/v1/prospecting/icp-profile', payload)
+    return response.data
+  },
   async createSearch(payload: ProspectingSearchCreate) {
     const response = await api.post<ProspectingSearch>('/api/v1/prospecting/searches', payload)
     return response.data
@@ -131,6 +202,18 @@ export const prospectingApi = {
   },
   async getSearch(id: string) {
     const response = await api.get<ProspectingSearch>(`/api/v1/prospecting/searches/${id}`)
+    return response.data
+  },
+  async scoreSearch(id: string) {
+    const response = await api.post<ProspectRanking>(`/api/v1/prospecting/searches/${id}/score`)
+    return response.data
+  },
+  async getRanking(id: string) {
+    const response = await api.get<ProspectRanking>(`/api/v1/prospecting/searches/${id}/ranking`)
+    return response.data
+  },
+  async reviewScore(id: string, payload: ProspectScoreReview) {
+    const response = await api.patch<ProspectScore>(`/api/v1/prospecting/scores/${id}/review`, payload)
     return response.data
   },
   async importContacts(contactIds: string[]) {

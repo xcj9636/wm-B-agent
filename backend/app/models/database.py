@@ -360,12 +360,86 @@ class ProspectingContact(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     search = relationship("ProspectingSearch", back_populates="contacts")
+    icp_score = relationship(
+        "ProspectingContactScore",
+        back_populates="contact",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     __table_args__ = (
         UniqueConstraint("search_id", "email", name="uq_prospecting_search_email"),
         Index("idx_prospecting_contact_search", "search_id"),
         Index("idx_prospecting_contact_email", "email"),
         Index("idx_prospecting_contact_imported", "imported_customer_id"),
+    )
+
+
+class ProspectingIcpProfile(Base):
+    """Versioned, user-owned and deterministic prospect qualification policy."""
+
+    __tablename__ = "prospecting_icp_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    name = Column(String(120), nullable=False)
+    target_departments_json = Column(JSON, nullable=False, default=list)
+    target_seniorities_json = Column(JSON, nullable=False, default=list)
+    title_keywords_json = Column(JSON, nullable=False, default=list)
+    preferred_contact_types_json = Column(JSON, nullable=False, default=list)
+    weights_json = Column(JSON, nullable=False, default=dict)
+    minimum_score = Column(Integer, nullable=False, default=65)
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+
+class ProspectingContactScore(Base):
+    """Explainable ICP score with a separately preserved human review."""
+
+    __tablename__ = "prospecting_contact_scores"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    contact_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prospecting_contacts.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prospecting_icp_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    profile_version = Column(Integer, nullable=False)
+    base_score = Column(Float, nullable=False)
+    factor_scores_json = Column(JSON, nullable=False, default=dict)
+    reasons_json = Column(JSON, nullable=False, default=list)
+    missing_signals_json = Column(JSON, nullable=False, default=list)
+    review_status = Column(String(30), nullable=False, default="unreviewed")
+    review_reason = Column(Text)
+    score_adjustment = Column(Integer, nullable=False, default=0)
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    reviewed_at = Column(DateTime)
+    scored_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    contact = relationship("ProspectingContact", back_populates="icp_score")
+    profile = relationship("ProspectingIcpProfile")
+
+    __table_args__ = (
+        Index("idx_prospecting_score_profile_score", "profile_id", "base_score"),
+        Index("idx_prospecting_score_review", "review_status", "reviewed_at"),
     )
 
 

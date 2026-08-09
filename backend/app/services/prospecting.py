@@ -314,6 +314,7 @@ class ProspectingService:
                 created += 1
             else:
                 existing += 1
+            self._apply_icp_context(customer, contact)
             contact.imported_customer_id = customer.id
             customer_ids.append(customer.id)
         self._db.commit()
@@ -373,7 +374,7 @@ class ProspectingService:
 
     def _customer_from_contact(self, contact: ProspectingContact) -> Customer:
         suppressed = contact.verification_status != "valid"
-        return Customer(
+        customer = Customer(
             username=self._customer_username(contact.email),
             platform="hunter",
             email=contact.email,
@@ -407,6 +408,62 @@ class ProspectingService:
                 ),
             },
         )
+        self._apply_icp_context(customer, contact)
+        return customer
+
+    @staticmethod
+    def _apply_icp_context(
+        customer: Customer,
+        contact: ProspectingContact,
+    ) -> None:
+        score = contact.icp_score
+        if score is None:
+            return
+        final_score = round(
+            max(0.0, min(float(score.base_score) + score.score_adjustment, 100.0)),
+            1,
+        )
+        if final_score >= 80:
+            tier = "A"
+        elif final_score >= 65:
+            tier = "B"
+        elif final_score >= 50:
+            tier = "C"
+        else:
+            tier = "D"
+        stale = score.profile_version != score.profile.version
+        recommended = not stale and (
+            score.review_status == "qualified"
+            or (
+                score.review_status != "disqualified"
+                and final_score >= score.profile.minimum_score
+            )
+        )
+        customer.custom_fields = {
+            **(customer.custom_fields or {}),
+            "icp_score": final_score,
+            "icp_tier": tier,
+            "icp_recommended": recommended,
+            "icp_review_status": score.review_status,
+        }
+        customer.source_data_json = {
+            **(customer.source_data_json or {}),
+            "icp": {
+                "profile_id": str(score.profile_id),
+                "profile_version": score.profile_version,
+                "base_score": score.base_score,
+                "score_adjustment": score.score_adjustment,
+                "final_score": final_score,
+                "tier": tier,
+                "stale": stale,
+                "recommended": recommended,
+                "factor_scores": dict(score.factor_scores_json or {}),
+                "reasons": list(score.reasons_json or []),
+                "missing_signals": list(score.missing_signals_json or []),
+                "review_status": score.review_status,
+                "review_reason": score.review_reason,
+            },
+        }
 
     def _connector_version(self) -> int:
         connector = (

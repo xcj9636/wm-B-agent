@@ -385,6 +385,57 @@
     </el-card>
 
     <el-card
+      class="icp-panel"
+      shadow="never"
+    >
+      <template #header>
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">{{ $t('Qualification policy') }}</span>
+            <strong>{{ $t('ICP ranking') }}</strong>
+          </div>
+          <div class="icp-actions">
+            <el-button @click="openIcpEditor">
+              {{ $t('Configure ICP') }}
+            </el-button>
+            <el-button
+              type="primary"
+              :disabled="!activeSearch?.contacts.length"
+              :loading="scoring"
+              @click="scoreActiveSearch"
+            >
+              {{ $t('Score current search') }}
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <div
+        v-if="icpProfile"
+        class="icp-summary"
+      >
+        <div>
+          <span>{{ $t('Active profile') }}</span>
+          <strong>{{ icpProfile.name }}</strong>
+          <small>v{{ icpProfile.version }} · {{ $t('Recommend at {score}+', { score: icpProfile.minimum_score }) }}</small>
+        </div>
+        <dl>
+          <div><dt>{{ $t('Role fit') }}</dt><dd>{{ icpProfile.weights.role_fit }}%</dd></div>
+          <div><dt>{{ $t('Contact quality') }}</dt><dd>{{ icpProfile.weights.contact_quality }}%</dd></div>
+          <div><dt>{{ $t('Evidence quality') }}</dt><dd>{{ icpProfile.weights.evidence_quality }}%</dd></div>
+        </dl>
+        <p>{{ $t('Unknown signals remain visible and are never treated as verified facts.') }}</p>
+      </div>
+      <el-alert
+        v-if="ranking?.stale"
+        class="stale-ranking"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="$t('This ranking uses an older ICP version. Score the search again before acting.')"
+      />
+    </el-card>
+
+    <el-card
       class="results-panel"
       shadow="never"
     >
@@ -415,7 +466,7 @@
 
       <el-table
         v-loading="resultLoading"
-        :data="activeSearch?.contacts ?? []"
+        :data="rankedContacts"
         row-key="id"
         @selection-change="onSelectionChange"
       >
@@ -444,6 +495,64 @@
               <strong>{{ row.company || row.domain || '—' }}</strong>
               <span>{{ row.position || '—' }}</span>
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('ICP fit')"
+          min-width="185"
+        >
+          <template #default="{ row }">
+            <div
+              v-if="scoreFor(row.id)"
+              class="score-cell"
+            >
+              <div>
+                <el-tag :type="tierType(scoreFor(row.id)!.tier)">
+                  {{ scoreFor(row.id)!.tier }} · {{ scoreFor(row.id)!.final_score }}
+                </el-tag>
+                <el-tag
+                  v-if="scoreFor(row.id)!.review_status !== 'unreviewed'"
+                  size="small"
+                  :type="scoreFor(row.id)!.review_status === 'qualified' ? 'success' : 'danger'"
+                >
+                  {{ $t(scoreFor(row.id)!.review_status) }}
+                </el-tag>
+              </div>
+              <el-popover
+                placement="bottom-start"
+                :width="310"
+                trigger="click"
+              >
+                <template #reference>
+                  <el-button
+                    link
+                    type="primary"
+                  >
+                    {{ $t('Why this score') }}
+                  </el-button>
+                </template>
+                <div class="score-explanation">
+                  <dl>
+                    <div><dt>{{ $t('Role fit') }}</dt><dd>{{ scoreFor(row.id)!.factor_scores.role_fit }}</dd></div>
+                    <div><dt>{{ $t('Contact quality') }}</dt><dd>{{ scoreFor(row.id)!.factor_scores.contact_quality }}</dd></div>
+                    <div><dt>{{ $t('Evidence quality') }}</dt><dd>{{ scoreFor(row.id)!.factor_scores.evidence_quality }}</dd></div>
+                  </dl>
+                  <p v-if="scoreFor(row.id)!.reasons.length">
+                    {{ scoreFor(row.id)!.reasons.map((reason) => $t(reason)).join(' · ') }}
+                  </p>
+                  <p v-if="scoreFor(row.id)!.missing_signals.length">
+                    {{ $t('Missing signals') }}: {{ scoreFor(row.id)!.missing_signals.map((signal) => $t(signal)).join(', ') }}
+                  </p>
+                </div>
+              </el-popover>
+              <el-button
+                link
+                @click="openReview(scoreFor(row.id)!)"
+              >
+                {{ $t('Human review') }}
+              </el-button>
+            </div>
+            <span v-else>—</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -516,6 +625,156 @@
         </template>
       </el-table>
     </el-card>
+
+    <el-dialog
+      v-model="icpDialogVisible"
+      class="icp-dialog"
+      append-to-body
+      :title="$t('Configure ICP')"
+      width="min(680px, 94vw)"
+      top="5vh"
+    >
+      <el-form label-position="top">
+        <el-form-item :label="$t('Profile name')">
+          <el-input v-model="icpDraft.name" />
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item :label="$t('Target departments')">
+            <el-select
+              v-model="icpDraft.target_departments"
+              multiple
+            >
+              <el-option
+                v-for="item in departments"
+                :key="item"
+                :label="$t(departmentLabel[item])"
+                :value="item"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="$t('Target seniorities')">
+            <el-select
+              v-model="icpDraft.target_seniorities"
+              multiple
+            >
+              <el-option
+                v-for="item in seniorities"
+                :key="item"
+                :label="$t(seniorityLabel[item])"
+                :value="item"
+              />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item :label="$t('Title keywords')">
+          <el-select
+            v-model="icpDraft.title_keywords"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+          />
+        </el-form-item>
+        <el-form-item :label="$t('Preferred contact types')">
+          <el-checkbox-group v-model="icpDraft.preferred_contact_types">
+            <el-checkbox value="personal">
+              {{ $t('Personal') }}
+            </el-checkbox>
+            <el-checkbox value="generic">
+              {{ $t('Generic') }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <div class="weight-grid">
+          <el-form-item :label="$t('Role fit weight')">
+            <el-input-number
+              v-model="icpDraft.weights.role_fit"
+              :min="0"
+              :max="100"
+            />
+          </el-form-item>
+          <el-form-item :label="$t('Contact quality weight')">
+            <el-input-number
+              v-model="icpDraft.weights.contact_quality"
+              :min="0"
+              :max="100"
+            />
+          </el-form-item>
+          <el-form-item :label="$t('Evidence quality weight')">
+            <el-input-number
+              v-model="icpDraft.weights.evidence_quality"
+              :min="0"
+              :max="100"
+            />
+          </el-form-item>
+          <el-form-item :label="$t('Minimum recommended score')">
+            <el-input-number
+              v-model="icpDraft.minimum_score"
+              :min="0"
+              :max="100"
+            />
+          </el-form-item>
+        </div>
+        <p class="field-hint">
+          {{ $t('Weights must total 100. Current total: {total}', { total: icpWeightTotal }) }}
+        </p>
+      </el-form>
+      <template #footer>
+        <el-button @click="icpDialogVisible = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="savingIcp"
+          :disabled="icpWeightTotal !== 100"
+          @click="saveIcpProfile"
+        >
+          {{ $t('Save ICP') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="reviewDialogVisible"
+      append-to-body
+      :title="$t('Human review')"
+      width="min(520px, 94vw)"
+    >
+      <el-form label-position="top">
+        <el-form-item :label="$t('Review decision')">
+          <el-segmented
+            v-model="reviewDraft.review_status"
+            :options="reviewOptions"
+          />
+        </el-form-item>
+        <el-form-item :label="$t('Score adjustment')">
+          <el-input-number
+            v-model="reviewDraft.score_adjustment"
+            :min="-20"
+            :max="20"
+          />
+        </el-form-item>
+        <el-form-item :label="$t('Review reason')">
+          <el-input
+            v-model="reviewDraft.review_reason"
+            type="textarea"
+            :rows="3"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reviewDialogVisible = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="reviewing"
+          @click="reviewScore"
+        >
+          {{ $t('Save review') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -525,12 +784,17 @@ import { ElMessage } from 'element-plus'
 import { translate } from '@/i18n'
 import {
   prospectingApi,
+  type IcpProfile,
+  type IcpProfileUpdate,
   type ProspectingContact,
   type ProspectingJob,
   type ProspectingJobCreate,
   type ProspectingMode,
   type ProspectingSearch,
   type ProspectingSearchCreate,
+  type ProspectRanking,
+  type ProspectScore,
+  type ProspectScoreReview,
 } from '@/api/prospecting'
 
 const modeOptions = computed(() => [
@@ -573,6 +837,11 @@ const form = reactive({
 const searches = ref<ProspectingSearch[]>([])
 const jobs = ref<ProspectingJob[]>([])
 const activeSearch = ref<ProspectingSearch | null>(null)
+const icpProfile = ref<IcpProfile | null>(null)
+const ranking = ref<ProspectRanking | null>(null)
+const icpDialogVisible = ref(false)
+const reviewDialogVisible = ref(false)
+const activeReviewScoreId = ref<string | null>(null)
 const resumeBudgets = reactive<Record<string, number>>({})
 const selectedIds = ref<string[]>([])
 const searching = ref(false)
@@ -580,7 +849,130 @@ const importing = ref(false)
 const historyLoading = ref(false)
 const resultLoading = ref(false)
 const jobsLoading = ref(false)
+const scoring = ref(false)
+const savingIcp = ref(false)
+const reviewing = ref(false)
+const icpDraft = reactive<IcpProfileUpdate>({
+  name: '',
+  target_departments: [],
+  target_seniorities: [],
+  title_keywords: [],
+  preferred_contact_types: ['personal'],
+  weights: { role_fit: 40, contact_quality: 35, evidence_quality: 25 },
+  minimum_score: 65,
+})
+const reviewDraft = reactive<ProspectScoreReview>({
+  review_status: 'unreviewed',
+  score_adjustment: 0,
+  review_reason: '',
+})
+const reviewOptions = computed(() => [
+  { label: translate('Unreviewed'), value: 'unreviewed' },
+  { label: translate('Qualified'), value: 'qualified' },
+  { label: translate('Disqualified'), value: 'disqualified' },
+])
+const icpWeightTotal = computed(() => Object.values(icpDraft.weights).reduce((total, weight) => total + weight, 0))
+const scoreByContact = computed(() => new Map(
+  (ranking.value?.scores || []).map((score) => [score.contact_id, score]),
+))
+const rankedContacts = computed(() => [...(activeSearch.value?.contacts || [])].sort((left, right) => {
+  const leftScore = scoreByContact.value.get(left.id)?.final_score ?? -1
+  const rightScore = scoreByContact.value.get(right.id)?.final_score ?? -1
+  return rightScore - leftScore
+}))
 let jobsTimer: number | undefined
+
+async function loadIcpProfile() {
+  try {
+    icpProfile.value = await prospectingApi.getIcpProfile()
+  } catch {
+    ElMessage.error(translate('ICP profile could not be loaded.'))
+  }
+}
+
+function openIcpEditor() {
+  if (!icpProfile.value) return
+  const profile = icpProfile.value
+  Object.assign(icpDraft, {
+    name: profile.name,
+    target_departments: [...profile.target_departments],
+    target_seniorities: [...profile.target_seniorities],
+    title_keywords: [...profile.title_keywords],
+    preferred_contact_types: [...profile.preferred_contact_types],
+    weights: { ...profile.weights },
+    minimum_score: profile.minimum_score,
+  })
+  icpDialogVisible.value = true
+}
+
+async function saveIcpProfile() {
+  savingIcp.value = true
+  try {
+    icpProfile.value = await prospectingApi.updateIcpProfile({
+      ...icpDraft,
+      target_departments: [...icpDraft.target_departments],
+      target_seniorities: [...icpDraft.target_seniorities],
+      title_keywords: [...icpDraft.title_keywords],
+      preferred_contact_types: [...icpDraft.preferred_contact_types],
+      weights: { ...icpDraft.weights },
+    })
+    ranking.value = null
+    icpDialogVisible.value = false
+    ElMessage.success(translate('ICP profile saved. Score the search again to apply it.'))
+  } catch {
+    ElMessage.error(translate('ICP profile could not be saved.'))
+  } finally {
+    savingIcp.value = false
+  }
+}
+
+async function scoreActiveSearch() {
+  if (!activeSearch.value) return
+  scoring.value = true
+  try {
+    ranking.value = await prospectingApi.scoreSearch(activeSearch.value.id)
+    ElMessage.success(translate('ICP ranking updated.'))
+  } catch {
+    ElMessage.error(translate('ICP ranking could not be generated.'))
+  } finally {
+    scoring.value = false
+  }
+}
+
+function scoreFor(contactId: string) {
+  return scoreByContact.value.get(contactId)
+}
+
+function openReview(score: ProspectScore) {
+  activeReviewScoreId.value = score.id
+  Object.assign(reviewDraft, {
+    review_status: score.review_status,
+    score_adjustment: score.score_adjustment,
+    review_reason: score.review_reason || '',
+  })
+  reviewDialogVisible.value = true
+}
+
+async function reviewScore() {
+  if (!activeReviewScoreId.value || !ranking.value) return
+  reviewing.value = true
+  try {
+    const updated = await prospectingApi.reviewScore(activeReviewScoreId.value, {
+      ...reviewDraft,
+      review_reason: reviewDraft.review_reason?.trim() || undefined,
+    })
+    ranking.value = {
+      ...ranking.value,
+      scores: ranking.value.scores.map((score) => score.id === updated.id ? updated : score),
+    }
+    reviewDialogVisible.value = false
+    ElMessage.success(translate('Human review saved.'))
+  } catch {
+    ElMessage.error(translate('Human review could not be saved.'))
+  } finally {
+    reviewing.value = false
+  }
+}
 
 function compact(value: string) {
   const result = value.trim()
@@ -629,6 +1021,7 @@ async function runSearch() {
   try {
     const result = await prospectingApi.createSearch(payload)
     activeSearch.value = result
+    ranking.value = null
     selectedIds.value = []
     searches.value = [result, ...searches.value.filter((item) => item.id !== result.id)]
     ElMessage.success(translate('Prospect search completed.'))
@@ -745,7 +1138,10 @@ async function openSearch(id: string) {
   resultLoading.value = true
   try {
     activeSearch.value = await prospectingApi.getSearch(id)
+    ranking.value = await prospectingApi.getRanking(id)
     selectedIds.value = []
+  } catch {
+    ElMessage.error(translate('Search results could not be loaded.'))
   } finally {
     resultLoading.value = false
   }
@@ -804,8 +1200,15 @@ function verificationType(status: string) {
   return status === 'valid' ? 'success' : status === 'invalid' || status === 'disposable' ? 'danger' : 'warning'
 }
 
+function tierType(tier: string) {
+  if (tier === 'A') return 'success'
+  if (tier === 'B') return 'primary'
+  if (tier === 'C') return 'warning'
+  return 'info'
+}
+
 onMounted(() => {
-  void Promise.all([loadSearches(), loadJobs()])
+  void Promise.all([loadSearches(), loadJobs(), loadIcpProfile()])
   jobsTimer = window.setInterval(() => {
     if (jobs.value.some((job) => ['queued', 'running', 'retry_wait'].includes(job.status))) {
       void loadJobs(true)
@@ -824,7 +1227,7 @@ onUnmounted(() => {
 .safety-note { display: flex; align-items: flex-start; gap: 10px; width: min(440px, 100%); padding: 13px 15px; border: 1px solid var(--border-hairline); border-radius: 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .safety-note .el-icon { flex: 0 0 auto; margin-top: 2px; color: var(--el-color-success); }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 18px; }
-.search-panel, .history-panel, .jobs-panel, .results-panel { border-radius: 20px; }
+.search-panel, .history-panel, .jobs-panel, .icp-panel, .results-panel { border-radius: 20px; }
 .panel-heading, .results-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .panel-heading > div:first-child, .results-heading > div:first-child { display: grid; gap: 4px; }
 .panel-heading strong, .results-heading strong { font-size: 17px; }
@@ -868,6 +1271,28 @@ onUnmounted(() => {
 .job-item small { color: var(--text-secondary); font-size: 10px; }
 .job-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .job-actions :deep(.el-input-number) { width: 118px; }
+.icp-actions { display: flex; gap: 8px; }
+.icp-summary { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.5fr); align-items: center; gap: 16px 26px; }
+.icp-summary > div:first-child { display: grid; gap: 4px; }
+.icp-summary span, .icp-summary small { color: var(--text-secondary); font-size: 11px; }
+.icp-summary strong { font-size: 16px; }
+.icp-summary dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.icp-summary dl > div { padding: 10px; border-radius: 12px; background: var(--surface-sunken); }
+.icp-summary dt { color: var(--text-secondary); font-size: 11px; }
+.icp-summary dd { margin: 4px 0 0; font-size: 15px; font-weight: 700; }
+.icp-summary > p { grid-column: 1 / -1; margin: 0; color: var(--text-secondary); font-size: 12px; }
+.stale-ranking { margin-top: 14px; }
+.weight-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.weight-grid :deep(.el-input-number), .el-dialog :deep(.el-select) { width: 100%; }
+.score-cell { display: grid; gap: 4px; }
+.score-cell > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.score-cell :deep(.el-button) { justify-content: flex-start; width: fit-content; height: auto; padding: 0; font-size: 11px; }
+.score-explanation { display: grid; gap: 10px; }
+.score-explanation dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+.score-explanation dl > div { padding: 8px; border-radius: 9px; background: var(--surface-sunken); }
+.score-explanation dt { color: var(--text-secondary); font-size: 10px; }
+.score-explanation dd { margin: 3px 0 0; font-weight: 700; }
+.score-explanation p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
 .results-panel { min-height: 330px; }
 .result-actions { display: flex; align-items: center; gap: 12px; }
 .selection-count { color: var(--text-secondary); font-size: 13px; }
@@ -883,6 +1308,9 @@ onUnmounted(() => {
   .workspace-grid { grid-template-columns: 1fr; }
   .history-list { max-height: 270px; }
   .job-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .icp-summary { grid-template-columns: 1fr; }
+  .icp-summary > p { grid-column: auto; }
+  .weight-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .page-heading { display: grid; }
@@ -891,8 +1319,14 @@ onUnmounted(() => {
   .panel-heading :deep(.el-segmented) { width: 100%; }
   .search-button { width: 100%; }
   .result-actions { justify-content: space-between; }
+  .icp-actions { align-items: stretch; flex-direction: column; width: 100%; }
+  .icp-summary dl, .weight-grid { grid-template-columns: 1fr; }
   .job-metrics { grid-template-columns: 1fr 1fr; }
   .job-actions { align-items: stretch; flex-direction: column; }
   .job-actions :deep(.el-input-number), .job-actions .el-button { width: 100%; }
 }
+</style>
+
+<style>
+.icp-dialog { max-height: 90vh; overflow: auto; }
 </style>
