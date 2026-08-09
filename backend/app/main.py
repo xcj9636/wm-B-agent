@@ -8,7 +8,6 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from app.config import settings
-from app.db import init_db
 from app.core.agent import get_agent
 
 
@@ -17,9 +16,6 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # Startup
     print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}...")
-
-    # Initialize database
-    init_db()
 
     # Register skills
     if not settings.START_MINIMAL:

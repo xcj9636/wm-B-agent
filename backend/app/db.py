@@ -61,10 +61,3 @@ def get_db_context() -> Generator[Session, None, None]:
         raise
     finally:
         db.close()
-
-
-def init_db():
-    """
-    Initialize database tables
-    """
-    Base.metadata.create_all(bind=engine)

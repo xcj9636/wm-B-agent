@@ -19,6 +19,20 @@ services:
     networks:
       - trade_ai_network
 
+  # One-shot schema owner. Application processes never call create_all.
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: alembic upgrade head
+    environment:
+      - DATABASE_URL=postgresql://admin:password@db:5432/trade_ai
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - trade_ai_network
+
   # Redis
   redis:
     image: redis:7-alpine
@@ -69,6 +83,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
@@ -106,6 +122,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       backend:
@@ -171,6 +189,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:

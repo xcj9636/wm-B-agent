@@ -12,12 +12,11 @@ import argparse
 # Add backend directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.db import SessionLocal, init_db
+from app.db import SessionLocal
 from app.api.v1.auth import get_password_hash
 from app.models.database import User
 
 def create_admin_user(username, email, password):
-    init_db()
     db = SessionLocal()
     try:
         # Check if user exists
@@ -34,10 +33,9 @@ def create_admin_user(username, email, password):
         )
         db.add(admin)
         db.commit()
-        print(f"Admin user created successfully!")
+        print("Admin user created successfully!")
         print(f"Username: {username}")
         print(f"Email: {email}")
-        print(f"Password: {password}")
     except Exception as e:
         print(f"Error creating user: {e}")
         db.rollback()
