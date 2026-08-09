@@ -1,12 +1,23 @@
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
-from app.models.database import AIChatMessage, AgentRun, AgentTurn, User
+from app.models.database import (
+    AIChatMessage,
+    AIChatSession,
+    AgentRun,
+    AgentTurn,
+    LLMInvocation,
+    User,
+)
 from app.services.agent_concurrency import ConcurrencyLimitExceeded
+from app.services.agent_runs import AgentRunService
+from app.services.agent_runtime.contracts import Sensitivity
+from app.services.agent_runtime.turns import AgentTurnCoordinator
 from app.services.ai_chat import AIChatService
 from app.services.data_policy import DataPolicyUnavailable
-from app.services.idempotency import IdempotencyConflict
+from app.services.idempotency import IdempotencyConflict, canonical_hash
 from app.services.llm.contracts import (
     GatewayError,
     GatewayErrorKind,
@@ -149,8 +160,71 @@ async def test_ai_chat_failure_leaves_a_durable_failed_turn(db_session):
     assert run.status == "failed"
     assert run.error_code == "agent_execution_failed"
     assert run.completed_at is not None
+    messages = db_session.query(AIChatMessage).all()
+    assert [(message.role, message.content) for message in messages] == [
+        ("user", "Hello")
+    ]
+    assert turn.user_message_id == messages[0].id
     assert len(service._concurrency.released) == 1
     assert backend.closed is True
+
+
+@pytest.mark.asyncio
+async def test_expired_chat_run_resumes_from_durable_user_message(db_session):
+    backend = ChatBackend(content="Recovered answer")
+    user, session_response, service = user_and_session(db_session, backend)
+    session = db_session.get(AIChatSession, session_response.id)
+    turn, _ = AgentTurnCoordinator(db_session).start(
+        session_id=session.id,
+        user_id=user.id,
+        idempotency_key="chat-worker-resume",
+        input_hash=canonical_hash({"content": "Recover this request"}),
+    )
+    runs = AgentRunService(db_session)
+    run, _ = runs.create(
+        service._run_command(
+            turn=turn,
+            user_id=user.id,
+            content="Recover this request",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+    )
+    first_claim = runs.claim_one(
+        run.id,
+        worker_id="terminated-api-worker",
+        now=datetime.utcnow(),
+        lease_seconds=30,
+    )
+    user_message = service._append_user_message(session, "Recover this request")
+    turn.user_message_id = user_message.id
+    db_session.commit()
+    recovery_time = first_claim.lease_until + timedelta(seconds=1)
+    runs.recover_expired(now=recovery_time)
+    reclaimed = runs.claim_one(
+        run.id,
+        worker_id="celery-worker-2",
+        now=recovery_time,
+        lease_seconds=60,
+    )
+
+    response = await service.resume_claimed(
+        run.id,
+        worker_id="celery-worker-2",
+        fencing_token=reclaimed.fencing_token,
+    )
+
+    db_session.refresh(turn)
+    db_session.refresh(run)
+    assert response.content == "Recovered answer"
+    assert turn.status == "completed"
+    assert run.status == "completed"
+    assert run.fencing_token == 2
+    assert db_session.query(AIChatMessage).filter_by(role="user").count() == 1
+    assert "Recover this request" in backend.requests[0].model_dump_json()
+    invocation = db_session.query(LLMInvocation).one()
+    assert invocation.idempotency_key == f"ai-chat:{turn.id}:llm"
+    assert len(service._concurrency.acquired) == 1
+    assert len(service._concurrency.released) == 1
 
 
 @pytest.mark.asyncio
@@ -241,6 +315,11 @@ async def test_backend_construction_failure_closes_the_durable_turn(db_session):
     turn = db_session.query(AgentTurn).one()
     assert turn.status == "failed"
     assert turn.completed_at is not None
+    messages = db_session.query(AIChatMessage).all()
+    assert [(message.role, message.content) for message in messages] == [
+        ("user", "Hello")
+    ]
+    assert turn.user_message_id == messages[0].id
 
 
 @pytest.mark.asyncio
