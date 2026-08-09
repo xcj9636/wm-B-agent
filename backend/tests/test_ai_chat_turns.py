@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.database import AIChatMessage, AgentTurn, User
+from app.models.database import AIChatMessage, AgentRun, AgentTurn, User
 from app.services.ai_chat import AIChatService
 from app.services.data_policy import DataPolicyUnavailable
 from app.services.idempotency import IdempotencyConflict
@@ -86,11 +86,17 @@ async def test_ai_chat_completion_atomically_completes_a_fenced_turn(db_session)
     )
 
     turn = db_session.query(AgentTurn).one()
+    run = db_session.query(AgentRun).one()
     assert response.content == "safe response"
     assert turn.status == "completed"
     assert turn.sequence == 1
     assert turn.generation_epoch == 1
     assert turn.session.generation_epoch == 1
+    assert run.status == "completed"
+    assert run.session_id == session.id
+    assert run.turn_id == turn.id
+    assert run.generation_epoch == turn.generation_epoch
+    assert "Hello" not in repr(run.__dict__)
     assert backend.closed is True
 
 
@@ -108,8 +114,12 @@ async def test_ai_chat_failure_leaves_a_durable_failed_turn(db_session):
         )
 
     turn = db_session.query(AgentTurn).one()
+    run = db_session.query(AgentRun).one()
     assert turn.status == "failed"
     assert turn.completed_at is not None
+    assert run.status == "failed"
+    assert run.error_code == "agent_execution_failed"
+    assert run.completed_at is not None
     assert backend.closed is True
 
 
@@ -144,6 +154,7 @@ async def test_ai_chat_idempotent_replay_returns_persisted_answer_without_new_ll
     assert second.id == first.id
     assert backend.call_count == 1
     assert db_session.query(AgentTurn).count() == 1
+    assert db_session.query(AgentRun).count() == 1
 
 
 @pytest.mark.asyncio
@@ -235,6 +246,10 @@ async def test_restricted_secret_is_rejected_before_message_or_llm_persistence(d
     assert backend.requests == []
     assert db_session.query(AIChatMessage).count() == 0
     assert db_session.query(AgentTurn).one().status == "failed"
+    run = db_session.query(AgentRun).one()
+    assert run.status == "failed"
+    assert run.sensitivity == "restricted"
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in repr(run.__dict__)
 
 
 @pytest.mark.asyncio
@@ -258,6 +273,7 @@ async def test_stream_redacts_provider_input_and_rehydrates_done_snapshot(db_ses
     )
     assert events[-1]["event"] == "done"
     assert events[-1]["data"]["content"] == "Contact buyer@example.com"
+    assert db_session.query(AgentRun).one().status == "completed"
 
 
 @pytest.mark.asyncio

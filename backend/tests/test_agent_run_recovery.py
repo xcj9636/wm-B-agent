@@ -85,6 +85,25 @@ def test_only_one_worker_claims_and_heartbeat_requires_current_fence(db_session)
         )
 
 
+def test_claim_one_leases_only_the_requested_run(db_session):
+    service = AgentRunService(db_session)
+    first, _ = service.create(command(idempotency_key="agent-run:claim-one:first"))
+    second, _ = service.create(command(idempotency_key="agent-run:claim-one:second"))
+    now = datetime(2026, 8, 10, 12, 0, 0)
+
+    claimed = service.claim_one(
+        second.id,
+        worker_id="inline-api-worker",
+        now=now,
+        lease_seconds=60,
+    )
+
+    assert claimed.id == second.id
+    assert claimed.status == "running"
+    assert claimed.fencing_token == 1
+    assert db_session.get(AgentRun, first.id).status == "queued"
+
+
 def test_expired_safe_run_is_reclaimed_and_stale_worker_cannot_commit(db_session):
     service = AgentRunService(db_session)
     run, _ = service.create(command())
