@@ -228,6 +228,60 @@ async def test_expired_chat_run_resumes_from_durable_user_message(db_session):
 
 
 @pytest.mark.asyncio
+async def test_resumed_chat_capacity_limit_requeues_without_closing_turn(db_session):
+    backend = ChatBackend()
+    gate = ConcurrencyGate(fail_scope="user")
+    user, session_response, service = user_and_session(db_session, backend, gate)
+    session = db_session.get(AIChatSession, session_response.id)
+    turn, _ = AgentTurnCoordinator(db_session).start(
+        session_id=session.id,
+        user_id=user.id,
+        idempotency_key="chat-worker-capacity-retry",
+        input_hash=canonical_hash({"content": "Retry this request"}),
+    )
+    runs = AgentRunService(db_session)
+    run, _ = runs.create(
+        service._run_command(
+            turn=turn,
+            user_id=user.id,
+            content="Retry this request",
+            sensitivity=Sensitivity.INTERNAL,
+        )
+    )
+    claimed = runs.claim_one(
+        run.id,
+        worker_id="celery-worker-1",
+        now=datetime.utcnow(),
+        lease_seconds=60,
+    )
+    user_message = service._append_user_message(session, "Retry this request")
+    turn.user_message_id = user_message.id
+    db_session.commit()
+
+    with pytest.raises(ConcurrencyLimitExceeded):
+        await service.resume_claimed(
+            run.id,
+            worker_id="celery-worker-1",
+            fencing_token=claimed.fencing_token,
+        )
+
+    db_session.refresh(run)
+    db_session.refresh(turn)
+    assert run.status == "queued"
+    assert run.error_code == "agent_capacity_exhausted"
+    assert run.leased_by is None
+    assert turn.status == "running"
+    assert backend.requests == []
+    reclaimed = runs.claim_one(
+        run.id,
+        worker_id="celery-worker-2",
+        now=datetime.utcnow(),
+        lease_seconds=60,
+    )
+    assert reclaimed.fencing_token == claimed.fencing_token + 1
+
+
+@pytest.mark.asyncio
 async def test_ai_chat_idempotent_replay_returns_persisted_answer_without_new_llm_call(
     db_session,
 ):

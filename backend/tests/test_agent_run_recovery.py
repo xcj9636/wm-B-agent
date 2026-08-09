@@ -140,6 +140,43 @@ def test_expired_safe_run_is_reclaimed_and_stale_worker_cannot_commit(db_session
     assert completed.status == "completed"
 
 
+def test_current_worker_can_requeue_safe_run_for_retry(db_session):
+    service = AgentRunService(db_session)
+    run, _ = service.create(command())
+    claimed = service.claim_one(
+        run.id,
+        worker_id="worker-a",
+        now=datetime(2026, 8, 10, 12, 0, 0),
+        lease_seconds=60,
+    )
+
+    requeued = service.requeue(
+        run.id,
+        worker_id="worker-a",
+        fencing_token=claimed.fencing_token,
+        now=datetime(2026, 8, 10, 12, 0, 10),
+        error_code="agent_capacity_exhausted",
+    )
+
+    assert requeued.status == "queued"
+    assert requeued.error_code == "agent_capacity_exhausted"
+    assert requeued.leased_by is None
+    with pytest.raises(RunLeaseConflict):
+        service.complete(
+            run.id,
+            worker_id="worker-a",
+            fencing_token=claimed.fencing_token,
+            now=datetime(2026, 8, 10, 12, 0, 11),
+        )
+    reclaimed = service.claim_one(
+        run.id,
+        worker_id="worker-b",
+        now=datetime(2026, 8, 10, 12, 0, 12),
+        lease_seconds=60,
+    )
+    assert reclaimed.fencing_token == claimed.fencing_token + 1
+
+
 def test_expired_run_after_effect_started_becomes_unknown_not_retried(db_session):
     service = AgentRunService(db_session)
     run, _ = service.create(command())
