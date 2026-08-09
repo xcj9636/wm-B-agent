@@ -25,7 +25,7 @@ from app.services.llm.contracts import (
     LLMResponse,
     LLMStreamChunk,
 )
-from app.services.llm.audit import InvocationAuditService
+from app.services.llm.audit import InvocationAuditService, StaleInvocationFence
 from app.services.llm.contracts import LLMUseCase
 
 
@@ -60,6 +60,46 @@ class ChatRuntime:
 
     def build_backend(self):
         return self.backend
+
+
+class TakeoverDuringCompletionBackend(ChatBackend):
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+        self.successor_token = None
+
+    async def complete(self, request):
+        self.requests.append(request)
+        invocation = self.db.query(LLMInvocation).one()
+        run = self.db.query(AgentRun).one()
+        first_token = run.fencing_token
+        runs = AgentRunService(self.db)
+        runs.requeue(
+            run.id,
+            worker_id=f"api-chat:{run.turn_id}",
+            fencing_token=first_token,
+            now=datetime.utcnow(),
+            error_code="simulated_worker_takeover",
+        )
+        successor = runs.claim_one(
+            run.id,
+            worker_id="successor-worker",
+            now=datetime.utcnow(),
+            lease_seconds=300,
+        )
+        self.successor_token = successor.fencing_token
+        InvocationAuditService(self.db).start(
+            idempotency_key=invocation.idempotency_key,
+            request=request,
+            backend=invocation.backend,
+            run_id=run.id,
+            fencing_token=self.successor_token,
+        )
+        self.db.commit()
+        return LLMResponse(
+            request_id=request.request_id,
+            content="late stale response",
+        )
 
 
 class BrokenRuntime(ChatRuntime):
@@ -173,6 +213,31 @@ async def test_ai_chat_failure_leaves_a_durable_failed_turn(db_session):
     assert turn.user_message_id == messages[0].id
     assert len(service._concurrency.released) == 1
     assert backend.closed is True
+
+
+@pytest.mark.asyncio
+async def test_stale_worker_response_cannot_close_successor_run_or_turn(db_session):
+    backend = TakeoverDuringCompletionBackend(db_session)
+    user, session, service = user_and_session(db_session, backend)
+
+    with pytest.raises(StaleInvocationFence):
+        await service.complete(
+            session.id,
+            user.id,
+            "Hello after takeover",
+            idempotency_key="chat-stale-worker-takeover",
+        )
+
+    run = db_session.query(AgentRun).one()
+    turn = db_session.query(AgentTurn).one()
+    invocation = db_session.query(LLMInvocation).one()
+    assert run.status == "running"
+    assert run.leased_by == "successor-worker"
+    assert run.fencing_token == backend.successor_token
+    assert turn.status == "running"
+    assert invocation.status.value == "pending"
+    assert invocation.fencing_token == backend.successor_token
+    assert db_session.query(AIChatMessage).filter_by(role="assistant").count() == 0
 
 
 @pytest.mark.asyncio
