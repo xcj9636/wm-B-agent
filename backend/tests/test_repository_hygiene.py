@@ -45,3 +45,38 @@ def test_every_gitlink_has_a_submodule_mapping():
         configured_paths = {line.split(maxsplit=1)[1] for line in configured}
 
     assert gitlinks <= configured_paths
+
+
+def test_runtime_versions_are_declared():
+    assert (REPOSITORY_ROOT / ".python-version").read_text().strip() == "3.11"
+    assert (REPOSITORY_ROOT / ".nvmrc").read_text().strip() == "20"
+
+
+def test_alembic_baseline_is_present():
+    alembic_config = REPOSITORY_ROOT / "backend" / "alembic.ini"
+    versions = REPOSITORY_ROOT / "backend" / "alembic" / "versions"
+
+    assert alembic_config.is_file()
+    assert any(versions.glob("*.py"))
+
+
+def test_ci_covers_backend_frontend_and_compose_gates():
+    workflow = (
+        REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+
+    for command in (
+        "pytest -q",
+        "npm ci",
+        "npm test",
+        "npm run build",
+        "docker compose config",
+    ):
+        assert command in workflow
+
+
+def test_celery_beat_does_not_reference_django_scheduler():
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "django_celery_beat" not in compose
+    assert "celerybeat-schedule" in compose
