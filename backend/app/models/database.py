@@ -71,6 +71,33 @@ class IntentLevel(str, enum.Enum):
     VERY_HIGH = "very_high"
 
 
+class LLMInvocationStatus(str, enum.Enum):
+    """Durable lifecycle of one business-level LLM invocation."""
+
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class LLMAttemptStatus(str, enum.Enum):
+    """Outcome of one provider/gateway attempt."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class OutboxStatus(str, enum.Enum):
+    """Durable delivery state for an external side effect."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    RETRY = "retry"
+    SENT = "sent"
+    DEAD_LETTER = "dead_letter"
+
+
 class User(Base):
     """User model"""
     __tablename__ = "users"
@@ -460,6 +487,155 @@ class AuditLog(Base):
         Index('idx_audit_user_action', 'user_id', 'action'),
         Index('idx_audit_resource', 'resource_type', 'resource_id'),
         Index('idx_audit_created', 'created_at'),
+    )
+
+
+class LLMInvocation(Base):
+    """Business invocation without storing raw prompt content."""
+
+    __tablename__ = "llm_invocations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
+    idempotency_key = Column(String(255), nullable=False, unique=True)
+    use_case = Column(String(50), nullable=False)
+    backend = Column(String(50), nullable=False)
+    status = Column(
+        Enum(
+            LLMInvocationStatus,
+            values_callable=lambda values: [value.value for value in values],
+            name="llm_invocation_status",
+        ),
+        nullable=False,
+        default=LLMInvocationStatus.PENDING,
+    )
+    input_hash = Column(String(64), nullable=False)
+    output_hash = Column(String(64))
+    response_json = Column(JSON)
+    workflow_execution_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_executions.id"),
+    )
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"))
+    error_kind = Column(String(50))
+    retryable = Column(Boolean)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    attempts = relationship(
+        "LLMAttempt",
+        back_populates="invocation",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("idx_llm_invocation_status_created", "status", "created_at"),
+        Index("idx_llm_invocation_workflow", "workflow_execution_id"),
+        Index("idx_llm_invocation_conversation", "conversation_id"),
+    )
+
+
+class LLMAttempt(Base):
+    """Provider-level observation associated with an LLM invocation."""
+
+    __tablename__ = "llm_attempts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    invocation_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("llm_invocations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_number = Column(Integer, nullable=False)
+    status = Column(
+        Enum(
+            LLMAttemptStatus,
+            values_callable=lambda values: [value.value for value in values],
+            name="llm_attempt_status",
+        ),
+        nullable=False,
+    )
+    gateway_request_id = Column(String(255))
+    provider = Column(String(100))
+    model = Column(String(255))
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    cost = Column(Float)
+    cost_status = Column(String(20), nullable=False, default="unknown")
+    cache_hit = Column(Boolean, nullable=False, default=False)
+    fallback_reason = Column(String(255))
+    error_kind = Column(String(50))
+    retryable = Column(Boolean)
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    invocation = relationship("LLMInvocation", back_populates="attempts")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "invocation_id",
+            "attempt_number",
+            name="uq_llm_attempt_number",
+        ),
+        Index("idx_llm_attempt_gateway_request", "gateway_request_id"),
+        Index("idx_llm_attempt_provider_model", "provider", "model"),
+    )
+
+
+class OutboxEvent(Base):
+    """Transactional outbox record for a single external side effect."""
+
+    __tablename__ = "outbox_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    aggregate_type = Column(String(50), nullable=False)
+    aggregate_id = Column(String(255), nullable=False)
+    event_type = Column(String(50), nullable=False)
+    business_key = Column(String(255), nullable=False)
+    channel = Column(String(50), nullable=False)
+    payload_json = Column(JSON, nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    status = Column(
+        Enum(
+            OutboxStatus,
+            values_callable=lambda values: [value.value for value in values],
+            name="outbox_status",
+        ),
+        nullable=False,
+        default=OutboxStatus.PENDING,
+    )
+    available_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    lease_until = Column(DateTime)
+    leased_by = Column(String(100))
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=5)
+    last_error = Column(Text)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    sent_at = Column(DateTime)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "channel",
+            "business_key",
+            "event_type",
+            name="uq_outbox_business_action",
+        ),
+        Index("idx_outbox_dispatch", "status", "available_at"),
+        Index("idx_outbox_lease", "status", "lease_until"),
+        Index("idx_outbox_aggregate", "aggregate_type", "aggregate_id"),
     )
 
 
