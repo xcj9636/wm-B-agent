@@ -1,11 +1,20 @@
 """Durable tool state machine with fencing, approval, and outbox handoff."""
 
+import logging
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Dict, Tuple
+from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models.database import AgentToolExecution, OutboxEvent
+from app.services.agent_concurrency import (
+    ConcurrencyLease,
+    ConcurrencyRequest,
+    ConcurrencyUnavailable,
+    DistributedConcurrencyLimiter,
+    get_agent_concurrency_limiter,
+)
 from app.services.agent_runtime.contracts import ExecutionPrincipal
 from app.services.idempotency import IdempotencyConflict, canonical_hash
 from app.services.outbox import OutboxCommand, OutboxService
@@ -17,6 +26,9 @@ from app.services.tool_runtime import (
     ToolRegistry,
     ToolRisk,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class StaleToolCall(RuntimeError):
@@ -43,10 +55,12 @@ class DurableToolExecutionService:
         registry: ToolRegistry,
         *,
         allow_side_effects: bool = False,
+        concurrency: Optional[DistributedConcurrencyLimiter] = None,
     ) -> None:
         self._db = session
         self._registry = registry
         self._allow_side_effects = allow_side_effects
+        self._concurrency = concurrency
 
     def record(self, call: ToolCall) -> Tuple[AgentToolExecution, bool]:
         self._validate_registered_call(call)
@@ -135,29 +149,44 @@ class DurableToolExecutionService:
         if row.status != "ready":
             raise ToolExecutionBusy("Tool call is not ready for execution")
 
-        row.status = "running"
-        self._db.commit()
+        limiter = self._concurrency or get_agent_concurrency_limiter()
+        concurrency_lease = await limiter.acquire(
+            ConcurrencyRequest(
+                org_id=row.org_id,
+                user_id=row.actor_user_id,
+                tool_name=row.tool_name,
+            ),
+            now=datetime.now(timezone.utc),
+            lease_seconds=settings.AGENT_CONCURRENCY_LEASE_SECONDS,
+        )
         try:
-            result = await handler(call)
-        except BaseException:
-            self._db.rollback()
-            failed = self._db.get(AgentToolExecution, call.call_id)
-            if failed is not None and failed.status == "running":
-                failed.status = "failed"
-                failed.error_code = "tool_execution_failed"
-                failed.completed_at = datetime.utcnow()
-                self._db.commit()
-            raise
+            row.status = "running"
+            self._db.commit()
+            try:
+                result = await handler(call)
+            except BaseException:
+                self._db.rollback()
+                failed = self._db.get(AgentToolExecution, call.call_id)
+                if failed is not None and failed.status == "running":
+                    failed.status = "failed"
+                    failed.error_code = "tool_execution_failed"
+                    failed.completed_at = datetime.utcnow()
+                    self._db.commit()
+                raise
 
-        completed = self._db.get(AgentToolExecution, call.call_id)
-        if completed is None or completed.status != "running":
-            raise ToolExecutionBusy("Tool execution state changed before completion")
-        completed.result_json = result
-        completed.result_hash = canonical_hash(result)
-        completed.status = "succeeded"
-        completed.completed_at = datetime.utcnow()
-        self._db.commit()
-        return dict(result)
+            completed = self._db.get(AgentToolExecution, call.call_id)
+            if completed is None or completed.status != "running":
+                raise ToolExecutionBusy(
+                    "Tool execution state changed before completion"
+                )
+            completed.result_json = result
+            completed.result_hash = canonical_hash(result)
+            completed.status = "succeeded"
+            completed.completed_at = datetime.utcnow()
+            self._db.commit()
+            return dict(result)
+        finally:
+            await self._release_concurrency(limiter, concurrency_lease)
 
     def enqueue_side_effect(
         self,
@@ -256,6 +285,19 @@ class DurableToolExecutionService:
                 "approval_required": call.approval_required,
             }
         )
+
+    @staticmethod
+    async def _release_concurrency(
+        limiter: DistributedConcurrencyLimiter,
+        lease: ConcurrencyLease,
+    ) -> None:
+        try:
+            await limiter.release(lease)
+        except ConcurrencyUnavailable as exc:
+            logger.warning(
+                "Tool concurrency lease release deferred to TTL",
+                extra={"error_type": type(exc).__name__},
+            )
 
     @staticmethod
     def _naive_utc(value: datetime) -> datetime:
