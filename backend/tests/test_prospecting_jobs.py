@@ -290,6 +290,47 @@ async def test_retryable_failure_backoffs_and_manual_resume_keeps_offset(
 
 
 @pytest.mark.asyncio
+async def test_due_retry_automatically_requeues_item_without_manual_resume(
+    configured_api,
+):
+    _, db, user = configured_api
+    created = ProspectingJobService(db).create_job(
+        job_command(domains=["acme.com"], request_budget=2),
+        user_id=user.id,
+    )
+    started = datetime(2026, 8, 9, 12, 0, 0)
+    hunter = FakeBatchHunter(
+        {
+            ("acme.com", 0): HunterConnectorError(
+                error_code="rate_limited",
+                retryable=True,
+            )
+        }
+    )
+    runner = ProspectingJobRunner(db)
+
+    waiting = await runner.run_slice(
+        created.id,
+        hunter=hunter,
+        worker_id="retry-worker-1",
+        now=started,
+    )
+    assert waiting.status == ProspectingJobStatus.RETRY_WAIT
+    hunter.pages[("acme.com", 0)] = page("acme.com", ["ready@acme.com"], 1)
+
+    completed = await runner.run_slice(
+        created.id,
+        hunter=hunter,
+        worker_id="retry-worker-2",
+        now=started + timedelta(seconds=30),
+    )
+
+    assert completed.status == ProspectingJobStatus.COMPLETED
+    assert [call["offset"] for call in hunter.calls] == [0, 0]
+    assert db.query(ProspectingContact).count() == 1
+
+
+@pytest.mark.asyncio
 async def test_expired_read_lease_is_recovered_without_skipping_page(
     configured_api,
 ):
