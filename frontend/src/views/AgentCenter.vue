@@ -1310,6 +1310,7 @@ function statusType(status: AgentRun['status']) {
     queued: 'info',
     running: 'primary',
     completed: 'success',
+    failed: 'danger',
     cancelled: 'info',
     unknown: 'danger',
   } as const)[status]

@@ -2,6 +2,7 @@
 Application configuration using Pydantic Settings
 """
 from typing import Dict, List, Literal
+from uuid import UUID
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     SECRET_KEY: str = "your-secret-key-change-in-production"
     START_MINIMAL: bool = False
+    AGENT_ORG_ID: UUID = UUID("ba6e0000-0000-0000-0000-000000000001")
 
     # Server
     HOST: str = "0.0.0.0"

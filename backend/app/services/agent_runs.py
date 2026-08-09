@@ -182,6 +182,34 @@ class AgentRunService:
             self._db.refresh(row)
         return rows
 
+    def claim_one(
+        self,
+        run_id: UUID,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> AgentRun:
+        self._validate_lease_request(worker_id, 1, lease_seconds)
+        now = self._naive_utc(now)
+        row = (
+            self._db.query(AgentRun)
+            .filter(AgentRun.id == run_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if row is None or row.status != "queued" or row.deadline_at <= now:
+            raise RunLeaseConflict("Agent run is not available for claiming")
+        row.status = "running"
+        row.fencing_token += 1
+        row.leased_by = worker_id
+        row.lease_until = now + timedelta(seconds=lease_seconds)
+        row.heartbeat_at = now
+        row.error_code = None
+        self._db.commit()
+        self._db.refresh(row)
+        return row
+
     def heartbeat(
         self,
         run_id: UUID,
@@ -224,6 +252,7 @@ class AgentRunService:
         worker_id: str,
         fencing_token: int,
         now: datetime,
+        commit: bool = True,
     ) -> AgentRun:
         now = self._naive_utc(now)
         row = self._leased_row(run_id, worker_id, fencing_token, now)
@@ -233,8 +262,30 @@ class AgentRunService:
         row.completed_at = now
         row.error_code = None
         self._clear_lease(row)
-        self._db.commit()
-        self._db.refresh(row)
+        if commit:
+            self._db.commit()
+            self._db.refresh(row)
+        return row
+
+    def fail(
+        self,
+        run_id: UUID,
+        *,
+        worker_id: str,
+        fencing_token: int,
+        now: datetime,
+        error_code: str = "agent_execution_failed",
+        commit: bool = True,
+    ) -> AgentRun:
+        now = self._naive_utc(now)
+        row = self._leased_row(run_id, worker_id, fencing_token, now)
+        row.status = "failed"
+        row.error_code = error_code
+        row.completed_at = now
+        self._clear_lease(row)
+        if commit:
+            self._db.commit()
+            self._db.refresh(row)
         return row
 
     def recover_expired(self, *, now: datetime) -> List[AgentRun]:

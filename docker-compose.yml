@@ -63,6 +63,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/2
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
       - SECRET_KEY=your-secret-key-change-in-production
+      - AGENT_ORG_ID=${AGENT_ORG_ID:-ba6e0000-0000-0000-0000-000000000001}
       - DEBUG=False
       - LLM_BACKEND=${LLM_BACKEND:-direct}
       - OMNIROUTE_BASE_URL=http://omniroute:20128
@@ -105,6 +106,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/2
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
       - SECRET_KEY=your-secret-key-change-in-production
+      - AGENT_ORG_ID=${AGENT_ORG_ID:-ba6e0000-0000-0000-0000-000000000001}
       - DEBUG=False
       - LLM_BACKEND=${LLM_BACKEND:-direct}
       - OMNIROUTE_BASE_URL=http://omniroute:20128

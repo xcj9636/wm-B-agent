@@ -1,5 +1,5 @@
 """Durable, user-owned AI chat powered by the current runtime route snapshot."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import AsyncIterator, Dict, List, Literal, Optional
 from uuid import UUID, uuid4
@@ -8,8 +8,9 @@ from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db
-from app.models.database import AIChatMessage, AIChatSession, AgentTurn
+from app.models.database import AIChatMessage, AIChatSession, AgentRun, AgentTurn
 from app.services.ai_runtime import AIRuntimeService
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.agent_runtime.context import (
@@ -22,6 +23,11 @@ from app.services.agent_runtime.context import (
 )
 from app.services.agent_runtime.prompts import get_default_prompt_registry
 from app.services.agent_runtime.turns import AgentTurnCoordinator
+from app.services.agent_runs import (
+    AgentRunCommand,
+    AgentRunService,
+    RunLeaseConflict,
+)
 from app.services.data_policy import (
     DataPolicyUnavailable,
     RedactionVault,
@@ -64,6 +70,7 @@ class AIChatService:
     MODEL_CONTEXT_TOKENS = 16384
     RESERVED_OUTPUT_TOKENS = 1600
     SAFETY_MARGIN_TOKENS = 512
+    RUN_LEASE_SECONDS = 300
 
     def __init__(self, db: Session, runtime: AIRuntimeService) -> None:
         self._db = db
@@ -124,8 +131,29 @@ class AIChatService:
         backend = None
         redaction_vault = None
         rehydration_placeholders = set()
+        run_service = AgentRunService(self._db)
+        run: Optional[AgentRun] = None
+        run_worker_id = f"api-chat:{turn.id}"
         try:
-            self._enforce_current_input_policy(content)
+            classification = SensitiveDataClassifier().classify(
+                content,
+                intrinsic=Sensitivity.INTERNAL,
+            )
+            run, _ = run_service.create(
+                self._run_command(
+                    turn=turn,
+                    user_id=user_id,
+                    content=content,
+                    sensitivity=classification.sensitivity,
+                )
+            )
+            run = run_service.claim_one(
+                run.id,
+                worker_id=run_worker_id,
+                now=datetime.utcnow(),
+                lease_seconds=self.RUN_LEASE_SECONDS,
+            )
+            self._enforce_current_input_policy(classification.sensitivity)
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.flush()
@@ -171,10 +199,22 @@ class AIChatService:
                 generation_epoch=turn.generation_epoch,
                 commit=False,
             )
+            run_service.complete(
+                run.id,
+                worker_id=run_worker_id,
+                fencing_token=run.fencing_token,
+                now=datetime.utcnow(),
+                commit=False,
+            )
             self._finish_turn(session, assistant, turn=turn)
             return self._message_response(assistant)
         except BaseException:
             self._db.rollback()
+            self._fail_run(
+                run_service,
+                run,
+                worker_id=run_worker_id,
+            )
             coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
             raise
         finally:
@@ -215,8 +255,29 @@ class AIChatService:
         rehydration_placeholders = set()
         fragments: List[str] = []
         metadata: Dict[str, object] = {}
+        run_service = AgentRunService(self._db)
+        run: Optional[AgentRun] = None
+        run_worker_id = f"api-chat:{turn.id}"
         try:
-            self._enforce_current_input_policy(content)
+            classification = SensitiveDataClassifier().classify(
+                content,
+                intrinsic=Sensitivity.INTERNAL,
+            )
+            run, _ = run_service.create(
+                self._run_command(
+                    turn=turn,
+                    user_id=user_id,
+                    content=content,
+                    sensitivity=classification.sensitivity,
+                )
+            )
+            run = run_service.claim_one(
+                run.id,
+                worker_id=run_worker_id,
+                now=datetime.utcnow(),
+                lease_seconds=self.RUN_LEASE_SECONDS,
+            )
+            self._enforce_current_input_policy(classification.sensitivity)
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.flush()
@@ -273,9 +334,21 @@ class AIChatService:
                 generation_epoch=turn.generation_epoch,
                 commit=False,
             )
+            run_service.complete(
+                run.id,
+                worker_id=run_worker_id,
+                fencing_token=run.fencing_token,
+                now=datetime.utcnow(),
+                commit=False,
+            )
             self._finish_turn(session, assistant, turn=turn)
         except BaseException:
             self._db.rollback()
+            self._fail_run(
+                run_service,
+                run,
+                worker_id=run_worker_id,
+            )
             coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
             raise
         finally:
@@ -316,12 +389,8 @@ class AIChatService:
         return message
 
     @staticmethod
-    def _enforce_current_input_policy(content: str) -> None:
-        classification = SensitiveDataClassifier().classify(
-            content,
-            intrinsic=Sensitivity.INTERNAL,
-        )
-        if classification.sensitivity == Sensitivity.RESTRICTED:
+    def _enforce_current_input_policy(sensitivity: Sensitivity) -> None:
+        if sensitivity == Sensitivity.RESTRICTED:
             raise DataPolicyUnavailable(
                 "Restricted data cannot be sent to the configured model route"
             )
@@ -363,6 +432,51 @@ class AIChatService:
         if not value:
             raise ValueError("Message content cannot be empty")
         return value
+
+    @staticmethod
+    def _run_command(
+        *,
+        turn: AgentTurn,
+        user_id: int,
+        content: str,
+        sensitivity: Sensitivity,
+    ) -> AgentRunCommand:
+        deadline_seconds = max(
+            int(settings.OMNIROUTE_TIMEOUT_SECONDS * 2),
+            120,
+        )
+        return AgentRunCommand(
+            idempotency_key=f"agent-run:ai-chat:{turn.id}",
+            org_id=settings.AGENT_ORG_ID,
+            user_id=user_id,
+            session_id=turn.session_id,
+            turn_id=turn.id,
+            use_case=LLMUseCase.LIVE_REPLY.value,
+            input={"content": content},
+            sensitivity=sensitivity,
+            generation_epoch=turn.generation_epoch,
+            deadline_at=datetime.utcnow() + timedelta(seconds=deadline_seconds),
+        )
+
+    @staticmethod
+    def _fail_run(
+        service: AgentRunService,
+        run: Optional[AgentRun],
+        *,
+        worker_id: str,
+    ) -> None:
+        if run is None or run.status != "running":
+            return
+        try:
+            service.fail(
+                run.id,
+                worker_id=worker_id,
+                fencing_token=run.fencing_token,
+                now=datetime.utcnow(),
+                commit=False,
+            )
+        except RunLeaseConflict:
+            service.recover_expired(now=datetime.utcnow())
 
     def _messages_for_model(
         self, session: AIChatSession, current: AIChatMessage

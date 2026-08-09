@@ -27,7 +27,7 @@ export interface AgentRun {
   use_case: string
   sensitivity: 'public' | 'internal' | 'confidential' | 'restricted'
   generation_epoch: number
-  status: 'queued' | 'running' | 'completed' | 'cancelled' | 'unknown'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
   effect_state: 'none' | 'started' | 'confirmed'
   deadline_at: string
   error_code?: string
