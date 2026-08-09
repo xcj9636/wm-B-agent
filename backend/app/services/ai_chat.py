@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.database import AIChatMessage, AIChatSession, AgentTurn
 from app.services.ai_runtime import AIRuntimeService
+from app.services.agent_runtime.contracts import Sensitivity
 from app.services.agent_runtime.context import (
     ContextAssembler,
     ContextBudgetPolicy,
@@ -21,6 +22,11 @@ from app.services.agent_runtime.context import (
 )
 from app.services.agent_runtime.prompts import get_default_prompt_registry
 from app.services.agent_runtime.turns import AgentTurnCoordinator
+from app.services.data_policy import (
+    DataPolicyUnavailable,
+    RedactionVault,
+    SensitiveDataClassifier,
+)
 from app.services.llm.contracts import LLMUseCase
 from app.services.llm.instrumented import SessionInvocationAuditSink
 from app.services.llm.service import LLMService
@@ -116,7 +122,9 @@ class AIChatService:
         if not created:
             return self._replay_completed_turn(turn)
         backend = None
+        redaction_vault = None
         try:
+            self._enforce_current_input_policy(content)
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.flush()
@@ -127,18 +135,26 @@ class AIChatService:
                 audit_sink=SessionInvocationAuditSink(self._db),
                 backend_name=runtime_config.backend,
             )
+            model_messages, redaction_vault = self._redact_model_messages(
+                self._messages_for_model(session, user_message),
+                run_id=str(turn.id),
+            )
             response = await service.complete(
                 LLMUseCase.LIVE_REPLY,
-                self._messages_for_model(session, user_message),
+                model_messages,
                 temperature=0.3,
                 max_output_tokens=1600,
                 idempotency_key=f"ai-chat:{turn.id}:llm",
+            )
+            response_content = redaction_vault.rehydrate(
+                response.content,
+                run_id=str(turn.id),
             )
 
             assistant = AIChatMessage(
                 session_id=session.id,
                 role="assistant",
-                content=response.content,
+                content=response_content,
                 resolved_model=response.resolved_model,
                 resolved_provider=response.resolved_provider,
                 gateway_request_id=response.gateway_request_id,
@@ -156,6 +172,8 @@ class AIChatService:
             coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
             raise
         finally:
+            if redaction_vault is not None:
+                redaction_vault.purge(run_id=str(turn.id))
             if backend is not None:
                 await self._close_backend(backend)
 
@@ -187,9 +205,11 @@ class AIChatService:
             }
             return
         backend = None
+        redaction_vault = None
         fragments: List[str] = []
         metadata: Dict[str, object] = {}
         try:
+            self._enforce_current_input_policy(content)
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.flush()
@@ -200,9 +220,13 @@ class AIChatService:
                 audit_sink=SessionInvocationAuditSink(self._db),
                 backend_name=runtime_config.backend,
             )
+            model_messages, redaction_vault = self._redact_model_messages(
+                self._messages_for_model(session, user_message),
+                run_id=str(turn.id),
+            )
             async for chunk in service.stream(
                 LLMUseCase.LIVE_REPLY,
-                self._messages_for_model(session, user_message),
+                model_messages,
                 temperature=0.3,
                 max_output_tokens=1600,
                 idempotency_key=f"ai-chat:{turn.id}:llm",
@@ -219,10 +243,14 @@ class AIChatService:
                 if chunk.usage:
                     metadata["usage"] = chunk.usage.model_dump()
 
+            response_content = redaction_vault.rehydrate(
+                "".join(fragments),
+                run_id=str(turn.id),
+            )
             assistant = AIChatMessage(
                 session_id=session.id,
                 role="assistant",
-                content="".join(fragments),
+                content=response_content,
                 resolved_model=metadata.get("resolved_model"),
                 resolved_provider=metadata.get("resolved_provider"),
                 gateway_request_id=metadata.get("gateway_request_id"),
@@ -239,6 +267,8 @@ class AIChatService:
             coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
             raise
         finally:
+            if redaction_vault is not None:
+                redaction_vault.purge(run_id=str(turn.id))
             if backend is not None:
                 await self._close_backend(backend)
         yield {
@@ -272,6 +302,51 @@ class AIChatService:
         self._db.add(message)
         self._db.flush()
         return message
+
+    @staticmethod
+    def _enforce_current_input_policy(content: str) -> None:
+        classification = SensitiveDataClassifier().classify(
+            content,
+            intrinsic=Sensitivity.INTERNAL,
+        )
+        if classification.sensitivity == Sensitivity.RESTRICTED:
+            raise DataPolicyUnavailable(
+                "Restricted data cannot be sent to the configured model route"
+            )
+
+    @staticmethod
+    def _redact_model_messages(
+        messages: List[Dict[str, str]],
+        *,
+        run_id: str,
+    ) -> tuple[List[Dict[str, str]], RedactionVault]:
+        classifier = SensitiveDataClassifier()
+        classifications = [
+            classifier.classify(
+                message["content"],
+                intrinsic=Sensitivity.INTERNAL,
+            )
+            for message in messages
+        ]
+        if any(
+            result.sensitivity == Sensitivity.RESTRICTED
+            for result in classifications
+        ):
+            raise DataPolicyUnavailable(
+                "Restricted context cannot be sent to the configured model route"
+            )
+        vault = RedactionVault()
+        redacted = [
+            {
+                **message,
+                "content": vault.redact(
+                    message["content"],
+                    run_id=run_id,
+                ).text,
+            }
+            for message in messages
+        ]
+        return redacted, vault
 
     @staticmethod
     def _normalize_content(content: str) -> str:

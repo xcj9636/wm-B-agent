@@ -86,10 +86,12 @@ class RedactionVault:
 
     def __init__(self) -> None:
         self._values: Dict[str, Dict[str, str]] = {}
+        self._counters: Dict[str, Dict[str, int]] = {}
 
     def redact(self, text: str, *, run_id: str) -> RedactionResult:
-        counters = defaultdict(int)
-        values: Dict[str, str] = {}
+        counters = defaultdict(int, self._counters.get(run_id, {}))
+        values = self._values.setdefault(run_id, {})
+        new_placeholders: List[str] = []
         result = text
         for kind, pattern, _ in _PATTERNS:
             label = kind.upper()
@@ -98,11 +100,12 @@ class RedactionVault:
                 counters[label] += 1
                 placeholder = f"[[{label}_{counters[label]}]]"
                 values[placeholder] = match.group(0)
+                new_placeholders.append(placeholder)
                 return placeholder
 
             result = pattern.sub(replace, result)
-        self._values[run_id] = values
-        return RedactionResult(text=result, placeholders=list(values))
+        self._counters[run_id] = dict(counters)
+        return RedactionResult(text=result, placeholders=new_placeholders)
 
     def rehydrate(self, text: str, *, run_id: str) -> str:
         if run_id not in self._values:
@@ -114,6 +117,7 @@ class RedactionVault:
 
     def purge(self, *, run_id: str) -> None:
         self._values.pop(run_id, None)
+        self._counters.pop(run_id, None)
 
 
 class ProviderRoutePolicy:

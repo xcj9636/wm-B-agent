@@ -10,6 +10,7 @@ from app.services.llm.contracts import (
     GatewayError,
     GatewayErrorKind,
     LLMResponse,
+    LLMStreamChunk,
 )
 
 
@@ -49,6 +50,13 @@ class ChatRuntime:
 class BrokenRuntime(ChatRuntime):
     def build_backend(self):
         raise RuntimeError("backend construction failed")
+
+
+class StreamingChatBackend(ChatBackend):
+    async def stream(self, request):
+        self.requests.append(request)
+        yield LLMStreamChunk(request_id=request.request_id, delta="Contact ")
+        yield LLMStreamChunk(request_id=request.request_id, delta="[[EMAIL_1]]")
 
 
 def user_and_session(db_session, backend):
@@ -227,3 +235,26 @@ async def test_restricted_secret_is_rejected_before_message_or_llm_persistence(d
     assert backend.requests == []
     assert db_session.query(AIChatMessage).count() == 0
     assert db_session.query(AgentTurn).one().status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_stream_redacts_provider_input_and_rehydrates_done_snapshot(db_session):
+    backend = StreamingChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+
+    events = [
+        event
+        async for event in service.stream(
+            session.id,
+            user.id,
+            "Email buyer@example.com",
+            idempotency_key="chat-stream-redacted-pii",
+        )
+    ]
+
+    assert "buyer@example.com" not in backend.requests[0].model_dump_json()
+    assert "[[EMAIL_1]]" in "".join(
+        event["data"]["delta"] for event in events if event["event"] == "delta"
+    )
+    assert events[-1]["event"] == "done"
+    assert events[-1]["data"]["content"] == "Contact buyer@example.com"
