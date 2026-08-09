@@ -54,12 +54,24 @@ def dispatch_outbox_task(
     )
     db = SessionLocal()
     service = OutboxService(db)
-    counters = {"claimed": 0, "sent": 0, "retry": 0, "dead_letter": 0}
+    counters = {
+        "claimed": 0,
+        "sent": 0,
+        "retry": 0,
+        "dead_letter": 0,
+        "expired_dead_letter": 0,
+    }
 
     try:
+        claim_time = datetime.utcnow()
+        expired = service.expire_stale_leases(now=claim_time)
+        counters["expired_dead_letter"] = len(expired)
+        for event in expired:
+            _sync_expired_outreach(db, event)
+
         events = service.claim_batch(
             worker_id=worker_id,
-            now=datetime.utcnow(),
+            now=claim_time,
             limit=batch_size,
             lease_seconds=180,
         )
@@ -443,3 +455,14 @@ def _sync_outreach_result(
     if event.status == OutboxStatus.DEAD_LETTER:
         outreach.status = OutreachStatus.FAILED
         outreach.error_msg = result.error_code
+
+
+def _sync_expired_outreach(db, event) -> None:
+    if event.aggregate_type != "outreach_log":
+        return
+
+    outreach = db.get(OutreachLog, uuid.UUID(event.aggregate_id))
+    if outreach is None:
+        raise RuntimeError("Outbox event has no outreach business record")
+    outreach.status = OutreachStatus.FAILED
+    outreach.error_msg = "lease_expired_unknown_delivery_state"

@@ -91,6 +91,7 @@ def test_worker_commits_successful_delivery_identity(
             "sent": 1,
             "retry": 0,
             "dead_letter": 0,
+            "expired_dead_letter": 0,
         }
         assert event.status == OutboxStatus.SENT
         assert event.external_message_id == "provider-message-7"

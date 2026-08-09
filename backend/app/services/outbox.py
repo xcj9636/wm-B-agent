@@ -78,19 +78,7 @@ class OutboxService:
         lease_seconds: int,
     ) -> List[OutboxEvent]:
         """Lease due work; caller must commit before making network calls."""
-        expired = (
-            self._session.query(OutboxEvent)
-            .filter(
-                OutboxEvent.status == OutboxStatus.PROCESSING,
-                OutboxEvent.lease_until <= now,
-            )
-            .with_for_update(skip_locked=True)
-            .all()
-        )
-        for event in expired:
-            event.status = OutboxStatus.DEAD_LETTER
-            event.last_error = "lease_expired_unknown_delivery_state"
-            self._clear_lease(event)
+        self.expire_stale_leases(now=now)
 
         due = (
             self._session.query(OutboxEvent)
@@ -114,6 +102,25 @@ class OutboxService:
 
         self._session.flush()
         return due
+
+    def expire_stale_leases(self, *, now: datetime) -> List[OutboxEvent]:
+        """Dead-letter leases whose external delivery state is unknowable."""
+        expired = (
+            self._session.query(OutboxEvent)
+            .filter(
+                OutboxEvent.status == OutboxStatus.PROCESSING,
+                OutboxEvent.lease_until <= now,
+            )
+            .with_for_update(skip_locked=True)
+            .all()
+        )
+        for event in expired:
+            event.status = OutboxStatus.DEAD_LETTER
+            event.last_error = "lease_expired_unknown_delivery_state"
+            self._clear_lease(event)
+
+        self._session.flush()
+        return expired
 
     def mark_sent(
         self,
