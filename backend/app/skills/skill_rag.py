@@ -33,6 +33,7 @@ class RagSkill(BaseSkill):
     name: str = "rag_skill"
     display_name: str = "RAG知识库"
     description: str = "管理知识库并检索相关信息以增强AI回复"
+    category: str = "ai"
     icon: str = "Document"
     version: str = "1.0.0"
     

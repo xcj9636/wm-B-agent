@@ -116,6 +116,10 @@ class AgentOrchestrator:
             return execution.to_dict()
         return None
 
+    def list_execution_statuses(self) -> List[Dict[str, Any]]:
+        """Return all live execution summaries for operator visibility."""
+        return self.workflow_engine.list_executions()
+
     async def handle_interrupt(
         self,
         execution_id: str,
@@ -154,7 +158,7 @@ class AgentOrchestrator:
 
         elif action == "takeover":
             # Mark execution as paused for manual takeover
-            execution.pause("manual_takeover")
+            execution.pause()
             execution.context.set_state("manual_takeover", True)
             if data:
                 execution.context.set_state("takeover_data", data)

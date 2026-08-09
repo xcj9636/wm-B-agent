@@ -236,19 +236,33 @@ class WorkflowExecution:
         return self._cancel_event.is_set()
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
+        """Return the stable, secret-free execution API representation."""
+        total_steps = len(self.workflow.steps)
+        finished_steps = len(self.completed_steps) + len(self.failed_steps) + len(self.paused_steps)
+        progress = 100 if self.status == WorkflowStatus.COMPLETED else (
+            round((finished_steps / total_steps) * 100) if total_steps else 0
+        )
+        duration = None
+        if self.started_at:
+            end = self.completed_at or datetime.utcnow()
+            duration = round((end - self.started_at).total_seconds(), 3)
+
         return {
-            "execution_id": self.execution_id,
-            "workflow_name": self.workflow.name,
+            "id": self.execution_id,
+            "workflow_id": self.workflow.name,
             "status": self.status.value,
             "current_step": self.current_step,
             "completed_steps": self.completed_steps,
             "failed_steps": self.failed_steps,
-            "paused_steps": self.paused_steps,
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "error_message": self.error_message,
-            "context": self.context.to_dict(),
+            "finished_at": self.completed_at.isoformat() if self.completed_at else None,
+            "error_msg": self.error_message,
+            "metrics": {
+                "progress": progress,
+                "total_steps": total_steps,
+                "skipped_steps": len(self.paused_steps),
+                "duration_seconds": duration,
+            },
         }
 
 
@@ -268,6 +282,15 @@ class WorkflowEngine:
         if execution_id not in self._callbacks:
             self._callbacks[execution_id] = []
         self._callbacks[execution_id].append(callback)
+
+    def list_executions(self) -> List[Dict[str, Any]]:
+        """List live executions, newest first."""
+        executions = [execution.to_dict() for execution in self._executions.values()]
+        return sorted(
+            executions,
+            key=lambda item: item.get("started_at") or "",
+            reverse=True,
+        )
 
     def _notify_callbacks(self, execution_id: str, execution: WorkflowExecution):
         """Notify registered callbacks of updates"""

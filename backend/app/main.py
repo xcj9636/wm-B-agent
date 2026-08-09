@@ -77,10 +77,11 @@ async def root():
 
 
 # Import routers
-from app.api.v1 import auth, workflow, skill, customer, conversation, stats, admin
+from app.api.v1 import agent, auth, workflow, skill, customer, conversation, stats, admin
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(agent.router, prefix="/api/v1/agent", tags=["Agent"])
 app.include_router(workflow.router, prefix="/api/v1/workflows", tags=["Workflows"])
 app.include_router(skill.router, prefix="/api/v1/skills", tags=["Skills"])
 app.include_router(customer.router, prefix="/api/v1/customers", tags=["Customers"])
