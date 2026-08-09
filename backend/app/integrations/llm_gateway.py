@@ -35,6 +35,8 @@ class LLMGatewayClient:
             for provider in allowed_providers
             if provider.strip()
         }
+        if not self._allowed_providers:
+            raise ValueError("OmniRoute provider allowlist cannot be empty")
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -274,9 +276,6 @@ class LLMGatewayClient:
         provider: Optional[str],
         request_id: UUID,
     ) -> None:
-        if not self._allowed_providers:
-            return
-
         normalized = provider.strip().lower() if provider else ""
         if normalized not in self._allowed_providers:
             raise GatewayError(

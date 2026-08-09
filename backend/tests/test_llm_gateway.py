@@ -35,7 +35,11 @@ def gateway_client(handler, aliases=None, allowed_providers=None):
             if aliases is not None
             else {LLMUseCase.LEAD_CLASSIFICATION: "b-agent-intent-cheap-v1"}
         ),
-        allowed_providers=allowed_providers or [],
+        allowed_providers=(
+            allowed_providers
+            if allowed_providers is not None
+            else ["approved-provider"]
+        ),
         http_client=http_client,
     )
 
@@ -128,7 +132,14 @@ async def test_stream_parses_sse_comments_done_and_final_usage():
                 "",
             ]
         )
-        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200,
+            content=body,
+            headers={
+                "content-type": "text/event-stream",
+                "X-OmniRoute-Provider": "approved-provider",
+            },
+        )
 
     client = gateway_client(handler)
 
@@ -195,7 +206,11 @@ async def test_timeout_is_retryable_before_any_response():
 @pytest.mark.asyncio
 async def test_invalid_json_is_not_retryable():
     client = gateway_client(
-        lambda request: httpx.Response(200, content=b"not-json")
+        lambda request: httpx.Response(
+            200,
+            content=b"not-json",
+            headers={"X-OmniRoute-Provider": "approved-provider"},
+        )
     )
 
     with pytest.raises(GatewayError) as raised:
