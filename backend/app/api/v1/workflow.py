@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import datetime
+from uuid import UUID
 
 from app.db import get_db
 from app.models import database as models
@@ -13,10 +14,32 @@ from app.models.schemas import (
     ExecutionResponse, ExecutionInterruptRequest
 )
 from app.core.agent import get_agent
-from app.core.workflow_engine import WorkflowDefinition, StepDefinition, Transition
+from app.core.workflow_engine import WorkflowDefinition
 from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
+
+
+def _build_definition(
+    *,
+    name: str,
+    description: Optional[str],
+    version: str,
+    steps: List[dict],
+    transitions: List[dict],
+    variables: dict,
+) -> WorkflowDefinition:
+    """Build the engine definition through its canonical deserializer."""
+    return WorkflowDefinition.from_dict(
+        {
+            "name": name,
+            "description": description or "",
+            "version": version,
+            "steps": steps,
+            "transitions": transitions,
+            "variables": variables,
+        }
+    )
 
 
 @router.get("", response_model=List[WorkflowResponse])
@@ -44,37 +67,12 @@ async def create_workflow(
     db: Session = Depends(get_db)
 ):
     """创建工作流"""
-    # Build workflow definition
-    steps = [
-        StepDefinition(
-            name=s.name,
-            skill_name=s.skill_name,
-            config=s.config,
-            condition=s.condition,
-            condition_expression=s.condition_expression,
-            retry_on_failure=s.retry_on_failure,
-            max_retries=s.max_retries,
-            timeout=s.timeout,
-            on_failure_action=s.on_failure_action,
-        )
-        for s in workflow.steps
-    ]
-
-    transitions = [
-        Transition(
-            from_step=t.from_step,
-            to_step=t.to_step,
-            condition=t.condition,
-        )
-        for t in workflow.transitions
-    ]
-
-    definition = WorkflowDefinition(
+    definition = _build_definition(
         name=workflow.name,
         description=workflow.description,
         version=workflow.version,
-        steps=steps,
-        transitions=transitions,
+        steps=[step.model_dump() for step in workflow.steps],
+        transitions=[transition.model_dump() for transition in workflow.transitions],
         variables=workflow.variables,
     )
 
@@ -102,7 +100,7 @@ async def create_workflow(
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(
-    workflow_id: str,
+    workflow_id: UUID,
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -120,7 +118,7 @@ async def get_workflow(
 
 @router.put("/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(
-    workflow_id: str,
+    workflow_id: UUID,
     workflow_update: WorkflowUpdate,
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -134,53 +132,30 @@ async def update_workflow(
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Update fields
     update_data = workflow_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         if key in ["steps", "transitions", "variables"]:
-            continue  # Handle separately
+            continue
+        if key == "status" and value is not None:
+            value = models.WorkflowStatus(value.value)
         setattr(workflow, key, value)
 
-    # Rebuild definition if steps or transitions changed
-    if "steps" in update_data or "transitions" in update_data:
-        current_config = workflow.config_json or {}
-        steps_data = update_data.get("steps", current_config.get("steps", []))
-        transitions_data = update_data.get("transitions", current_config.get("transitions", []))
-
-        steps = [
-            models.WorkflowStep(
-                name=s["name"],
-                skill_name=s["skill_name"],
-                config=s.get("config", {}),
-                condition=s.get("condition", "always"),
-                condition_expression=s.get("condition_expression"),
-                retry_on_failure=s.get("retry_on_failure", True),
-                max_retries=s.get("max_retries", 3),
-                timeout=s.get("timeout"),
-                on_failure_action=s.get("on_failure_action"),
-            )
-            for s in steps_data
-        ]
-
-        transitions = [
-            models.WorkflowTransition(
-                from_step=t["from_step"],
-                to_step=t["to_step"],
-                condition=t.get("condition"),
-            )
-            for t in transitions_data
-        ]
-
-        definition = WorkflowDefinition(
-            name=workflow.name,
-            description=workflow.description,
-            version=workflow.version,
-            steps=steps,
-            transitions=transitions,
-            variables=workflow_update.get("variables", current_config.get("variables", {})),
-        )
-
-        workflow.config_json = definition.to_dict()
+    current_config = workflow.config_json or {}
+    variables = update_data.get(
+        "variables", workflow.variables or current_config.get("variables", {})
+    )
+    definition = _build_definition(
+        name=workflow.name,
+        description=workflow.description,
+        version=workflow.version,
+        steps=update_data.get("steps", current_config.get("steps", [])),
+        transitions=update_data.get(
+            "transitions", current_config.get("transitions", [])
+        ),
+        variables=variables,
+    )
+    workflow.variables = variables
+    workflow.config_json = definition.to_dict()
 
     db.commit()
     db.refresh(workflow)
@@ -194,7 +169,7 @@ async def update_workflow(
 
 @router.delete("/{workflow_id}")
 async def delete_workflow(
-    workflow_id: str,
+    workflow_id: UUID,
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -215,7 +190,7 @@ async def delete_workflow(
 
 @router.post("/{workflow_id}/execute")
 async def execute_workflow(
-    workflow_id: str,
+    workflow_id: UUID,
     request: WorkflowExecuteRequest,
     current_user: models.User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -229,8 +204,9 @@ async def execute_workflow(
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Get agent and execute
     agent = get_agent()
+    definition = WorkflowDefinition.from_dict(workflow.config_json)
+    agent.register_workflow(definition)
 
     async def execution_generator():
         import json
