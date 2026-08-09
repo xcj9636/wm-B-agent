@@ -61,6 +61,28 @@ def test_alembic_baseline_is_present():
     assert any(versions.glob("*.py"))
 
 
+def test_runtime_schema_changes_are_owned_by_alembic():
+    main = (
+        REPOSITORY_ROOT / "backend" / "app" / "main.py"
+    ).read_text(encoding="utf-8")
+    create_admin = (
+        REPOSITORY_ROOT / "backend" / "scripts" / "create_admin.py"
+    ).read_text(encoding="utf-8")
+
+    assert "init_db" not in main
+    assert "init_db" not in create_admin
+
+
+def test_compose_runs_migrations_before_database_consumers():
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "  migrate:" in compose
+    assert "command: alembic upgrade head" in compose
+    assert compose.count("condition: service_completed_successfully") >= 3
+
+
 def test_ci_covers_backend_frontend_and_compose_gates():
     workflow = (
         REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
