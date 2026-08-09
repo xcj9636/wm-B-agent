@@ -95,6 +95,7 @@ def test_agent_chat_queue_runner_claims_only_supported_runs(
     assert result == {
         "claimed": 1,
         "completed": 1,
+        "requeued": 0,
         "failed": 0,
         "lease_conflict": 0,
     }

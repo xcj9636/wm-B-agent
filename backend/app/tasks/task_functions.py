@@ -78,6 +78,7 @@ def sweep_agent_runs_task():
 async def _resume_claimed_chat_runs(db, runs, *, worker_id: str):
     counters = {
         "completed": 0,
+        "requeued": 0,
         "failed": 0,
         "lease_conflict": 0,
     }
@@ -98,14 +99,18 @@ async def _resume_claimed_chat_runs(db, runs, *, worker_id: str):
             except RunLeaseConflict:
                 counters["lease_conflict"] += 1
             except Exception as exc:
-                counters["failed"] += 1
-                logger.warning(
-                    "Queued AI chat run failed",
-                    extra={
-                        "run_id": str(run.id),
-                        "error_type": type(exc).__name__,
-                    },
-                )
+                db.refresh(run)
+                if run.status == "queued":
+                    counters["requeued"] += 1
+                else:
+                    counters["failed"] += 1
+                    logger.warning(
+                        "Queued AI chat run failed",
+                        extra={
+                            "run_id": str(run.id),
+                            "error_type": type(exc).__name__,
+                        },
+                    )
     finally:
         try:
             await close_agent_concurrency_limiter()
@@ -149,6 +154,7 @@ def run_agent_chat_runs_task(
         counters = {
             "claimed": len(runs),
             "completed": 0,
+            "requeued": 0,
             "failed": 0,
             "lease_conflict": 0,
         }
