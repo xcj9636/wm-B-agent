@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from app.integrations.email_service import get_email_service
 from app.integrations.whatsapp_service import get_whatsapp_service
 from app.models.database import Account, OutboxEvent
+from app.services.mailbox_oauth import MailboxCredentialService, MailboxOAuthError
 from app.services.outbox import DeliveryFailureKind
 
 
@@ -55,15 +56,18 @@ class OutboxDeliveryRouter:
         account_loader: Optional[Callable[[int], Optional[Account]]] = None,
         email_service_factory: Optional[Callable[[str], object]] = None,
         whatsapp_service=None,
+        credential_service=None,
     ) -> None:
         self._email_service = email_service
         self._account_loader = account_loader
         self._email_service_factory = email_service_factory or get_email_service
         self._whatsapp_service = whatsapp_service
+        self._credential_service = credential_service
 
     def bind_session(self, session) -> None:
         """Bind account lookup after construction without exposing credentials."""
         self._account_loader = lambda account_id: session.get(Account, account_id)
+        self._credential_service = MailboxCredentialService(session)
 
     async def deliver(self, event: OutboxEvent) -> DeliveryResult:
         try:
@@ -130,7 +134,18 @@ class OutboxDeliveryRouter:
                 DeliveryFailureKind.PERMANENT,
                 "unsupported_email_provider",
             )
-        access_token = (account.credentials_json or {}).get("access_token")
+        if not account.credential_secret_ref or self._credential_service is None:
+            return DeliveryResult.failed(
+                DeliveryFailureKind.PERMANENT,
+                "sender_account_not_connected",
+            )
+        try:
+            access_token = await self._credential_service.access_token(account)
+        except MailboxOAuthError as exc:
+            return DeliveryResult.failed(
+                DeliveryFailureKind.PERMANENT,
+                exc.error_code,
+            )
         if not isinstance(access_token, str) or not access_token:
             return DeliveryResult.failed(
                 DeliveryFailureKind.PERMANENT,
@@ -205,4 +220,8 @@ def get_outbox_delivery_router(session=None) -> OutboxDeliveryRouter:
     loader = None
     if session is not None:
         loader = lambda account_id: session.get(Account, account_id)
-    return OutboxDeliveryRouter(account_loader=loader)
+    credentials = MailboxCredentialService(session) if session is not None else None
+    return OutboxDeliveryRouter(
+        account_loader=loader,
+        credential_service=credentials,
+    )

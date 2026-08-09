@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     OMNIROUTE_API_KEY_FILE: str = ""
     AI_RUNTIME_SECRET_FILE: str = "./data/secrets/omniroute_api_key"
     CONNECTOR_SECRET_DIR: str = "./data/secrets/connectors"
+    MAILBOX_SECRET_DIR: str = "./data/secrets/mailboxes"
     OMNIROUTE_ALLOWED_PROVIDERS: List[str] = []
     OMNIROUTE_TIMEOUT_SECONDS: float = 60.0
     OMNIROUTE_MODEL_LEAD_CLASSIFICATION: str = ""
@@ -64,13 +65,16 @@ class Settings(BaseSettings):
     # Gmail API
     GMAIL_CLIENT_ID: str = ""
     GMAIL_CLIENT_SECRET: str = ""
-    GMAIL_REDIRECT_URI: str = "http://localhost:3000/callback/gmail"
+    GMAIL_REDIRECT_URI: str = "http://localhost:8000/api/v1/mailboxes/oauth/callback/gmail"
 
     # Outlook API
     OUTLOOK_CLIENT_ID: str = ""
     OUTLOOK_CLIENT_SECRET: str = ""
-    OUTLOOK_REDIRECT_URI: str = "http://localhost:3000/callback/outlook"
+    OUTLOOK_REDIRECT_URI: str = "http://localhost:8000/api/v1/mailboxes/oauth/callback/outlook"
     OUTLOOK_TENANT_ID: str = "common"
+
+    # Browser origin used after a server-side mailbox OAuth callback.
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
 
     # WhatsApp
     WHATSAPP_PHONE_NUMBER_ID: str = ""

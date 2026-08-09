@@ -237,7 +237,10 @@ class AgentDeliveryService:
             raise DeliveryConflict("Selected sender account is not verified")
         if not account.email:
             raise DeliveryConflict("Selected sender account has no email address")
-        if not (account.credentials_json or {}).get("access_token"):
+        if not (
+            account.connection_status == "connected"
+            and account.credential_secret_ref
+        ):
             raise DeliveryConflict("Selected sender account is not connected")
         reserved_query = self._db.query(AgentOutreachDelivery).filter(
             AgentOutreachDelivery.account_id == account.id,

@@ -5,6 +5,8 @@ from pathlib import Path
 import stat
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 from app.api.v1.mailboxes import get_mailbox_oauth_service
 from app.config import settings
 from app.main import app
@@ -204,6 +206,7 @@ def test_oauth_rejects_open_redirect_and_wrong_provider_state(api_context, tmp_p
     assert provider.exchanges == []
 
 
+@pytest.mark.asyncio
 async def test_expired_access_token_is_refreshed_server_side_without_losing_refresh_token(
     api_context,
     tmp_path,

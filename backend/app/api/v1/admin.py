@@ -181,6 +181,11 @@ async def create_account(
     db: Session = Depends(get_db)
 ):
     """创建账号"""
+    if account.account_type in {"gmail", "outlook"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Connect Gmail and Microsoft accounts through mailbox OAuth",
+        )
     # Check for duplicates
     existing = db.query(Account).filter(
         Account.email == account.email,
@@ -245,6 +250,13 @@ async def update_account(
         raise HTTPException(status_code=404, detail="Account not found")
 
     update_data = account_update.model_dump(exclude_unset=True)
+    if "credentials" in update_data:
+        if account.account_type in {"gmail", "outlook"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Reconnect Gmail and Microsoft accounts through mailbox OAuth",
+            )
+        update_data["credentials_json"] = update_data.pop("credentials")
     for key, value in update_data.items():
         setattr(account, key, value)
 

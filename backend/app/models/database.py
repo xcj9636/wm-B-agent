@@ -841,8 +841,16 @@ class Account(Base):
     email = Column(String(255))
     phone_number = Column(String(20))
 
-    # Credentials (encrypted in production)
+    # Legacy only. OAuth credentials live in a backend-only 0600 secret file.
     credentials_json = Column(JSON)
+    credential_secret_ref = Column(String(1024))
+    oauth_subject = Column(String(255))
+    oauth_scopes_json = Column(JSON)
+    token_expires_at = Column(DateTime)
+    connection_status = Column(String(30), nullable=False, default="reconnect_required")
+    credential_version = Column(Integer, nullable=False, default=0)
+    last_verified_at = Column(DateTime)
+    last_error_code = Column(String(100))
 
     # Status
     is_active = Column(Boolean, default=True)
@@ -863,7 +871,30 @@ class Account(Base):
 
     __table_args__ = (
         Index('idx_account_user_type', 'user_id', 'account_type'),
-        UniqueConstraint('email', 'account_type', name='uq_account_email_type'),
+        UniqueConstraint(
+            'user_id', 'email', 'account_type', name='uq_account_user_email_type'
+        ),
+    )
+
+
+class MailboxOAuthSession(Base):
+    """Short-lived, one-time server-side OAuth handshake state."""
+    __tablename__ = "mailbox_oauth_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider = Column(String(20), nullable=False)
+    state_hash = Column(String(64), nullable=False, unique=True, index=True)
+    code_verifier_ref = Column(String(1024), nullable=False)
+    return_to = Column(String(255), nullable=False, default="/settings")
+    status = Column(String(20), nullable=False, default="pending")
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime)
+    error_code = Column(String(100))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_mailbox_oauth_user_status", "user_id", "status", "created_at"),
     )
 
 

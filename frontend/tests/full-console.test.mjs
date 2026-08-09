@@ -31,6 +31,7 @@ test('the console exposes every backend operating surface', () => {
 test('settings can configure and verify the backend API at runtime', () => {
   const runtimeConfig = source('src/api/runtimeConfig.ts')
   const api = source('src/api/index.ts')
+  const mailboxes = source('src/api/mailboxes.ts')
   const settings = source('src/views/Settings.vue')
 
   assert.match(runtimeConfig, /backend_api_url/)
@@ -39,7 +40,8 @@ test('settings can configure and verify the backend API at runtime', () => {
   assert.match(api, /resolveBackendApiUrl/)
   assert.match(settings, /testBackendConnection/)
   assert.match(settings, /\/health/)
-  assert.match(settings, /\/api\/v1\/admin\/accounts/)
+  assert.match(settings, /mailboxApi\.list/)
+  assert.match(mailboxes, /\/api\/v1\/mailboxes/)
   assert.doesNotMatch(settings, /apiProviders|your-api-key|Mock data/i)
 })
 

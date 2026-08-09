@@ -334,44 +334,66 @@ class OutlookEmailService(EmailService):
         if not access_token:
             raise ValueError("access_token is required for Outlook API")
 
-        # Build message
+        # Create a draft with an immutable ID so the exact sent copy can be
+        # verified after Microsoft moves it into Sent Items.
         message_body = {
-            "message": {
-                "subject": subject,
-                "body": {
-                    "contentType": "HTML" if html else "Text",
-                    "content": html or body
-                },
-                "toRecipients": [
-                    {"emailAddress": {"address": to}}
-                ]
-            }
+            "subject": subject,
+            "body": {
+                "contentType": "HTML" if html else "Text",
+                "content": html or body,
+            },
+            "toRecipients": [{"emailAddress": {"address": to}}],
         }
 
         if from_email:
-            message_body["message"]["from"] = {"emailAddress": {"address": from_email}}
+            message_body["from"] = {"emailAddress": {"address": from_email}}
 
         if reply_to:
-            message_body["message"]["replyTo"] = [
+            message_body["replyTo"] = [
                 {"emailAddress": {"address": reply_to}}
             ]
 
-        # Send via Microsoft Graph API
-        url = f"https://graph.microsoft.com/v1.0/users/{from_email or 'me'}/sendMail"
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Prefer": 'IdType="ImmutableId"',
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=message_body, headers=headers)
-            response.raise_for_status()
+            draft = await client.post(
+                "https://graph.microsoft.com/v1.0/me/messages",
+                json=message_body,
+                headers=headers,
+            )
+            draft.raise_for_status()
+            message_id = draft.json().get("id")
+            if not message_id:
+                raise ValueError("Microsoft Graph did not return a draft ID")
+            sent = await client.post(
+                f"https://graph.microsoft.com/v1.0/me/messages/{message_id}/send",
+                headers=headers,
+            )
+            sent.raise_for_status()
 
         return {
             "success": True,
             "to": to,
-            "sent_at": datetime.utcnow().isoformat()
+            "sent_at": datetime.utcnow().isoformat(),
+            "message_id": message_id,
         }
+
+    async def verify_sent(self, *, message_id: str, access_token: str) -> bool:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Prefer": 'IdType="ImmutableId"',
+        }
+        url = f"https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages/{message_id}?$select=id"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        return response.json().get("id") == message_id
 
     async def send_bulk_emails(
         self,

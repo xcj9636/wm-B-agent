@@ -285,6 +285,41 @@
             </div>
           </template>
 
+          <div class="mailbox-connect-grid">
+            <article
+              v-for="provider in mailboxProviders"
+              :key="provider.provider"
+              class="mailbox-connect-card"
+            >
+              <div
+                class="mailbox-provider-mark"
+                :class="provider.provider"
+              >
+                {{ provider.provider === 'gmail' ? 'G' : 'M' }}
+              </div>
+              <div class="mailbox-provider-copy">
+                <strong>{{ provider.display_name }}</strong>
+                <span>
+                  {{ provider.configured
+                    ? $t('OAuth is configured on the backend.')
+                    : $t('Configure OAuth credentials on the backend first.') }}
+                </span>
+              </div>
+              <el-button
+                type="primary"
+                plain
+                :disabled="!provider.configured"
+                :loading="connectingProvider === provider.provider"
+                @click="startMailboxOAuth(provider.provider)"
+              >
+                {{ provider.provider === 'gmail' ? $t('Connect Gmail') : $t('Connect Microsoft') }}
+              </el-button>
+            </article>
+          </div>
+          <p class="mailbox-security-note">
+            {{ $t('OAuth credentials stay in backend-only storage and are never sent to this browser.') }}
+          </p>
+
           <el-alert
             v-if="accountsError"
             :title="accountsError"
@@ -317,14 +352,14 @@
             />
             <el-table-column
               :label="$t('State')"
-              width="120"
+              width="150"
             >
               <template #default="{ row }">
                 <el-tag
-                  :type="row.is_active && row.is_verified ? 'success' : 'info'"
+                  :type="row.connection_status === 'connected' ? 'success' : 'warning'"
                   effect="plain"
                 >
-                  {{ $t(row.is_active ? (row.is_verified ? 'Ready' : 'Unverified') : 'Disabled') }}
+                  {{ $t(row.connection_status === 'connected' ? 'Ready' : 'Reconnect required') }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -403,34 +438,33 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, updateBackendApiUrl } from '@/api'
 import { aiApi, type AIRuntimeConfigUpdate } from '@/api/ai'
+import {
+  mailboxApi,
+  type MailboxAccount,
+  type MailboxOAuthProvider,
+  type MailboxProvider,
+} from '@/api/mailboxes'
 import { resolveBackendApiUrl } from '@/api/runtimeConfig'
 import { useAuthStore } from '@/stores/auth'
 import { translate } from '@/i18n'
 
 interface HealthResponse { status: string; app?: string; version?: string }
-interface AccountResponse {
-  id: number
-  account_type: string
-  name: string
-  email?: string
-  phone_number?: string
-  is_active: boolean
-  is_verified: boolean
-  daily_limit: number
-  today_sent: number
-}
-
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const backendUrl = ref(resolveBackendApiUrl())
 const effectiveUrl = ref(resolveBackendApiUrl())
 const testingConnection = ref(false)
 const connectionState = ref<'idle' | 'healthy' | 'failed'>('idle')
 const connectionMessage = ref('')
 const health = ref<HealthResponse | null>(null)
-const accounts = ref<AccountResponse[]>([])
+const accounts = ref<MailboxAccount[]>([])
+const mailboxProviders = ref<MailboxOAuthProvider[]>([])
+const connectingProvider = ref<MailboxProvider | ''>('')
 const accountsError = ref('')
 const loadingAccounts = ref(false)
 const loadingAiConfig = ref(false)
@@ -502,14 +536,38 @@ async function loadAccounts() {
   loadingAccounts.value = true
   accountsError.value = ''
   try {
-    const response = await api.get<AccountResponse[]>('/api/v1/admin/accounts')
-    accounts.value = response.data
+    const [providers, linkedAccounts] = await Promise.all([
+      mailboxApi.providers(),
+      mailboxApi.list(),
+    ])
+    mailboxProviders.value = providers
+    accounts.value = linkedAccounts
   } catch {
     accounts.value = []
     accountsError.value = translate('Accounts are unavailable. Verify the connection and your access permissions.')
   } finally {
     loadingAccounts.value = false
   }
+}
+
+async function startMailboxOAuth(provider: MailboxProvider) {
+  connectingProvider.value = provider
+  try {
+    const result = await mailboxApi.startOAuth(provider)
+    window.location.assign(result.authorization_url)
+  } catch {
+    ElMessage.error(translate('Mailbox authorization could not be started.'))
+    connectingProvider.value = ''
+  }
+}
+
+async function consumeMailboxOAuthResult() {
+  if (route.query.mailbox_oauth !== 'success') return
+  ElMessage.success(translate('Mailbox connected successfully.'))
+  const query = { ...route.query }
+  delete query.mailbox_oauth
+  delete query.provider
+  await router.replace({ query })
 }
 
 async function loadAiConfig() {
@@ -581,11 +639,12 @@ async function discoverAiModels() {
   }
 }
 
-function usagePercentage(account: AccountResponse) {
+function usagePercentage(account: MailboxAccount) {
   return Math.min(100, Math.round((account.today_sent / Math.max(account.daily_limit, 1)) * 100))
 }
 
 onMounted(() => {
+  void consumeMailboxOAuthResult()
   void loadAccounts()
   void loadAiConfig()
 })
@@ -593,6 +652,7 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .settings-card { margin-bottom: 16px; }
+.settings-page, .settings-page > *, .settings-page :deep(.el-col) { min-width: 0; }
 .card-title { display: flex; align-items: center; gap: 10px; }
 .card-title > div { display: grid; flex: 1; gap: 2px; }
 .card-title span, .profile span, .account-name span { color: var(--el-text-color-secondary); font-size: 12px; }
@@ -604,6 +664,21 @@ onMounted(() => {
 .alias-grid :deep(.el-select), .settings-card :deep(.el-input-number) { width: 100%; }
 .profile { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
 .profile > div, .account-name { display: grid; gap: 3px; }
+.mailbox-connect-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+.mailbox-connect-card { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--el-border-color-lighter); border-radius: 16px; background: color-mix(in srgb, var(--el-fill-color-light) 70%, transparent); }
+.mailbox-provider-mark { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px; color: #fff; font-weight: 700; background: #2563eb; }
+.mailbox-provider-mark.gmail { background: linear-gradient(135deg, #4285f4, #ea4335); }
+.mailbox-provider-mark.outlook { background: linear-gradient(135deg, #0078d4, #28a8ea); }
+.mailbox-provider-copy { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.mailbox-provider-copy span, .mailbox-security-note { color: var(--el-text-color-secondary); font-size: 12px; }
+.mailbox-security-note { margin: 0 0 16px; }
 .behavior-list { margin: 0; padding-left: 20px; color: var(--el-text-color-regular); line-height: 1.7; }
-@media (max-width: 640px) { .form-actions > * { flex: 1 1 100%; } .alias-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .settings-page .page-heading { align-items: stretch; flex-wrap: wrap; }
+  .settings-page .page-heading > .el-button { width: 100%; margin-left: 0; }
+  .form-actions > * { flex: 1 1 100%; min-width: 0; width: 100%; margin-left: 0 !important; }
+  .alias-grid, .mailbox-connect-grid { grid-template-columns: minmax(0, 1fr); width: 100%; }
+  .mailbox-connect-card { flex-wrap: wrap; min-width: 0; }
+  .mailbox-connect-card > .el-button { width: 100%; margin-left: 0; }
+}
 </style>

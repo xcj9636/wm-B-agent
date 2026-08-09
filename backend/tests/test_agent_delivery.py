@@ -67,7 +67,9 @@ def seed_approved_email_draft(db, user, *, suffix="one"):
         account_type="gmail",
         name="Export sales",
         email="sales@example.com",
-        credentials_json={"access_token": "backend-only-secret"},
+        credentials_json=None,
+        credential_secret_ref="/backend-only/mailbox.json",
+        connection_status="connected",
         is_active=True,
         is_verified=True,
         daily_limit=100,
@@ -250,6 +252,12 @@ class FakeVerifiedEmailService:
         return self.verified
 
 
+class FakeCredentialService:
+    async def access_token(self, account):
+        assert account.credential_secret_ref == "/backend-only/mailbox.json"
+        return "backend-only-secret"
+
+
 @pytest.mark.asyncio
 async def test_email_delivery_uses_selected_account_and_requires_sent_verification(
     api_context,
@@ -260,6 +268,7 @@ async def test_email_delivery_uses_selected_account_and_requires_sent_verificati
     router = OutboxDeliveryRouter(
         account_loader=lambda account_id: db.get(Account, account_id),
         email_service_factory=lambda provider: service,
+        credential_service=FakeCredentialService(),
     )
     event = OutboxEvent(
         channel="email",
