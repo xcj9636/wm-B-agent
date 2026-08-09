@@ -61,6 +61,19 @@ def test_alembic_baseline_is_present():
     assert any(versions.glob("*.py"))
 
 
+def test_alembic_baseline_does_not_import_runtime_models():
+    baseline = (
+        REPOSITORY_ROOT
+        / "backend"
+        / "alembic"
+        / "versions"
+        / "0001_initial_schema.py"
+    ).read_text(encoding="utf-8")
+
+    assert "Base.metadata" not in baseline
+    assert "app.models" not in baseline
+
+
 def test_runtime_schema_changes_are_owned_by_alembic():
     main = (
         REPOSITORY_ROOT / "backend" / "app" / "main.py"
