@@ -425,7 +425,6 @@ def test_schedule_task_persists_batch_delivery_spacing(session_factory):
 @pytest.mark.asyncio
 async def test_auto_sender_persists_spacing_without_blocking_sleep(
     session_factory,
-    monkeypatch,
 ):
     first_customer_id, account_id = create_customer_and_account(session_factory)
     session = session_factory()
@@ -441,16 +440,12 @@ async def test_auto_sender_persists_spacing_without_blocking_sleep(
     finally:
         session.close()
 
-    async def blocking_sleep_forbidden(*args, **kwargs):
-        raise AssertionError("producer must not sleep between durable queue writes")
-
     skill = AutoSenderSkill(
         {
             "dry_run": False,
             "enable_account_rotation": True,
         }
     )
-    monkeypatch.setattr(skill, "_random_delay", blocking_sleep_forbidden)
     context = ExecutionContext(
         workflow_id="workflow-spacing",
         execution_id="execution-spacing",

@@ -7,7 +7,6 @@ Skill 5: 自动化触达发送
 - 多账号轮换
 - 状态回传
 """
-import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import random
@@ -387,15 +386,6 @@ class AutoSenderSkill(BaseSkill):
         # Simple implementation - just return delayed time
         # In production, would convert to target timezone and adjust to business hours
         return now
-
-    async def _random_delay(self, schedule: Optional[Dict[str, Any]] = None):
-        """Random delay between sends"""
-        interval_min = schedule.get("interval_min", 30) if schedule else 30
-        interval_max = schedule.get("interval_max", 120) if schedule else 120
-
-        delay = random.randint(interval_min, interval_max)
-        await asyncio.sleep(delay)
-
 
 @register_skill
 class ScheduleOutreachSkill(BaseSkill):
