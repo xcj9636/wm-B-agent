@@ -534,6 +534,11 @@ class ResearchOutreachDraft(Base):
     )
 
     research_job = relationship("AgentResearchJob", back_populates="drafts")
+    deliveries = relationship(
+        "AgentOutreachDelivery",
+        back_populates="draft",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -542,6 +547,64 @@ class ResearchOutreachDraft(Base):
             name="uq_research_draft_user_idempotency",
         ),
         Index("idx_research_draft_job_status", "research_job_id", "status"),
+    )
+
+
+class AgentOutreachDelivery(Base):
+    """Approval-gated, account-bound delivery snapshot for one research draft."""
+
+    __tablename__ = "agent_outreach_deliveries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    draft_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("research_outreach_drafts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    customer_id = Column(
+        Integer,
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    channel = Column(String(30), nullable=False)
+    provider = Column(String(30), nullable=False)
+    account_name = Column(String(100), nullable=False)
+    sender = Column(String(255), nullable=False)
+    recipient = Column(String(255), nullable=False)
+    subject = Column(String(255))
+    body = Column(Text, nullable=False)
+    research_version = Column(Integer, nullable=False)
+    status = Column(String(30), nullable=False, default="approval_pending")
+    scheduled_at = Column(DateTime, nullable=False)
+    outbox_event_id = Column(UUID(as_uuid=True), ForeignKey("outbox_events.id"))
+    external_message_id = Column(String(255))
+    error_code = Column(String(100))
+    review_reason = Column(Text)
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    reviewed_at = Column(DateTime)
+    verified_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    draft = relationship("ResearchOutreachDraft", back_populates="deliveries")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_agent_delivery_user_idempotency",
+        ),
+        Index("idx_agent_delivery_user_status", "user_id", "status", "updated_at"),
+        Index("idx_agent_delivery_account_schedule", "account_id", "scheduled_at"),
     )
 
 

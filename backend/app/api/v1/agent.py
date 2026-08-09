@@ -12,6 +12,14 @@ from app.core.agent import get_agent
 from app.core.skill_base import SkillRegistry
 from app.db import get_db
 from app.models.database import User
+from app.services.agent_delivery import (
+    AgentDeliveryService,
+    DeliveryConflict,
+    DeliveryCreate,
+    DeliveryNotFound,
+    DeliveryResponse,
+    DeliveryReview,
+)
 from app.services.agent_research import (
     AgentResearchService,
     DraftCreate,
@@ -98,6 +106,14 @@ def _research_http_error(exc: Exception) -> HTTPException:
             detail=f"AI gateway request failed: {exc.kind.value}",
         )
     return HTTPException(status_code=503, detail="AI runtime is unavailable")
+
+
+def _delivery_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, DeliveryNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, DeliveryConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=503, detail="Delivery workflow is unavailable")
 
 
 @router.get("/overview")
@@ -286,6 +302,58 @@ def review_research_draft(
         )
     except (ResearchNotFound, ResearchConflict) as exc:
         raise _research_http_error(exc) from exc
+
+
+@router.get("/deliveries", response_model=List[DeliveryResponse])
+def list_agent_deliveries(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return AgentDeliveryService(db).list_deliveries(user_id=current_user.id)
+
+
+@router.post(
+    "/outreach-drafts/{draft_id}/deliveries",
+    response_model=DeliveryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def prepare_agent_delivery(
+    draft_id: UUID,
+    command: DeliveryCreate,
+    response: Response,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        delivery, created = AgentDeliveryService(db).prepare(
+            draft_id,
+            command,
+            user_id=current_user.id,
+        )
+        response.status_code = 201 if created else 200
+        return delivery
+    except (DeliveryNotFound, DeliveryConflict) as exc:
+        raise _delivery_http_error(exc) from exc
+
+
+@router.patch(
+    "/deliveries/{delivery_id}/review",
+    response_model=DeliveryResponse,
+)
+def review_agent_delivery(
+    delivery_id: UUID,
+    command: DeliveryReview,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return AgentDeliveryService(db).review(
+            delivery_id,
+            command,
+            user_id=current_user.id,
+        )
+    except (DeliveryNotFound, DeliveryConflict) as exc:
+        raise _delivery_http_error(exc) from exc
 
 
 @router.get("/runs/{execution_id}")

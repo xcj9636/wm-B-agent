@@ -276,6 +276,24 @@ class GmailEmailService(EmailService):
 
         return results
 
+    async def verify_sent(
+        self,
+        *,
+        message_id: str,
+        access_token: str,
+    ) -> bool:
+        """Confirm Gmail placed the exact provider message in the Sent label."""
+        url = (
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/"
+            f"{message_id}?format=minimal"
+        )
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        return "SENT" in set(data.get("labelIds") or [])
+
     def _replace_variables(self, text: str, variables: Dict[str, str]) -> str:
         """替换模板中的变量"""
         if not text:

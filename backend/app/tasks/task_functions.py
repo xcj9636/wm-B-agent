@@ -14,6 +14,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models.database import (
     Account,
+    AgentOutreachDelivery,
     Conversation,
     Customer,
     OutreachLog,
@@ -169,9 +170,14 @@ def dispatch_outbox_task(
             lease_seconds=180,
         )
         counters["claimed"] = len(events)
+        for event in events:
+            _sync_claimed_agent_delivery(db, event)
         db.commit()  # Persist lease before the first external side effect.
 
         router = get_outbox_delivery_router()
+        bind_session = getattr(router, "bind_session", None)
+        if bind_session is not None:
+            bind_session(db)
         for event in events:
             try:
                 result = asyncio.run(router.deliver(event))
@@ -520,6 +526,37 @@ def _sync_outreach_result(
     completed_at: datetime,
 ) -> None:
     """Update the outreach business record in the worker transaction."""
+    if event.aggregate_type == "agent_outreach_delivery":
+        delivery = db.get(AgentOutreachDelivery, uuid.UUID(event.aggregate_id))
+        if delivery is None:
+            raise RuntimeError("Outbox event has no agent delivery record")
+        if result.success:
+            delivery.status = "sent"
+            delivery.external_message_id = result.external_message_id
+            delivery.verified_at = completed_at
+            delivery.error_code = None
+            account = db.get(Account, delivery.account_id)
+            if account is not None:
+                account.today_sent = (account.today_sent or 0) + 1
+                account.last_used = completed_at
+            customer = db.get(Customer, delivery.customer_id)
+            if customer is not None:
+                customer.first_contacted_at = (
+                    customer.first_contacted_at or completed_at
+                )
+                customer.last_contacted_at = completed_at
+            return
+        delivery.error_code = result.error_code
+        if event.status == OutboxStatus.DEAD_LETTER:
+            delivery.status = (
+                "awaiting_verification"
+                if result.failure_kind.value == "unknown_after_send"
+                else "blocked"
+            )
+        else:
+            delivery.status = "scheduled"
+        return
+
     if event.aggregate_type != "outreach_log":
         return
 
@@ -551,6 +588,13 @@ def _sync_outreach_result(
 
 
 def _sync_expired_outreach(db, event) -> None:
+    if event.aggregate_type == "agent_outreach_delivery":
+        delivery = db.get(AgentOutreachDelivery, uuid.UUID(event.aggregate_id))
+        if delivery is None:
+            raise RuntimeError("Outbox event has no agent delivery record")
+        delivery.status = "awaiting_verification"
+        delivery.error_code = "lease_expired_unknown_delivery_state"
+        return
     if event.aggregate_type != "outreach_log":
         return
 
@@ -559,3 +603,12 @@ def _sync_expired_outreach(db, event) -> None:
         raise RuntimeError("Outbox event has no outreach business record")
     outreach.status = OutreachStatus.FAILED
     outreach.error_msg = "lease_expired_unknown_delivery_state"
+
+
+def _sync_claimed_agent_delivery(db, event) -> None:
+    if event.aggregate_type != "agent_outreach_delivery":
+        return
+    delivery = db.get(AgentOutreachDelivery, uuid.UUID(event.aggregate_id))
+    if delivery is None:
+        raise RuntimeError("Outbox event has no agent delivery record")
+    delivery.status = "dispatching"

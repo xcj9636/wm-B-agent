@@ -1,12 +1,12 @@
 """Conservative delivery adapters for transactional outbox events."""
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.integrations.email_service import get_email_service
 from app.integrations.whatsapp_service import get_whatsapp_service
-from app.models.database import OutboxEvent
+from app.models.database import Account, OutboxEvent
 from app.services.outbox import DeliveryFailureKind
 
 
@@ -52,10 +52,18 @@ class OutboxDeliveryRouter:
         self,
         *,
         email_service=None,
+        account_loader: Optional[Callable[[int], Optional[Account]]] = None,
+        email_service_factory: Optional[Callable[[str], object]] = None,
         whatsapp_service=None,
     ) -> None:
         self._email_service = email_service
+        self._account_loader = account_loader
+        self._email_service_factory = email_service_factory or get_email_service
         self._whatsapp_service = whatsapp_service
+
+    def bind_session(self, session) -> None:
+        """Bind account lookup after construction without exposing credentials."""
+        self._account_loader = lambda account_id: session.get(Account, account_id)
 
     async def deliver(self, event: OutboxEvent) -> DeliveryResult:
         try:
@@ -98,6 +106,64 @@ class OutboxDeliveryRouter:
         to = self._required_string(payload, "to")
         subject = self._required_string(payload, "subject")
         body = self._required_string(payload, "body")
+        account_id = payload.get("account_id")
+        if account_id is None:
+            return await self._deliver_legacy_email(
+                to=to,
+                subject=subject,
+                body=body,
+                payload=payload,
+            )
+        if not isinstance(account_id, int) or self._account_loader is None:
+            return DeliveryResult.failed(
+                DeliveryFailureKind.PERMANENT,
+                "sender_account_unavailable",
+            )
+        account = self._account_loader(account_id)
+        if account is None or not account.is_active or not account.is_verified:
+            return DeliveryResult.failed(
+                DeliveryFailureKind.PERMANENT,
+                "sender_account_unavailable",
+            )
+        if account.account_type not in {"gmail", "outlook"}:
+            return DeliveryResult.failed(
+                DeliveryFailureKind.PERMANENT,
+                "unsupported_email_provider",
+            )
+        access_token = (account.credentials_json or {}).get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            return DeliveryResult.failed(
+                DeliveryFailureKind.PERMANENT,
+                "sender_account_not_connected",
+            )
+        email_service = self._email_service or self._email_service_factory(
+            account.account_type
+        )
+        result = await email_service.send_email(
+            to=to,
+            subject=subject,
+            body=body,
+            html=payload.get("html"),
+            from_email=account.email,
+            reply_to=payload.get("reply_to"),
+            access_token=access_token,
+        )
+        if not result.get("success"):
+            return DeliveryResult.unknown_after_send("email_delivery_failed")
+        message_id = result.get("message_id")
+        verify_sent = getattr(email_service, "verify_sent", None)
+        if not message_id or verify_sent is None:
+            return DeliveryResult.unknown_after_send("sent_copy_not_verified")
+        verified = await verify_sent(
+            message_id=message_id,
+            access_token=access_token,
+        )
+        if not verified:
+            return DeliveryResult.unknown_after_send("sent_copy_not_verified")
+        return DeliveryResult.sent(external_message_id=message_id)
+
+    async def _deliver_legacy_email(self, *, to, subject, body, payload):
+        """Legacy SMTP has no Sent-folder proof and therefore never reports sent."""
         email_service = self._email_service or get_email_service("smtp")
         result = await email_service.send_email(
             to=to,
@@ -108,7 +174,7 @@ class OutboxDeliveryRouter:
         )
         if not result.get("success"):
             return DeliveryResult.unknown_after_send("email_delivery_failed")
-        return DeliveryResult.sent(external_message_id=result.get("message_id"))
+        return DeliveryResult.unknown_after_send("sent_copy_not_verified")
 
     async def _deliver_whatsapp(self, event: OutboxEvent) -> DeliveryResult:
         payload = event.payload_json
@@ -130,5 +196,8 @@ class OutboxDeliveryRouter:
         return value
 
 
-def get_outbox_delivery_router() -> OutboxDeliveryRouter:
-    return OutboxDeliveryRouter()
+def get_outbox_delivery_router(session=None) -> OutboxDeliveryRouter:
+    loader = None
+    if session is not None:
+        loader = lambda account_id: session.get(Account, account_id)
+    return OutboxDeliveryRouter(account_loader=loader)
