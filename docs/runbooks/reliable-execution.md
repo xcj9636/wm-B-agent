@@ -12,7 +12,9 @@
 
 ## 2. 数据库升级
 
-部署应用前备份 PostgreSQL，并在同版本镜像中执行：
+部署应用前备份 PostgreSQL。Compose 部署由一次性 `migrate` 服务执行
+`alembic upgrade head`；backend、Worker 和 Beat 只有在迁移成功后才会启动。
+应用进程和管理脚本不得调用 `create_all`。手工部署时，在同版本镜像中执行：
 
 ```bash
 cd backend
@@ -20,7 +22,11 @@ alembic upgrade head
 alembic current
 ```
 
-当前可靠执行迁移为 `0002_reliable_execution` 和 `0003_outbox_delivery_identity`。先在影子库演练 upgrade、downgrade、再 upgrade；生产回滚应用前，应先确认旧应用不会误读新状态。降级会删除可靠执行表和其中的审计/待投递记录，不能在存在未处理事件时直接执行。
+当前可靠执行迁移为 `0002_reliable_execution`、`0003_outbox_delivery_identity`
+和 `0004_outbox_resolution_approvals`。先在影子库演练 upgrade、downgrade、再
+upgrade；生产回滚应用前，应先确认旧应用不会误读新状态。降级 `0004` 会删除
+审批证据索引和审批记录；存在待审批请求时不得降级。继续降级会删除可靠执行表及
+其中的审计/待投递记录，不能在存在未处理事件时执行。
 
 ## 3. 生产者事务规则
 
@@ -66,11 +72,26 @@ Celery Beat 每 10 秒触发 `dispatch_outbox_task`。Worker 用 `FOR UPDATE SKI
 
 ## 6. 死信处置
 
-1. 暂停相关生产者或 channel，保留事件、租约 token、attempt count、business key 和时间线。
-2. 判断上游是否已经接受消息；优先使用 `external_message_id` 或上游审计记录核对。
+1. 暂停相关生产者或 channel，使用死信列表取得事件 ID，保留租约 token、attempt count、business key 和时间线；payload 不得复制到工单。
+2. 判断上游是否已经接受消息；优先使用上游审计记录或 provider message ID 核对，并把不含密钥/正文的工单或审计路径作为 `evidence_reference`。
 3. `permanent` 先修正配置或数据；`unknown_after_send` 在无法证明“未发送”时不得补发。
-4. 当前版本没有自动 requeue API。需要补发时由双人审批生成新的业务动作和审计记录，不直接修改原事件为 PENDING。
-5. 恢复后观察待处理年龄、死信增量和重复投递投诉。
+4. 两名不同的超级管理员必须提交完全相同的处置结论。接口只记录审批和修改数据库状态，不会在 HTTP 请求内调用外部 provider：
+
+   ```http
+   POST /api/v1/admin/reliable-execution/dead-letters/{event_id}/resolution-approvals
+   Content-Type: application/json
+
+   {
+     "action": "confirmed_not_sent",
+     "evidence_reference": "provider-audit/INC-1234"
+   }
+   ```
+
+   - `confirmed_not_sent`：第二人批准后把事件置为 `retry`，由 Worker 按原业务键重新投递；不得提供 `external_message_id`。
+   - `confirmed_sent`：必须同时提供已核验的 `external_message_id`；第二人批准后仅将事件及关联触达记录对账为 `sent`，不会再次发送。
+   - 同一管理员不能批准两次；两次提交的 action、证据引用和 message ID 任一不同都会返回 `409`。证据引用和消息正文不会出现在响应里。
+
+5. 恢复后观察待处理年龄、死信增量、账号计数和重复投递投诉。
 
 ## 7. 回滚
 

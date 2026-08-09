@@ -2,6 +2,7 @@
 管理后台API
 """
 from typing import List, Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,13 @@ from app.services.llm.status import (
     GatewayReadiness,
     GatewayStatusService,
     get_gateway_status_service,
+)
+from app.services.dead_letter_resolution import (
+    DeadLetterResolutionService,
+    ResolutionApprovalCommand,
+    ResolutionApprovalResponse,
+    ResolutionConflict,
+    ResolutionEventNotFound,
 )
 from app.services.reliable_execution_status import (
     DeadLetterSummary,
@@ -72,6 +80,37 @@ async def list_reliable_execution_dead_letters(
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return status_service.list_dead_letters(channel=channel, limit=limit)
+
+
+@router.post(
+    "/reliable-execution/dead-letters/{event_id}/resolution-approvals",
+    response_model=ResolutionApprovalResponse,
+)
+async def approve_dead_letter_resolution(
+    event_id: UUID,
+    command: ResolutionApprovalCommand,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Approve a secret-free resolution; execution requires two admins."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    service = DeadLetterResolutionService(db)
+    try:
+        result = service.approve(
+            event_id=event_id,
+            admin_user_id=current_user.id,
+            command=command,
+        )
+        db.commit()
+        return result
+    except ResolutionEventNotFound as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ResolutionConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/users", response_model=List[UserResponse])

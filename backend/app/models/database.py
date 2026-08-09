@@ -98,6 +98,20 @@ class OutboxStatus(str, enum.Enum):
     DEAD_LETTER = "dead_letter"
 
 
+class OutboxResolutionAction(str, enum.Enum):
+    """Evidence-backed operator conclusion for a dead-letter event."""
+
+    CONFIRMED_NOT_SENT = "confirmed_not_sent"
+    CONFIRMED_SENT = "confirmed_sent"
+
+
+class OutboxResolutionStatus(str, enum.Enum):
+    """Lifecycle of a two-person dead-letter resolution request."""
+
+    PENDING = "pending"
+    EXECUTED = "executed"
+
+
 class User(Base):
     """User model"""
     __tablename__ = "users"
@@ -637,6 +651,93 @@ class OutboxEvent(Base):
         Index("idx_outbox_dispatch", "status", "available_at"),
         Index("idx_outbox_lease", "status", "lease_until"),
         Index("idx_outbox_aggregate", "aggregate_type", "aggregate_id"),
+    )
+
+
+class OutboxResolutionRequest(Base):
+    """One resolution decision scoped to one dead-letter lifecycle."""
+
+    __tablename__ = "outbox_resolution_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("outbox_events.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    dead_letter_version = Column(DateTime, nullable=False)
+    action = Column(
+        Enum(
+            OutboxResolutionAction,
+            values_callable=lambda values: [value.value for value in values],
+            name="outbox_resolution_action",
+        ),
+        nullable=False,
+    )
+    evidence_reference = Column(String(128), nullable=False)
+    external_message_id = Column(String(255))
+    status = Column(
+        Enum(
+            OutboxResolutionStatus,
+            values_callable=lambda values: [value.value for value in values],
+            name="outbox_resolution_status",
+        ),
+        nullable=False,
+        default=OutboxResolutionStatus.PENDING,
+    )
+    requested_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    executed_at = Column(DateTime)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "dead_letter_version",
+            name="uq_outbox_resolution_cycle",
+        ),
+        Index(
+            "idx_outbox_resolution_event_status",
+            "event_id",
+            "status",
+        ),
+    )
+
+
+class OutboxResolutionApproval(Base):
+    """Approval by one distinct administrator."""
+
+    __tablename__ = "outbox_resolution_approvals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("outbox_resolution_requests.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    approved_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id",
+            "approved_by_user_id",
+            name="uq_outbox_resolution_approver",
+        ),
+        Index("idx_outbox_resolution_approval_request", "request_id"),
     )
 
 
