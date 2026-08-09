@@ -302,6 +302,73 @@ class ContactVerification(Base):
     )
 
 
+class ProspectingSearch(Base):
+    """Durable search record without storing named-person query PII."""
+
+    __tablename__ = "prospecting_searches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider = Column(String(50), nullable=False, default="hunter")
+    mode = Column(String(30), nullable=False)
+    query_json = Column(JSON, nullable=False, default=dict)
+    status = Column(String(30), nullable=False, default="running")
+    connector_version = Column(Integer, nullable=False, default=0)
+    result_count = Column(Integer, nullable=False, default=0)
+    error_code = Column(String(100))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    contacts = relationship(
+        "ProspectingContact",
+        back_populates="search",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("idx_prospecting_search_user_created", "user_id", "created_at"),
+        Index("idx_prospecting_search_status_created", "status", "created_at"),
+    )
+
+
+class ProspectingContact(Base):
+    """Normalized, evidence-backed contact candidate from a search."""
+
+    __tablename__ = "prospecting_contacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    search_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prospecting_searches.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    email = Column(String(255), nullable=False)
+    first_name = Column(String(100))
+    last_name = Column(String(100))
+    company = Column(String(255))
+    domain = Column(String(255))
+    position = Column(String(255))
+    department = Column(String(50))
+    seniority = Column(String(50))
+    contact_type = Column(String(30))
+    confidence = Column(Integer)
+    decision_maker = Column(Boolean)
+    verification_status = Column(String(30), nullable=False, default="unknown")
+    verification_date = Column(String(20))
+    evidence_json = Column(JSON, nullable=False, default=list)
+    imported_customer_id = Column(Integer, ForeignKey("customers.id"))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    search = relationship("ProspectingSearch", back_populates="contacts")
+
+    __table_args__ = (
+        UniqueConstraint("search_id", "email", name="uq_prospecting_search_email"),
+        Index("idx_prospecting_contact_search", "search_id"),
+        Index("idx_prospecting_contact_email", "email"),
+        Index("idx_prospecting_contact_imported", "imported_customer_id"),
+    )
+
+
 class Conversation(Base):
     """Conversation model"""
     __tablename__ = "conversations"

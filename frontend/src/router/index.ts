@@ -53,6 +53,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Workflow Editor' },
       },
       {
+        path: 'prospecting',
+        name: 'Prospecting',
+        component: () => import('@/views/Prospecting.vue'),
+        meta: { title: 'Prospecting' },
+      },
+      {
         path: 'customers',
         name: 'Customers',
         component: () => import('@/views/Customers.vue'),

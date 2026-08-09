@@ -1,6 +1,6 @@
 """Secret-safe Hunter API adapter with explicit provider error semantics."""
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import Depends, HTTPException
@@ -82,6 +82,11 @@ class HunterClient:
         company: Optional[str] = None,
         limit: int = 10,
         offset: int = 0,
+        contact_type: Optional[str] = None,
+        seniorities: Optional[List[str]] = None,
+        departments: Optional[List[str]] = None,
+        decision_maker: Optional[bool] = None,
+        verification_statuses: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         if not domain and not company:
             raise ValueError("domain or company is required")
@@ -92,6 +97,15 @@ class HunterClient:
                 "company": company,
                 "limit": max(1, min(limit, 100)),
                 "offset": max(offset, 0),
+                "type": contact_type,
+                "seniority": ",".join(seniorities or []) or None,
+                "department": ",".join(departments or []) or None,
+                "decision_maker": (
+                    str(decision_maker).lower()
+                    if decision_maker is not None
+                    else None
+                ),
+                "verification_status": ",".join(verification_statuses or []) or None,
             },
         )
 
@@ -103,6 +117,7 @@ class HunterClient:
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         full_name: Optional[str] = None,
+        max_duration: int = 10,
     ) -> Dict[str, Any]:
         if not domain and not company:
             raise ValueError("domain or company is required")
@@ -116,6 +131,7 @@ class HunterClient:
                 "first_name": first_name,
                 "last_name": last_name,
                 "full_name": full_name,
+                "max_duration": max(3, min(max_duration, 20)),
             },
         )
 

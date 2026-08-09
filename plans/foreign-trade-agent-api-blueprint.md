@@ -1,7 +1,7 @@
 # B-agent 外贸业务链路与 API 实施蓝图
 
 > 日期：2026-08-09  
-> 状态：Phase 1 AI control plane and Sprint B1 Hunter connector implemented
+> 状态：Phase 1 AI control plane、Sprint B1 Hunter connector 与 B2 交互式获客链路已实现
 > 范围：单组织部署。浏览器只调用 B-agent API，所有第三方凭据、OAuth token、Webhook secret 和 OmniRoute key 都由后端保管。
 
 ## 1. 产品目标
@@ -282,6 +282,17 @@ AI 只负责理解、生成和辅助决策。抓取、发送、报价、承诺�
 
 前端热加载只代表“配置提交后下一项新任务使用新版本”。正在执行的任务绑定启动时的 connector/config version，避免半途中切换账号或字段映射。
 
+### 4.1 已实现的 Hunter 获客接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/v1/prospecting/searches` | 执行 Domain Search 或 Email Finder，并持久化脱敏查询、connector version、候选联系人和证据 |
+| GET | `/api/v1/prospecting/searches` | 按当前用户列出最近搜索 |
+| GET | `/api/v1/prospecting/searches/{id}` | 按所有者读取搜索和联系人，跨账号访问返回 404 |
+| POST | `/api/v1/prospecting/contacts/import` | 批量导入所选联系人，按标准化邮箱去重并写入来源证据和触达抑制状态 |
+
+Email Finder 的人名只用于本次供应商请求，不写入搜索查询记录；Hunter 451 响应只保留错误码，不持久化候选联系人。浏览器不提供 LinkedIn identifier 输入。`accept_all`、`unknown`、`invalid` 等非 `valid` 结果即使人工导入，也会写入 `contact_suppressed=true`，不能绕过外发门禁。
+
 ## 5. 交付顺序
 
 ### Sprint A：可用的销售副驾，已进入实现
@@ -294,7 +305,8 @@ AI 只负责理解、生成和辅助决策。抓取、发送、报价、承诺�
 ### Sprint B：最短营收闭环
 
 - Hunter connector 控制面、邮箱核验、451 法务抑制和外发阻断，已完成 B1。
-- Hunter Domain Search / Email Finder 工作流与批量 enrichment job，待 B2。
+- Hunter Domain Search / Email Finder、证据持久化、选择性导入、邮箱去重和用户级访问隔离，已完成 B2 核心链路。
+- 大批量异步 enrichment job、配额预算和断点续跑，待 B3。
 - Gmail + Microsoft 发送/回复 Webhook。
 - 外发审批、outbox、退订和邮箱核验。
 - 客户时间线、回复意图、AI 草稿。

@@ -80,6 +80,12 @@
         </el-menu-item-group>
 
         <el-menu-item-group :title="$t('Relationships')">
+          <el-menu-item index="/prospecting">
+            <el-icon><Search /></el-icon>
+            <template #title>
+              {{ $t('Prospecting') }}
+            </template>
+          </el-menu-item>
           <el-menu-item index="/customers">
             <el-icon><User /></el-icon>
             <template #title>
