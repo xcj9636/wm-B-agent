@@ -1377,6 +1377,91 @@ class AIChatMessage(Base):
     )
 
 
+class AgentMemoryEpoch(Base):
+    """Monotonic invalidation fence for one fully-qualified memory scope."""
+
+    __tablename__ = "agent_memory_epochs"
+
+    scope_key = Column(String(64), primary_key=True)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(Integer)
+    session_id = Column(UUID(as_uuid=True))
+    epoch = Column(Integer, nullable=False, default=0)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        Index("idx_agent_memory_epoch_org", "org_id"),
+    )
+
+
+class AgentMemory(Base):
+    """Durable source record for working, session, and long-term memory."""
+
+    __tablename__ = "agent_memories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope_key = Column(String(64), nullable=False)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(Integer)
+    session_id = Column(UUID(as_uuid=True))
+    tier = Column(String(20), nullable=False)
+    kind = Column(String(100), nullable=False)
+    content = Column(JSON, nullable=False)
+    source_type = Column(String(60), nullable=False)
+    source_ref = Column(String(500), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(String(20), nullable=False, default="active")
+    correction_of = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_memories.id"),
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_agent_memory_scope_status_tier",
+            "scope_key",
+            "status",
+            "tier",
+        ),
+        Index("idx_agent_memory_org_created", "org_id", "created_at"),
+    )
+
+
+class AgentMemoryPurgeJob(Base):
+    """Durable cleanup work for indexes and caches derived from memory."""
+
+    __tablename__ = "agent_memory_purge_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    memory_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_memories.id"),
+        nullable=False,
+    )
+    tombstone_epoch = Column(Integer, nullable=False)
+    targets = Column(JSON, nullable=False, default=list)
+    status = Column(String(20), nullable=False, default="pending")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_agent_memory_purge_status_created", "status", "created_at"),
+    )
+
+
 class StatsDaily(Base):
     """Daily statistics model"""
     __tablename__ = "stats_daily"
