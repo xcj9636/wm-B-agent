@@ -40,6 +40,24 @@ def gateway_client(handler, aliases=None, allowed_providers=None):
     )
 
 
+def test_gateway_client_rejects_empty_provider_allowlist():
+    http_client = httpx.AsyncClient(
+        base_url="http://omniroute.test",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200)),
+    )
+
+    with pytest.raises(ValueError, match="allowlist"):
+        LLMGatewayClient(
+            base_url="http://omniroute.test",
+            api_key="gateway-secret",
+            model_aliases={
+                LLMUseCase.LEAD_CLASSIFICATION: "b-agent-intent-cheap-v1"
+            },
+            allowed_providers=[],
+            http_client=http_client,
+        )
+
+
 @pytest.mark.asyncio
 async def test_completion_translates_the_openai_compatible_contract():
     captured = {}
