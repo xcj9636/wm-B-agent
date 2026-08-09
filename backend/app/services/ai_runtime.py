@@ -1,6 +1,7 @@
 """Persistent, secret-safe AI routing configuration resolved per request."""
 from datetime import datetime, timezone
 from pathlib import Path
+from hashlib import sha256
 import os
 from typing import Dict, List, Literal, Optional
 from urllib.parse import urlparse
@@ -14,7 +15,9 @@ from app.db import get_db
 from app.integrations.ai_provider import get_ai_provider
 from app.integrations.llm_gateway import LLMGatewayClient
 from app.models.database import AIRuntimeConfiguration
+from app.services.idempotency import canonical_hash
 from app.services.llm.contracts import LLMUseCase, REQUIRED_GATEWAY_USE_CASES
+from app.services.llm.runtime_pool import runtime_backend_pool
 from app.services.llm.service import DirectProviderAdapter
 
 
@@ -131,28 +134,55 @@ class AIRuntimeService:
     def build_backend(self):
         config = self.get_config()
         if config.backend == "direct":
-            return DirectProviderAdapter(get_ai_provider())
+            key = canonical_hash(
+                {
+                    "backend": config.backend,
+                    "version": config.version,
+                    "source": config.source,
+                }
+            )
+            return runtime_backend_pool.acquire(
+                key,
+                lambda: DirectProviderAdapter(get_ai_provider()),
+            )
         self._validate_gateway_policy(
             config.allowed_providers,
             config.model_aliases,
         )
-        return LLMGatewayClient(
-            base_url=config.base_url,
-            api_key=self._read_api_key(),
-            model_aliases={
-                LLMUseCase(use_case): model
-                for use_case, model in config.model_aliases.items()
-            },
-            allowed_providers=config.allowed_providers,
-            timeout_seconds=config.timeout_seconds,
+        api_key = self._read_api_key()
+        key = canonical_hash(
+            {
+                "backend": config.backend,
+                "base_url": config.base_url,
+                "allowed_providers": config.allowed_providers,
+                "model_aliases": config.model_aliases,
+                "timeout_seconds": config.timeout_seconds,
+                "version": config.version,
+                "source": config.source,
+                "api_key_digest": sha256(api_key.encode("utf-8")).hexdigest(),
+            }
+        )
+        return runtime_backend_pool.acquire(
+            key,
+            lambda: LLMGatewayClient(
+                base_url=config.base_url,
+                api_key=api_key,
+                model_aliases={
+                    LLMUseCase(use_case): model
+                    for use_case, model in config.model_aliases.items()
+                },
+                allowed_providers=config.allowed_providers,
+                timeout_seconds=config.timeout_seconds,
+            ),
         )
 
     async def list_models(self) -> List[str]:
         backend = self.build_backend()
-        if not isinstance(backend, LLMGatewayClient):
-            return []
         try:
-            return sorted(await backend.list_models())
+            list_models = getattr(backend, "list_models", None)
+            if list_models is None:
+                return []
+            return sorted(await list_models())
         finally:
             await backend.aclose()
 
