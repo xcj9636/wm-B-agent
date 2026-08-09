@@ -1,7 +1,8 @@
 """
 Application configuration using Pydantic Settings
 """
-from typing import List
+from typing import Dict, List, Literal
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,18 @@ class Settings(BaseSettings):
     QWEN_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_API_BASE: str = ""
+
+    # Internal LLM Gateway (disabled until explicitly enabled)
+    LLM_BACKEND: Literal["direct", "omniroute"] = "direct"
+    OMNIROUTE_BASE_URL: str = "http://omniroute:20128"
+    OMNIROUTE_API_KEY: str = ""
+    OMNIROUTE_API_KEY_FILE: str = ""
+    OMNIROUTE_TIMEOUT_SECONDS: float = 60.0
+    OMNIROUTE_MODEL_LEAD_CLASSIFICATION: str = ""
+    OMNIROUTE_MODEL_MESSAGE_DRAFT: str = ""
+    OMNIROUTE_MODEL_LIVE_REPLY: str = ""
+    OMNIROUTE_MODEL_RAG_QUERY_REWRITE: str = ""
+    OMNIROUTE_MODEL_SUMMARIZATION: str = ""
 
     # Email Service
     SMTP_HOST: str = "smtp.gmail.com"
@@ -93,6 +106,29 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
+
+    @field_validator(
+        "OMNIROUTE_MODEL_LEAD_CLASSIFICATION",
+        "OMNIROUTE_MODEL_MESSAGE_DRAFT",
+        "OMNIROUTE_MODEL_LIVE_REPLY",
+        "OMNIROUTE_MODEL_RAG_QUERY_REWRITE",
+        "OMNIROUTE_MODEL_SUMMARIZATION",
+    )
+    @classmethod
+    def reject_dynamic_gateway_routes(cls, value: str) -> str:
+        if value.startswith("auto/"):
+            raise ValueError("dynamic auto/* routes are not approved")
+        return value
+
+    def omniroute_model_aliases(self) -> Dict[str, str]:
+        aliases = {
+            "lead_classification": self.OMNIROUTE_MODEL_LEAD_CLASSIFICATION,
+            "message_draft": self.OMNIROUTE_MODEL_MESSAGE_DRAFT,
+            "live_reply": self.OMNIROUTE_MODEL_LIVE_REPLY,
+            "rag_query_rewrite": self.OMNIROUTE_MODEL_RAG_QUERY_REWRITE,
+            "summarization": self.OMNIROUTE_MODEL_SUMMARIZATION,
+        }
+        return {use_case: alias for use_case, alias in aliases.items() if alias}
 
     model_config = SettingsConfigDict(
         env_file=".env",

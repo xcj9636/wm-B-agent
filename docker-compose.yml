@@ -35,6 +35,7 @@ services:
       retries: 3
     networks:
       - trade_ai_network
+      - ai_gateway_network
 
   # Backend API
   backend:
@@ -49,6 +50,14 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
       - SECRET_KEY=your-secret-key-change-in-production
       - DEBUG=False
+      - LLM_BACKEND=${LLM_BACKEND:-direct}
+      - OMNIROUTE_BASE_URL=http://omniroute:20128
+      - OMNIROUTE_API_KEY=${OMNIROUTE_API_KEY:-}
+      - OMNIROUTE_MODEL_LEAD_CLASSIFICATION=${OMNIROUTE_MODEL_LEAD_CLASSIFICATION:-}
+      - OMNIROUTE_MODEL_MESSAGE_DRAFT=${OMNIROUTE_MODEL_MESSAGE_DRAFT:-}
+      - OMNIROUTE_MODEL_LIVE_REPLY=${OMNIROUTE_MODEL_LIVE_REPLY:-}
+      - OMNIROUTE_MODEL_RAG_QUERY_REWRITE=${OMNIROUTE_MODEL_RAG_QUERY_REWRITE:-}
+      - OMNIROUTE_MODEL_SUMMARIZATION=${OMNIROUTE_MODEL_SUMMARIZATION:-}
     ports:
       - "8000:8000"
     volumes:
@@ -62,6 +71,7 @@ services:
         condition: service_healthy
     networks:
       - trade_ai_network
+      - ai_gateway_network
 
   # Celery Worker
   celery_worker:
@@ -77,6 +87,14 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
       - SECRET_KEY=your-secret-key-change-in-production
       - DEBUG=False
+      - LLM_BACKEND=${LLM_BACKEND:-direct}
+      - OMNIROUTE_BASE_URL=http://omniroute:20128
+      - OMNIROUTE_API_KEY=${OMNIROUTE_API_KEY:-}
+      - OMNIROUTE_MODEL_LEAD_CLASSIFICATION=${OMNIROUTE_MODEL_LEAD_CLASSIFICATION:-}
+      - OMNIROUTE_MODEL_MESSAGE_DRAFT=${OMNIROUTE_MODEL_MESSAGE_DRAFT:-}
+      - OMNIROUTE_MODEL_LIVE_REPLY=${OMNIROUTE_MODEL_LIVE_REPLY:-}
+      - OMNIROUTE_MODEL_RAG_QUERY_REWRITE=${OMNIROUTE_MODEL_RAG_QUERY_REWRITE:-}
+      - OMNIROUTE_MODEL_SUMMARIZATION=${OMNIROUTE_MODEL_SUMMARIZATION:-}
     volumes:
       - ./backend:/app
       - uploads:/app/uploads
@@ -90,6 +108,43 @@ services:
         condition: service_started
     networks:
       - trade_ai_network
+      - ai_gateway_network
+
+  # Internal AI Gateway. It is opt-in and never publishes a host port.
+  omniroute:
+    profiles: [gateway]
+    build:
+      context: https://github.com/diegosouzapw/OmniRoute.git#e0ce95c592c00f100f5141371dbda976d678ddee
+      target: runner-base
+    image: b-agent/omniroute:e0ce95c592c0
+    restart: unless-stopped
+    stop_grace_period: 40s
+    environment:
+      - DATA_DIR=/app/data
+      - PORT=20128
+      - DASHBOARD_PORT=20128
+      - API_PORT=20129
+      - API_HOST=0.0.0.0
+      - REDIS_URL=redis://redis:6379/4
+      - NODE_OPTIONS=--max-old-space-size=2048
+    expose:
+      - "20128"
+      - "20129"
+    volumes:
+      - omniroute_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 2g
+    cpus: 2.0
+    networks:
+      - ai_gateway_network
 
   # Celery Beat (Scheduler)
   celery_beat:
@@ -171,7 +226,11 @@ volumes:
   uploads:
   exports:
   celery_beat_data:
+  omniroute_data:
 
 networks:
   trade_ai_network:
     driver: bridge
+  ai_gateway_network:
+    driver: bridge
+    internal: true
