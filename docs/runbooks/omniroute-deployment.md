@@ -29,7 +29,7 @@ export OMNIROUTE_IMAGE='registry.example.com/b-agent/omniroute@sha256:0123456789
 2. 创建 B-agent 专用、最小权限、可轮换的 API key，不与管理员或其他应用共享。
 3. 创建固定 combo/model 别名 `b-agent-draft-v1` 和 `b-agent-reply-v1`，其候选只能来自审批 provider。
 4. 禁止 `auto/*`、免费/无密钥 provider 和未固定的模型名。应用配置本身也会拒绝 `auto/*`。
-5. `OMNIROUTE_ALLOWED_PROVIDERS` 必须填写 OmniRoute completion 响应中 `provider` 字段的规范化值，例如 `["openai","azure-openai"]`。
+5. `OMNIROUTE_ALLOWED_PROVIDERS` 必须填写 OmniRoute completion 响应头 `X-OmniRoute-Provider` 的规范化值，例如 `["openai","azure-openai"]`。
 
 应用侧 allowlist 会在响应返回时检测越界，但请求此时已经发给 gateway。真正的发送前隔离依赖专用实例、固定 combo、只装载审批凭证以及出口 ACL；不能只依赖响应校验。
 
@@ -76,7 +76,7 @@ docker compose exec backend sh -lc 'curl -fsS -H "Authorization: Bearer $(cat /r
 GET /api/v1/admin/ai-gateway/status
 ```
 
-只有 `enabled=true`、`ready=true`、`reachable=true`、`issues=[]` 才能放量。用不含敏感信息的 canary 请求验证 draft 和 reply 两个 use case，再逐级提升流量。当前受 provider 校验约束的 streaming 路径默认拒绝，不得绕过。
+只有 `enabled=true`、`ready=true`、`reachable=true`、`issues=[]` 才能进入 canary。再用不含敏感信息的请求验证 draft 和 reply 两个 use case，并确认每次响应都有允许值的 `X-OmniRoute-Provider`；缺少该头时 B-agent 会 fail-closed，不能放量。当前受 provider 校验约束的 streaming 路径默认拒绝，不得绕过。
 
 ## 6. backup / restore
 

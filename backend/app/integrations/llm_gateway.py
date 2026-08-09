@@ -106,8 +106,9 @@ class LLMGatewayClient:
             data = response.json()
             choice = data["choices"][0]
             usage = self._usage(data.get("usage"))
+            resolved_provider = response.headers.get("x-omniroute-provider")
             self._validate_resolved_provider(
-                data.get("provider"),
+                resolved_provider,
                 request.request_id,
             )
             return LLMResponse(
@@ -116,10 +117,15 @@ class LLMGatewayClient:
                 finish_reason=choice.get("finish_reason"),
                 usage=usage,
                 gateway_request_id=(
-                    data.get("id") or response.headers.get("x-request-id")
+                    response.headers.get("x-omniroute-request-id")
+                    or data.get("id")
+                    or response.headers.get("x-request-id")
                 ),
-                resolved_model=data.get("model"),
-                resolved_provider=data.get("provider"),
+                resolved_model=(
+                    response.headers.get("x-omniroute-model")
+                    or data.get("model")
+                ),
+                resolved_provider=resolved_provider,
             )
         except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise GatewayError(
