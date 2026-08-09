@@ -207,3 +207,102 @@ def test_worker_marks_outreach_sent_and_consumes_quota_after_delivery(
         assert account.today_sent == 1
     finally:
         session.close()
+
+
+def test_schedule_task_reserves_daily_quota_before_queuing(
+    session_factory,
+):
+    first_customer_id, account_id = create_customer_and_account(session_factory)
+    session = session_factory()
+    try:
+        second_customer = Customer(
+            username="buyer-2",
+            platform="email",
+            email="buyer-2@example.com",
+        )
+        account = session.get(Account, account_id)
+        account.daily_limit = 1
+        session.add(second_customer)
+        session.commit()
+        second_customer_id = second_customer.id
+    finally:
+        session.close()
+
+    result = task_functions.schedule_outreach_task.run(
+        customer_ids=[first_customer_id, second_customer_id],
+        channel="email",
+        template_id="intro-v1",
+        schedule_config={"idempotency_key": "quota-campaign"},
+    )
+
+    session = session_factory()
+    try:
+        assert [item["status"] for item in result["results"]] == [
+            "queued",
+            "failed",
+        ]
+        assert result["results"][1]["error"] == "account_daily_limit_reached"
+        assert session.query(OutreachLog).count() == 1
+        assert session.query(OutboxEvent).count() == 1
+    finally:
+        session.close()
+
+
+class UnknownRouter:
+    async def deliver(self, event):
+        return DeliveryResult.unknown_after_send("provider_response_lost")
+
+
+def test_dead_letter_marks_outreach_failed_without_consuming_quota(
+    session_factory,
+    monkeypatch,
+):
+    customer_id, account_id = create_customer_and_account(session_factory)
+    session = session_factory()
+    try:
+        log = OutreachLog(
+            customer_id=customer_id,
+            channel="email",
+            status=OutreachStatus.PENDING,
+            subject="Hello",
+            content="Introduction",
+            account_id=account_id,
+        )
+        session.add(log)
+        session.flush()
+        OutboxService(session).enqueue(
+            OutboxCommand(
+                aggregate_type="outreach_log",
+                aggregate_id=str(log.id),
+                event_type="send",
+                business_key="worker-outreach-unknown",
+                channel="email",
+                payload={
+                    "to": "buyer@example.com",
+                    "subject": "Hello",
+                    "body": "Introduction",
+                },
+            )
+        )
+        log_id = log.id
+        session.commit()
+    finally:
+        session.close()
+
+    monkeypatch.setattr(
+        task_functions,
+        "get_outbox_delivery_router",
+        lambda: UnknownRouter(),
+    )
+    task_functions.dispatch_outbox_task.run(worker_id="worker-1", batch_size=10)
+
+    session = session_factory()
+    try:
+        log = session.get(OutreachLog, log_id)
+        account = session.get(Account, account_id)
+        assert log.status == OutreachStatus.FAILED
+        assert log.error_msg == "provider_response_lost"
+        assert log.sent_at is None
+        assert account.today_sent == 0
+    finally:
+        session.close()
