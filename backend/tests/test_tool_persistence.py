@@ -1,8 +1,13 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from app.models.database import AgentToolExecution, OutboxEvent
+from app.services.agent_concurrency import (
+    ConcurrencyLimitExceeded,
+    ConcurrencyUnavailable,
+)
 from app.services.agent_runtime.contracts import ExecutionPrincipal
 from app.services.idempotency import IdempotencyConflict
 from app.services.tool_execution import (
@@ -52,6 +57,26 @@ def registry():
         )
     )
     return value
+
+
+class ConcurrencyGate:
+    def __init__(self, *, acquire_error=None, release_error=None):
+        self.acquire_error = acquire_error
+        self.release_error = release_error
+        self.acquired = []
+        self.released = []
+
+    async def acquire(self, request, *, now, lease_seconds):
+        self.acquired.append((request, now, lease_seconds))
+        if self.acquire_error is not None:
+            raise self.acquire_error
+        return SimpleNamespace(lease_id="tool-concurrency-lease")
+
+    async def release(self, lease):
+        self.released.append(lease)
+        if self.release_error is not None:
+            raise self.release_error
+        return True
 
 
 def tool_call(*, actor=None, name="catalog.product.read", arguments=None, epoch=3):
@@ -118,7 +143,12 @@ def test_write_approval_requires_same_org_exact_call_and_four_eyes(db_session):
 @pytest.mark.asyncio
 async def test_read_tool_executes_once_and_replays_persisted_result(db_session):
     call = tool_call()
-    service = DurableToolExecutionService(db_session, registry())
+    concurrency = ConcurrencyGate()
+    service = DurableToolExecutionService(
+        db_session,
+        registry(),
+        concurrency=concurrency,
+    )
     service.record(call)
     executions = 0
 
@@ -138,6 +168,73 @@ async def test_read_tool_executes_once_and_replays_persisted_result(db_session):
     assert first == {"sku": "AX-7", "verified": True}
     assert replay == first
     assert executions == 1
+    assert len(concurrency.acquired) == 1
+    request = concurrency.acquired[0][0]
+    assert request.org_id == call.org_id
+    assert request.user_id == call.actor_user_id
+    assert request.tool_name == call.tool_name
+    assert request.provider_id is None
+    assert len(concurrency.released) == 1
+    assert db_session.get(AgentToolExecution, call.call_id).status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_read_tool_capacity_rejection_is_retryable_without_handler_execution(
+    db_session,
+):
+    call = tool_call()
+    concurrency = ConcurrencyGate(
+        acquire_error=ConcurrencyLimitExceeded("tool"),
+    )
+    service = DurableToolExecutionService(
+        db_session,
+        registry(),
+        concurrency=concurrency,
+    )
+    service.record(call)
+    called = False
+
+    async def handler(_):
+        nonlocal called
+        called = True
+        return {}
+
+    with pytest.raises(ConcurrencyLimitExceeded):
+        await service.execute_read(
+            call,
+            current_generation_epoch=3,
+            handler=handler,
+        )
+
+    assert called is False
+    assert db_session.get(AgentToolExecution, call.call_id).status == "ready"
+    assert concurrency.released == []
+
+
+@pytest.mark.asyncio
+async def test_read_tool_release_failure_defers_cleanup_to_lease_ttl(db_session):
+    call = tool_call()
+    concurrency = ConcurrencyGate(
+        release_error=ConcurrencyUnavailable("redis endpoint unavailable"),
+    )
+    service = DurableToolExecutionService(
+        db_session,
+        registry(),
+        concurrency=concurrency,
+    )
+    service.record(call)
+
+    async def handler(_):
+        return {"sku": "AX-7"}
+
+    result = await service.execute_read(
+        call,
+        current_generation_epoch=3,
+        handler=handler,
+    )
+
+    assert result == {"sku": "AX-7"}
+    assert len(concurrency.released) == 1
     assert db_session.get(AgentToolExecution, call.call_id).status == "succeeded"
 
 
