@@ -268,3 +268,20 @@ async def test_completion_accepts_an_approved_resolved_provider():
     response = await client.complete(llm_request())
 
     assert response.resolved_provider == "approved-provider"
+
+
+@pytest.mark.asyncio
+async def test_streaming_fails_closed_when_provider_verification_is_required():
+    def unexpected_request(request):
+        raise AssertionError("unverifiable streaming traffic must not be sent")
+
+    client = gateway_client(
+        unexpected_request,
+        allowed_providers=["approved-provider"],
+    )
+
+    with pytest.raises(GatewayError) as raised:
+        _ = [chunk async for chunk in client.stream(llm_request())]
+
+    assert raised.value.kind == GatewayErrorKind.INVALID_RESPONSE
+    assert raised.value.retryable is False
