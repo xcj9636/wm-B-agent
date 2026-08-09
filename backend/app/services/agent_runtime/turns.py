@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.database import AIChatSession, AgentTurn
+from app.services.idempotency import IdempotencyConflict, canonical_hash
 
 
 class TurnBusy(RuntimeError):
@@ -28,6 +29,7 @@ class AgentTurnCoordinator:
         session_id: UUID,
         user_id: int,
         idempotency_key: str,
+        input_hash: str | None = None,
         policy: Literal["queue", "cancel_previous"] = "queue",
     ) -> Tuple[AgentTurn, bool]:
         chat = (
@@ -51,6 +53,10 @@ class AgentTurnCoordinator:
             .one_or_none()
         )
         if existing is not None:
+            if input_hash is not None and existing.input_hash != input_hash:
+                raise IdempotencyConflict(
+                    "Agent turn idempotency key was reused for different input"
+                )
             return existing, False
 
         active = (
@@ -80,6 +86,7 @@ class AgentTurnCoordinator:
             sequence=sequence,
             generation_epoch=chat.generation_epoch,
             idempotency_key=idempotency_key,
+            input_hash=input_hash or canonical_hash({}),
             status="running",
         )
         self._db.add(turn)

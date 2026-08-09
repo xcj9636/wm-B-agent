@@ -33,11 +33,18 @@ def upgrade() -> None:
         sa.Column("sequence", sa.Integer(), nullable=False),
         sa.Column("generation_epoch", sa.Integer(), nullable=False),
         sa.Column("idempotency_key", sa.String(255), nullable=False),
+        sa.Column("input_hash", sa.String(64), nullable=False),
         sa.Column("status", sa.String(30), nullable=False),
+        sa.Column("user_message_id", sa.Uuid()),
+        sa.Column("assistant_message_id", sa.Uuid()),
         sa.Column("started_at", sa.DateTime(), nullable=False),
         sa.Column("completed_at", sa.DateTime()),
         sa.ForeignKeyConstraint(
             ["session_id"], ["ai_chat_sessions.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(["user_message_id"], ["ai_chat_messages.id"]),
+        sa.ForeignKeyConstraint(
+            ["assistant_message_id"], ["ai_chat_messages.id"]
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(

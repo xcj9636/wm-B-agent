@@ -1314,7 +1314,16 @@ class AgentTurn(Base):
     sequence = Column(Integer, nullable=False)
     generation_epoch = Column(Integer, nullable=False)
     idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
     status = Column(String(30), nullable=False, default="running")
+    user_message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_messages.id"),
+    )
+    assistant_message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_messages.id"),
+    )
     started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     completed_at = Column(DateTime)
 

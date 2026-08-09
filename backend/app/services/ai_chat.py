@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.database import AIChatMessage, AIChatSession
+from app.models.database import AIChatMessage, AIChatSession, AgentTurn
 from app.services.ai_runtime import AIRuntimeService
 from app.services.agent_runtime.context import (
     ContextAssembler,
@@ -24,6 +24,7 @@ from app.services.agent_runtime.turns import AgentTurnCoordinator
 from app.services.llm.contracts import LLMUseCase
 from app.services.llm.instrumented import SessionInvocationAuditSink
 from app.services.llm.service import LLMService
+from app.services.idempotency import IdempotencyConflict, canonical_hash
 
 
 logger = logging.getLogger(__name__)
@@ -103,14 +104,19 @@ class AIChatService:
     ) -> AIChatMessageResponse:
         session = self._owned_session(session_id, user_id)
         coordinator = AgentTurnCoordinator(self._db)
-        turn, _ = coordinator.start(
+        turn, created = coordinator.start(
             session_id=session.id,
             user_id=user_id,
             idempotency_key=(
                 idempotency_key or f"ai-chat:{session.id}:{uuid4()}"
             ),
+            input_hash=canonical_hash({"content": content.strip()}),
         )
+        if not created:
+            return self._replay_completed_turn(turn)
         user_message = self._append_user_message(session, content)
+        turn.user_message_id = user_message.id
+        self._db.flush()
         runtime_config = self._runtime.get_config()
         service = LLMService(
             self._runtime.build_backend(),
@@ -147,7 +153,7 @@ class AIChatService:
             generation_epoch=turn.generation_epoch,
             commit=False,
         )
-        self._finish_turn(session, assistant)
+        self._finish_turn(session, assistant, turn=turn)
         return self._message_response(assistant)
 
     async def stream(
@@ -160,14 +166,25 @@ class AIChatService:
     ) -> AsyncIterator[Dict[str, object]]:
         session = self._owned_session(session_id, user_id)
         coordinator = AgentTurnCoordinator(self._db)
-        turn, _ = coordinator.start(
+        turn, created = coordinator.start(
             session_id=session.id,
             user_id=user_id,
             idempotency_key=(
                 idempotency_key or f"ai-chat:{session.id}:{uuid4()}"
             ),
+            input_hash=canonical_hash({"content": content.strip()}),
         )
+        if not created:
+            replay = self._replay_completed_turn(turn)
+            yield {"event": "delta", "data": {"delta": replay.content}}
+            yield {
+                "event": "done",
+                "data": replay.model_dump(mode="json"),
+            }
+            return
         user_message = self._append_user_message(session, content)
+        turn.user_message_id = user_message.id
+        self._db.flush()
         runtime_config = self._runtime.get_config()
         service = LLMService(
             self._runtime.build_backend(),
@@ -217,7 +234,7 @@ class AIChatService:
             generation_epoch=turn.generation_epoch,
             commit=False,
         )
-        self._finish_turn(session, assistant)
+        self._finish_turn(session, assistant, turn=turn)
         yield {
             "event": "done",
             "data": self._message_response(assistant).model_dump(mode="json"),
@@ -312,12 +329,29 @@ class AIChatService:
         ]
 
     def _finish_turn(
-        self, session: AIChatSession, assistant: AIChatMessage
+        self,
+        session: AIChatSession,
+        assistant: AIChatMessage,
+        *,
+        turn: Optional[AgentTurn] = None,
     ) -> None:
         session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self._db.add(assistant)
+        self._db.flush()
+        if turn is not None:
+            turn.assistant_message_id = assistant.id
         self._db.commit()
         self._db.refresh(assistant)
+
+    def _replay_completed_turn(self, turn: AgentTurn) -> AIChatMessageResponse:
+        if turn.status == "running":
+            raise IdempotencyConflict("Agent turn is already in progress")
+        if turn.status != "completed" or turn.assistant_message_id is None:
+            raise IdempotencyConflict("Agent turn cannot be replayed")
+        assistant = self._db.get(AIChatMessage, turn.assistant_message_id)
+        if assistant is None:
+            raise IdempotencyConflict("Agent turn response is unavailable")
+        return self._message_response(assistant)
 
     @staticmethod
     async def _close_backend(backend) -> None:
