@@ -19,6 +19,10 @@ class CompletionBackend(Protocol):
         ...
 
 
+class StreamingUnavailable(RuntimeError):
+    """The configured backend cannot provide genuine incremental output."""
+
+
 class DirectProviderAdapter:
     """Keep the legacy provider available behind the stable response contract."""
 
@@ -35,6 +39,26 @@ class DirectProviderAdapter:
             content=content,
             usage=LLMUsage(cost_status="unknown"),
         )
+
+    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
+        messages = [
+            message.model_dump(exclude_none=True) for message in request.messages
+        ]
+        stream_method = getattr(
+            self._provider,
+            "chat_completion_with_stream",
+            None,
+        )
+        if stream_method is None:
+            raise StreamingUnavailable(
+                "Direct provider does not support incremental streaming"
+            )
+        async for delta in stream_method(messages):
+            if delta:
+                yield LLMStreamChunk(
+                    request_id=request.request_id,
+                    delta=delta,
+                )
 
 
 class LLMService:
@@ -115,24 +139,14 @@ class LLMService:
         try:
             stream_method = getattr(self._backend, "stream", None)
             if stream_method is None:
-                response = await self._backend.complete(request)
-                final_chunk = LLMStreamChunk(
-                    request_id=request.request_id,
-                    delta=response.content,
-                    finish_reason=response.finish_reason,
-                    usage=response.usage,
-                    gateway_request_id=response.gateway_request_id,
-                    resolved_model=response.resolved_model,
-                    resolved_provider=response.resolved_provider,
+                raise StreamingUnavailable(
+                    "Configured backend does not support incremental streaming"
                 )
-                fragments.append(response.content)
-                yield final_chunk
-            else:
-                async for chunk in stream_method(request):
-                    final_chunk = chunk
-                    if chunk.delta:
-                        fragments.append(chunk.delta)
-                    yield chunk
+            async for chunk in stream_method(request):
+                final_chunk = chunk
+                if chunk.delta:
+                    fragments.append(chunk.delta)
+                yield chunk
         except Exception as exc:
             if audit is not None:
                 self._audit_sink.fail(audit.invocation_id, exc)
