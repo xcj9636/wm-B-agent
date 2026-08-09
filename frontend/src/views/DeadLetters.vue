@@ -1,9 +1,16 @@
 <template>
-  <section class="dead-letters" aria-labelledby="dead-letters-title">
+  <section
+    class="dead-letters"
+    aria-labelledby="dead-letters-title"
+  >
     <header class="page-header">
       <div>
-        <p class="eyebrow">Reliable execution</p>
-        <h1 id="dead-letters-title">Dead-letter operations</h1>
+        <p class="eyebrow">
+          Reliable execution
+        </p>
+        <h1 id="dead-letters-title">
+          Dead-letter operations
+        </h1>
         <p class="page-description">
           Review delivery failures without exposing recipient or message content.
         </p>
@@ -27,7 +34,10 @@
     />
 
     <el-card shadow="never">
-      <div class="toolbar" aria-label="Dead-letter filters">
+      <div
+        class="toolbar"
+        aria-label="Dead-letter filters"
+      >
         <el-select
           v-model="channel"
           aria-label="Filter by channel"
@@ -35,10 +45,19 @@
           clearable
           @change="loadDeadLetters"
         >
-          <el-option label="Email" value="email" />
-          <el-option label="WhatsApp" value="whatsapp" />
+          <el-option
+            label="Email"
+            value="email"
+          />
+          <el-option
+            label="WhatsApp"
+            value="whatsapp"
+          />
         </el-select>
-        <span class="result-count" aria-live="polite">
+        <span
+          class="result-count"
+          aria-live="polite"
+        >
           {{ deadLetters.length }} unresolved event{{ deadLetters.length === 1 ? '' : 's' }}
         </span>
       </div>
@@ -50,7 +69,10 @@
         stripe
         empty-text="No dead-letter events"
       >
-        <el-table-column label="Event" min-width="220">
+        <el-table-column
+          label="Event"
+          min-width="220"
+        >
           <template #default="{ row }">
             <div class="event-identity">
               <code>{{ row.id }}</code>
@@ -58,29 +80,53 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="channel" label="Channel" width="120">
+        <el-table-column
+          prop="channel"
+          label="Channel"
+          width="120"
+        >
           <template #default="{ row }">
-            <el-tag effect="plain">{{ row.channel }}</el-tag>
+            <el-tag effect="plain">
+              {{ row.channel }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Attempts" width="110">
+        <el-table-column
+          label="Attempts"
+          width="110"
+        >
           <template #default="{ row }">
             {{ row.attempt_count }} / {{ row.max_attempts }}
           </template>
         </el-table-column>
-        <el-table-column prop="error_code" label="Error code" min-width="210">
+        <el-table-column
+          prop="error_code"
+          label="Error code"
+          min-width="210"
+        >
           <template #default="{ row }">
             <code>{{ row.error_code }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="Last updated" width="180">
+        <el-table-column
+          label="Last updated"
+          width="180"
+        >
           <template #default="{ row }">
             {{ formatTime(row.updated_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="Action" width="120" fixed="right">
+        <el-table-column
+          label="Action"
+          width="120"
+          fixed="right"
+        >
           <template #default="{ row }">
-            <el-button type="primary" link @click="openResolution(row)">
+            <el-button
+              type="primary"
+              link
+              @click="openResolution(row)"
+            >
               Resolve
             </el-button>
           </template>
@@ -95,7 +141,10 @@
       :close-on-click-modal="false"
       @closed="resetResolution"
     >
-      <div v-if="selectedEvent" class="resolution-context">
+      <div
+        v-if="selectedEvent"
+        class="resolution-context"
+      >
         <span>Event</span>
         <code>{{ selectedEvent.id }}</code>
       </div>
@@ -107,18 +156,24 @@
         label-position="top"
         @submit.prevent="submitResolution"
       >
-        <el-form-item label="Resolution" prop="action">
+        <el-form-item
+          label="Resolution"
+          prop="action"
+        >
           <el-radio-group v-model="form.action">
-            <el-radio-button value="confirmed_not_sent">
+            <el-radio-button label="confirmed_not_sent">
               Confirmed not sent
             </el-radio-button>
-            <el-radio-button value="confirmed_sent">
+            <el-radio-button label="confirmed_sent">
               Confirmed sent
             </el-radio-button>
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="Evidence reference" prop="evidence_reference">
+        <el-form-item
+          label="Evidence reference"
+          prop="evidence_reference"
+        >
           <el-input
             v-model="form.evidence_reference"
             maxlength="128"
@@ -143,13 +198,18 @@
           />
         </el-form-item>
 
-        <el-checkbox v-model="acknowledged" class="acknowledgement">
+        <el-checkbox
+          v-model="acknowledged"
+          class="acknowledgement"
+        >
           I verified the provider evidence and understand this approval is audited.
         </el-checkbox>
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogOpen = false">Cancel</el-button>
+        <el-button @click="dialogOpen = false">
+          Cancel
+        </el-button>
         <el-button
           type="danger"
           :loading="submitting"
@@ -164,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
@@ -269,7 +329,7 @@ function formatTime(value: string) {
   return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
 }
 
-loadDeadLetters()
+onMounted(loadDeadLetters)
 </script>
 
 <style lang="scss" scoped>

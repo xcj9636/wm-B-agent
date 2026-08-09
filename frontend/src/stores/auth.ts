@@ -91,7 +91,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function initialize() {
-    if (token.value) {
+    if (token.value && !user.value) {
       fetchUser()
     }
   }
