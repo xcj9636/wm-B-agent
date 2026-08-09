@@ -21,9 +21,12 @@ from app.services.idempotency import IdempotencyConflict, canonical_hash
 from app.services.llm.contracts import (
     GatewayError,
     GatewayErrorKind,
+    LLMRequest,
     LLMResponse,
     LLMStreamChunk,
 )
+from app.services.llm.audit import InvocationAuditService
+from app.services.llm.contracts import LLMUseCase
 
 
 class ChatBackend:
@@ -130,6 +133,9 @@ async def test_ai_chat_completion_atomically_completes_a_fenced_turn(db_session)
     assert run.turn_id == turn.id
     assert run.generation_epoch == turn.generation_epoch
     assert "Hello" not in repr(run.__dict__)
+    invocation = db_session.query(LLMInvocation).one()
+    assert invocation.agent_run_id == run.id
+    assert invocation.fencing_token == run.fencing_token
     assert len(service._concurrency.acquired) == 1
     request = service._concurrency.acquired[0][0]
     assert request.org_id == run.org_id
@@ -198,6 +204,26 @@ async def test_expired_chat_run_resumes_from_durable_user_message(db_session):
     user_message = service._append_user_message(session, "Recover this request")
     turn.user_message_id = user_message.id
     db_session.commit()
+    model_messages, seed_vault, _ = service._redact_model_messages(
+        service._messages_for_model(session, user_message),
+        run_id=str(turn.id),
+    )
+    pending_request = LLMRequest(
+        use_case=LLMUseCase.LIVE_REPLY,
+        messages=model_messages,
+        temperature=0.3,
+        max_output_tokens=1600,
+    )
+    invocation, _ = InvocationAuditService(db_session).start(
+        idempotency_key=f"ai-chat:{turn.id}:llm",
+        request=pending_request,
+        backend="omniroute",
+        run_id=run.id,
+        fencing_token=first_claim.fencing_token,
+    )
+    original_request_id = invocation.request_id
+    db_session.commit()
+    seed_vault.purge(run_id=str(turn.id))
     recovery_time = first_claim.lease_until + timedelta(seconds=1)
     runs.recover_expired(now=recovery_time)
     reclaimed = runs.claim_one(
@@ -221,8 +247,10 @@ async def test_expired_chat_run_resumes_from_durable_user_message(db_session):
     assert run.fencing_token == 2
     assert db_session.query(AIChatMessage).filter_by(role="user").count() == 1
     assert "Recover this request" in backend.requests[0].model_dump_json()
-    invocation = db_session.query(LLMInvocation).one()
     assert invocation.idempotency_key == f"ai-chat:{turn.id}:llm"
+    assert backend.requests[0].request_id == original_request_id
+    assert invocation.fencing_token == reclaimed.fencing_token
+    assert invocation.status.value == "succeeded"
     assert len(service._concurrency.acquired) == 1
     assert len(service._concurrency.released) == 1
 
@@ -439,7 +467,11 @@ async def test_stream_redacts_provider_input_and_rehydrates_done_snapshot(db_ses
     )
     assert events[-1]["event"] == "done"
     assert events[-1]["data"]["content"] == "Contact buyer@example.com"
-    assert db_session.query(AgentRun).one().status == "completed"
+    run = db_session.query(AgentRun).one()
+    assert run.status == "completed"
+    invocation = db_session.query(LLMInvocation).one()
+    assert invocation.agent_run_id == run.id
+    assert invocation.fencing_token == run.fencing_token
     assert len(service._concurrency.released) == 1
 
 
