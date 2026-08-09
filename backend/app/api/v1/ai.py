@@ -23,6 +23,10 @@ from app.services.ai_runtime import (
     get_ai_runtime_service,
 )
 from app.services.agent_runtime.turns import TurnBusy
+from app.services.agent_concurrency import (
+    ConcurrencyLimitExceeded,
+    ConcurrencyUnavailable,
+)
 from app.services.idempotency import IdempotencyConflict
 
 
@@ -171,6 +175,18 @@ async def create_chat_message(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (IdempotencyConflict, TurnBusy) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ConcurrencyLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI capacity is temporarily full",
+            headers={"Retry-After": "1"},
+        ) from exc
+    except ConcurrencyUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI capacity coordination is temporarily unavailable",
+            headers={"Retry-After": "1"},
+        ) from exc
 
 
 @router.post("/chat/sessions/{session_id}/messages/stream")
