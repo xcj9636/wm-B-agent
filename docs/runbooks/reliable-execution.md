@@ -29,6 +29,8 @@ alembic current
 
 账号日额度在入队时通过账号行锁预留，计算口径为 `today_sent + pending + scheduled`。真正发送成功后 Worker 才增加 `today_sent`；死信不会消耗已发送额度。Outbox payload 只能包含投递目标和消息内容，账号凭证不得进入 payload。
 
+批量节流通过每条事件的 `available_at` 持久化，不允许在 producer 或 Celery 任务中 `sleep`。`interval_min`/`interval_max` 按秒配置，系统使用区间中点形成确定性间隔；Worker 重启不会丢失排期。
+
 同一个 `(channel, business_key, event_type)`：
 
 - payload 相同：返回已有事件；
