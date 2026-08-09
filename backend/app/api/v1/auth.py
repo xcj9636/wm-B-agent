@@ -13,7 +13,8 @@ from app.config import settings
 from app.db import get_db
 from app.models.database import User
 from app.models.schemas import (
-    UserCreate, UserUpdate, UserResponse, Token, LoginRequest
+    UserCreate, UserUpdate, UserResponse, Token, LoginRequest,
+    RefreshTokenRequest
 )
 
 router = APIRouter()
@@ -210,11 +211,19 @@ async def update_me(
     return current_user
 
 
+@router.post("/logout")
+async def logout(current_user: User = Depends(get_current_active_user)):
+    """Acknowledge logout for the stateless JWT client."""
+    return {"message": "Logged out"}
+
+
 @router.post("/refresh", response_model=Token)
-async def refresh_token(token: str):
+async def refresh_token(request: RefreshTokenRequest):
     """刷新令牌"""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        payload = jwt.decode(
+            request.token, settings.SECRET_KEY, algorithms=["HS256"]
+        )
         user_id = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")

@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.database import User, Customer
+from app.models.database import User, Customer, IntentLevel
 from app.models.schemas import (
     CustomerCreate, CustomerUpdate, CustomerResponse,
-    CustomerListResponse, SearchFilters
+    CustomerListResponse, HighIntentLeadResponse, SearchFilters
 )
 from app.api.v1.auth import get_current_active_user
 
@@ -85,6 +85,33 @@ async def create_customer(
     db.refresh(db_customer)
 
     return db_customer
+
+
+@router.get("/high-intent", response_model=List[HighIntentLeadResponse])
+async def list_high_intent_customers(
+    limit: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Return the dashboard's highest-priority customer projection."""
+    customers = db.query(Customer).filter(
+        Customer.intent_level.in_([IntentLevel.HIGH, IntentLevel.VERY_HIGH])
+    ).order_by(Customer.updated_at.desc()).limit(limit).all()
+
+    return [
+        HighIntentLeadResponse(
+            id=customer.id,
+            name=(
+                customer.company_name
+                or customer.username
+                or customer.email
+                or f"Customer {customer.id}"
+            ),
+            intent=customer.intent_level.value,
+            platform=customer.platform,
+        )
+        for customer in customers
+    ]
 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)

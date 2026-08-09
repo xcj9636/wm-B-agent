@@ -73,6 +73,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request schema."""
+    token: str
+
+
 # ============================================
 # Workflow Schemas
 # ============================================
@@ -284,6 +289,14 @@ class CustomerListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class HighIntentLeadResponse(BaseModel):
+    """Compact customer projection used by the dashboard."""
+    id: int
+    name: str
+    intent: str
+    platform: Optional[str] = None
 
 
 # ============================================

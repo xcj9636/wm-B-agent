@@ -2,17 +2,67 @@
 统计相关API
 """
 from datetime import datetime, timedelta
-from typing import List
+from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.db import get_db
-from app.models.database import User, Customer, OutreachLog, Conversation, StatsDaily
+from app.models.database import (
+    User, Customer, OutreachLog, Conversation, StatsDaily, AuditLog
+)
 from app.models.schemas import StatsResponse, DashboardStats
 from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
+
+
+ACTIVITY_TYPES = {
+    ("customer", "create"): "customer_created",
+    ("customer", "update"): "customer_updated",
+    ("workflow", "execute"): "workflow_started",
+    ("workflow", "complete"): "workflow_completed",
+    ("workflow", "fail"): "workflow_failed",
+    ("conversation", "takeover"): "takeover_requested",
+}
+
+ACTIVITY_ACTION_LABELS = {
+    "create": "created",
+    "update": "updated",
+    "delete": "deleted",
+    "execute": "started",
+    "complete": "completed",
+    "fail": "failed",
+    "takeover": "takeover requested",
+}
+
+
+@router.get("/activities")
+async def get_recent_activities(
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Expose recent per-user audit events in the dashboard contract."""
+    logs = db.query(AuditLog).filter(
+        AuditLog.user_id == current_user.id
+    ).order_by(AuditLog.created_at.desc()).limit(limit).all()
+
+    return [
+        {
+            "id": str(log.id),
+            "type": ACTIVITY_TYPES.get(
+                (log.resource_type, log.action), "system_alert"
+            ),
+            "description": (
+                f"{(log.resource_type or 'System').replace('_', ' ').title()} "
+                f"{ACTIVITY_ACTION_LABELS.get(log.action, log.action or 'updated')}"
+            ),
+            "timestamp": log.created_at.isoformat(),
+            "metadata": log.details_json,
+        }
+        for log in logs
+    ]
 
 
 @router.get("/dashboard", response_model=DashboardStats)
