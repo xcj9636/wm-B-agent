@@ -65,3 +65,20 @@ test('visible console copy contains no forbidden dash typography', () => {
   const combined = files.map(source).join('\n')
   assert.doesNotMatch(combined, /[—–]/)
 })
+
+test('all primary work surfaces use the shared native page rhythm', () => {
+  const views = [
+    'Workflows.vue',
+    'Customers.vue',
+    'Conversations.vue',
+    'DeadLetters.vue',
+    'CustomerDetail.vue',
+    'ConversationDetail.vue',
+  ]
+
+  for (const view of views) {
+    const contents = source(`src/views/${view}`)
+    assert.match(contents, /page-stack/, `${view} must use page-stack`)
+    assert.match(contents, /page-heading/, `${view} must use page-heading`)
+  }
+})
