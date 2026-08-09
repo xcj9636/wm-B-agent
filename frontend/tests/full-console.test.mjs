@@ -73,3 +73,16 @@ test('Docker development frontend uses Vite HMR and the backend proxy', () => {
   assert.match(vite, /VITE_API_PROXY_TARGET/)
   assert.match(vite, /usePolling/)
 })
+
+test('remaining interactive console actions do not fall back to placeholders', () => {
+  const workflowEditor = source('src/views/WorkflowEditor.vue')
+  const alertPanel = source('src/components/Monitor/AlertPanel.vue')
+  const conversationChat = source('src/components/ConversationView/ConversationChat.vue')
+
+  assert.match(workflowEditor, /workflowApi\.(create|update)/)
+  assert.doesNotMatch(workflowEditor, /console\.log\('Saving workflow/)
+  assert.match(alertPanel, /ai-gateway\/status/)
+  assert.match(alertPanel, /reliable-execution\/status/)
+  assert.doesNotMatch(alertPanel, /Mock data|replace with API/i)
+  assert.doesNotMatch(conversationChat, /coming soon/i)
+})
