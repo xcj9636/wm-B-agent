@@ -102,6 +102,7 @@ class AIChatService:
         *,
         idempotency_key: Optional[str] = None,
     ) -> AIChatMessageResponse:
+        content = self._normalize_content(content)
         session = self._owned_session(session_id, user_id)
         coordinator = AgentTurnCoordinator(self._db)
         turn, created = coordinator.start(
@@ -114,47 +115,49 @@ class AIChatService:
         )
         if not created:
             return self._replay_completed_turn(turn)
-        user_message = self._append_user_message(session, content)
-        turn.user_message_id = user_message.id
-        self._db.flush()
-        runtime_config = self._runtime.get_config()
-        service = LLMService(
-            self._runtime.build_backend(),
-            audit_sink=SessionInvocationAuditSink(self._db),
-            backend_name=runtime_config.backend,
-        )
-        backend = service._backend
+        backend = None
         try:
-            try:
-                response = await service.complete(
-                    LLMUseCase.LIVE_REPLY,
-                    self._messages_for_model(session, user_message),
-                    temperature=0.3,
-                    max_output_tokens=1600,
-                    idempotency_key=f"ai-chat:{turn.id}:llm",
-                )
-            finally:
-                await self._close_backend(backend)
-        except Exception:
+            user_message = self._append_user_message(session, content)
+            turn.user_message_id = user_message.id
+            self._db.flush()
+            runtime_config = self._runtime.get_config()
+            backend = self._runtime.build_backend()
+            service = LLMService(
+                backend,
+                audit_sink=SessionInvocationAuditSink(self._db),
+                backend_name=runtime_config.backend,
+            )
+            response = await service.complete(
+                LLMUseCase.LIVE_REPLY,
+                self._messages_for_model(session, user_message),
+                temperature=0.3,
+                max_output_tokens=1600,
+                idempotency_key=f"ai-chat:{turn.id}:llm",
+            )
+
+            assistant = AIChatMessage(
+                session_id=session.id,
+                role="assistant",
+                content=response.content,
+                resolved_model=response.resolved_model,
+                resolved_provider=response.resolved_provider,
+                gateway_request_id=response.gateway_request_id,
+                usage_json=response.usage.model_dump(),
+            )
+            coordinator.complete(
+                turn.id,
+                generation_epoch=turn.generation_epoch,
+                commit=False,
+            )
+            self._finish_turn(session, assistant, turn=turn)
+            return self._message_response(assistant)
+        except BaseException:
+            self._db.rollback()
             coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
             raise
-
-        assistant = AIChatMessage(
-            session_id=session.id,
-            role="assistant",
-            content=response.content,
-            resolved_model=response.resolved_model,
-            resolved_provider=response.resolved_provider,
-            gateway_request_id=response.gateway_request_id,
-            usage_json=response.usage.model_dump(),
-        )
-        coordinator.complete(
-            turn.id,
-            generation_epoch=turn.generation_epoch,
-            commit=False,
-        )
-        self._finish_turn(session, assistant, turn=turn)
-        return self._message_response(assistant)
+        finally:
+            if backend is not None:
+                await self._close_backend(backend)
 
     async def stream(
         self,
@@ -164,6 +167,7 @@ class AIChatService:
         *,
         idempotency_key: Optional[str] = None,
     ) -> AsyncIterator[Dict[str, object]]:
+        content = self._normalize_content(content)
         session = self._owned_session(session_id, user_id)
         coordinator = AgentTurnCoordinator(self._db)
         turn, created = coordinator.start(
@@ -182,59 +186,61 @@ class AIChatService:
                 "data": replay.model_dump(mode="json"),
             }
             return
-        user_message = self._append_user_message(session, content)
-        turn.user_message_id = user_message.id
-        self._db.flush()
-        runtime_config = self._runtime.get_config()
-        service = LLMService(
-            self._runtime.build_backend(),
-            audit_sink=SessionInvocationAuditSink(self._db),
-            backend_name=runtime_config.backend,
-        )
-        backend = service._backend
+        backend = None
         fragments: List[str] = []
         metadata: Dict[str, object] = {}
         try:
-            try:
-                async for chunk in service.stream(
-                    LLMUseCase.LIVE_REPLY,
-                    self._messages_for_model(session, user_message),
-                    temperature=0.3,
-                    max_output_tokens=1600,
-                    idempotency_key=f"ai-chat:{turn.id}:llm",
-                ):
-                    if chunk.delta:
-                        fragments.append(chunk.delta)
-                        yield {"event": "delta", "data": {"delta": chunk.delta}}
-                    if chunk.resolved_model:
-                        metadata["resolved_model"] = chunk.resolved_model
-                    if chunk.resolved_provider:
-                        metadata["resolved_provider"] = chunk.resolved_provider
-                    if chunk.gateway_request_id:
-                        metadata["gateway_request_id"] = chunk.gateway_request_id
-                    if chunk.usage:
-                        metadata["usage"] = chunk.usage.model_dump()
-            finally:
-                await self._close_backend(backend)
+            user_message = self._append_user_message(session, content)
+            turn.user_message_id = user_message.id
+            self._db.flush()
+            runtime_config = self._runtime.get_config()
+            backend = self._runtime.build_backend()
+            service = LLMService(
+                backend,
+                audit_sink=SessionInvocationAuditSink(self._db),
+                backend_name=runtime_config.backend,
+            )
+            async for chunk in service.stream(
+                LLMUseCase.LIVE_REPLY,
+                self._messages_for_model(session, user_message),
+                temperature=0.3,
+                max_output_tokens=1600,
+                idempotency_key=f"ai-chat:{turn.id}:llm",
+            ):
+                if chunk.delta:
+                    fragments.append(chunk.delta)
+                    yield {"event": "delta", "data": {"delta": chunk.delta}}
+                if chunk.resolved_model:
+                    metadata["resolved_model"] = chunk.resolved_model
+                if chunk.resolved_provider:
+                    metadata["resolved_provider"] = chunk.resolved_provider
+                if chunk.gateway_request_id:
+                    metadata["gateway_request_id"] = chunk.gateway_request_id
+                if chunk.usage:
+                    metadata["usage"] = chunk.usage.model_dump()
+
+            assistant = AIChatMessage(
+                session_id=session.id,
+                role="assistant",
+                content="".join(fragments),
+                resolved_model=metadata.get("resolved_model"),
+                resolved_provider=metadata.get("resolved_provider"),
+                gateway_request_id=metadata.get("gateway_request_id"),
+                usage_json=metadata.get("usage", {}),
+            )
+            coordinator.complete(
+                turn.id,
+                generation_epoch=turn.generation_epoch,
+                commit=False,
+            )
+            self._finish_turn(session, assistant, turn=turn)
         except BaseException:
+            self._db.rollback()
             coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
             raise
-
-        assistant = AIChatMessage(
-            session_id=session.id,
-            role="assistant",
-            content="".join(fragments),
-            resolved_model=metadata.get("resolved_model"),
-            resolved_provider=metadata.get("resolved_provider"),
-            gateway_request_id=metadata.get("gateway_request_id"),
-            usage_json=metadata.get("usage", {}),
-        )
-        coordinator.complete(
-            turn.id,
-            generation_epoch=turn.generation_epoch,
-            commit=False,
-        )
-        self._finish_turn(session, assistant, turn=turn)
+        finally:
+            if backend is not None:
+                await self._close_backend(backend)
         yield {
             "event": "done",
             "data": self._message_response(assistant).model_dump(mode="json"),
@@ -256,9 +262,7 @@ class AIChatService:
     def _append_user_message(
         self, session: AIChatSession, content: str
     ) -> AIChatMessage:
-        value = content.strip()
-        if not value:
-            raise ValueError("Message content cannot be empty")
+        value = self._normalize_content(content)
         message = AIChatMessage(
             session_id=session.id,
             role="user",
@@ -268,6 +272,13 @@ class AIChatService:
         self._db.add(message)
         self._db.flush()
         return message
+
+    @staticmethod
+    def _normalize_content(content: str) -> str:
+        value = content.strip()
+        if not value:
+            raise ValueError("Message content cannot be empty")
+        return value
 
     def _messages_for_model(
         self, session: AIChatSession, current: AIChatMessage
