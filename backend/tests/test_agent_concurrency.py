@@ -336,3 +336,4 @@ async def test_redis_keys_hash_provider_and_tool_identifiers():
     assert requested.provider_id not in serialized_keys
     assert requested.tool_name not in serialized_keys
     assert all(key.startswith("test:agent:concurrency:") for key in keys)
+    assert all("{agent-concurrency}" in key for key in keys)
