@@ -210,6 +210,16 @@ def test_research_evidence_requires_web_sources_and_reviewable_content(api_conte
     assert rejected.status_code == 422
     assert empty_review.status_code == 409
 
+    credentialed = evidence_payload()
+    credentialed["profile_evidence"][0]["source_url"] = (
+        "https://token:secret@acme.example/private-report"
+    )
+    leaked_credentials = client.put(
+        f"/api/v1/agent/research-jobs/{job_id}/evidence",
+        json=credentialed,
+    )
+    assert leaked_credentials.status_code == 422
+
 
 def test_approved_research_generates_idempotent_evidence_bound_draft(api_context):
     client, db, _ = api_context
@@ -254,6 +264,14 @@ def test_approved_research_generates_idempotent_evidence_bound_draft(api_context
     assert "Opened a German sales office" in prompt
     assert "missing_signals" in prompt
     assert backend.closed is True
+
+    customer.job_title = "Chief Procurement Officer"
+    db.commit()
+    changed_context = client.post(
+        f"/api/v1/agent/research-jobs/{job['id']}/drafts",
+        json=command,
+    )
+    assert changed_context.status_code == 409
 
 
 def test_draft_generation_and_approval_fail_closed_on_stale_or_suppressed_context(
