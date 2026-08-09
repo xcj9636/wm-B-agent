@@ -1,16 +1,25 @@
 <template>
-  <div class="customer-detail">
-    <el-page-header @back="$router.back()">
-      <template #content>
-        <span class="text-large font-600 mr-3">{{ customer?.username }}</span>
-      </template>
-    </el-page-header>
+  <div class="customer-detail page-stack">
+    <header class="page-heading">
+      <div>
+        <el-button
+          text
+          class="back-button"
+          @click="$router.back()"
+        >
+          <el-icon><ArrowLeft /></el-icon>
+          Customers
+        </el-button>
+        <h1>{{ customer?.username || 'Customer details' }}</h1>
+        <p>Identity, contact details and current engagement classification.</p>
+      </div>
+    </header>
 
     <el-descriptions
       v-if="customer"
+      class="detail-surface"
       :column="3"
       border
-      style="margin-top: 20px"
     >
       <el-descriptions-item label="Email">
         {{ customer.email }}
@@ -99,9 +108,35 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.customer-detail {
-  .text-large {
-    font-size: 20px;
+.back-button {
+  margin: 0 0 8px -12px;
+  color: var(--text-secondary);
+}
+
+.detail-surface {
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+
+@media (max-width: 760px) {
+  .detail-surface :deep(.el-descriptions__body),
+  .detail-surface :deep(.el-descriptions__table),
+  .detail-surface :deep(.el-descriptions__table tbody),
+  .detail-surface :deep(.el-descriptions__table tr) {
+    display: block;
+    width: 100%;
+  }
+
+  .detail-surface :deep(.el-descriptions__cell) {
+    display: flex;
+    width: 100%;
+  }
+
+  .detail-surface :deep(.el-descriptions__label) {
+    min-width: 112px;
   }
 }
 </style>

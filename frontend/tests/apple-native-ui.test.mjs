@@ -62,6 +62,7 @@ test('visible console copy contains no forbidden dash typography', () => {
     'src/views/Analytics.vue',
     'src/views/Operations.vue',
     'src/views/Settings.vue',
+    'src/views/DeadLetters.vue',
   ]
   const combined = files.map(source).join('\n')
   assert.doesNotMatch(combined, /[—–]/)

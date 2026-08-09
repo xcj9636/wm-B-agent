@@ -1,11 +1,11 @@
 <template>
   <section
-    class="dead-letters"
+    class="dead-letters page-stack"
     aria-labelledby="dead-letters-title"
   >
-    <header class="page-header">
+    <header class="page-heading">
       <div>
-        <p class="eyebrow">
+        <p class="page-kicker">
           Reliable execution
         </p>
         <h1 id="dead-letters-title">
@@ -252,7 +252,7 @@ const form = reactive<DeadLetterResolutionCommand>({
 
 const referenceValidator = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (!EVIDENCE_PATTERN.test(value || '')) {
-    callback(new Error('Use a 3–128 character audit or ticket reference.'))
+    callback(new Error('Use an audit or ticket reference between 3 and 128 characters.'))
     return
   }
   callback()
@@ -333,32 +333,6 @@ onMounted(loadDeadLetters)
 </script>
 
 <style lang="scss" scoped>
-.dead-letters {
-  display: grid;
-  gap: 20px;
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--el-color-primary);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-h1 {
-  margin: 0;
-  font-size: 28px;
-}
-
 .page-description {
   margin: 8px 0 0;
   color: var(--el-text-color-secondary);
@@ -420,7 +394,7 @@ code {
 }
 
 @media (max-width: 720px) {
-  .page-header,
+  .page-heading,
   .toolbar {
     align-items: stretch;
     flex-direction: column;

@@ -1,7 +1,13 @@
 <template>
-  <div class="workflows">
-    <div class="page-header">
-      <h1>Workflows</h1>
+  <div class="workflows page-stack">
+    <header class="page-heading">
+      <div>
+        <p class="page-kicker">
+          Automation
+        </p>
+        <h1>Workflows</h1>
+        <p>Build, inspect and run reusable business automations.</p>
+      </div>
       <el-button
         type="primary"
         @click="showCreateDialog = true"
@@ -9,9 +15,9 @@
         <el-icon><Plus /></el-icon>
         Create Workflow
       </el-button>
-    </div>
+    </header>
 
-    <el-card>
+    <el-card shadow="never">
       <el-table
         v-loading="loading"
         :data="workflows"
@@ -193,18 +199,3 @@ onMounted(() => {
   fetchWorkflows()
 })
 </script>
-
-<style lang="scss" scoped>
-.workflows {
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-}
-</style>

@@ -5,7 +5,7 @@
       aria-hidden="true"
     />
     <div
-      class="login-ambient login-ambient--violet"
+      class="login-ambient login-ambient--soft-blue"
       aria-hidden="true"
     />
 
@@ -35,7 +35,10 @@
       </header>
 
       <div class="login-content">
-        <div class="app-icon" aria-hidden="true">
+        <div
+          class="app-icon"
+          aria-hidden="true"
+        >
           B
         </div>
         <div class="login-heading">
@@ -155,6 +158,7 @@ async function handleLogin() {
 .login-page {
   position: relative;
   display: grid;
+  width: 100%;
   min-height: 100dvh;
   place-items: center;
   overflow: hidden;
@@ -180,10 +184,10 @@ async function handleLogin() {
   background: color-mix(in srgb, var(--apple-blue) 45%, transparent);
 }
 
-.login-ambient--violet {
+.login-ambient--soft-blue {
   bottom: -34%;
   left: 2%;
-  background: rgb(175 82 222 / 0.24);
+  background: color-mix(in srgb, var(--apple-blue) 22%, transparent);
 }
 
 .login-window {

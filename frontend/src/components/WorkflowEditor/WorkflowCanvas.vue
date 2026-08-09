@@ -490,17 +490,19 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--el-fill-color-lighter);
+  background-color: var(--surface-canvas);
+  background-image: radial-gradient(circle, var(--border-hairline) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 .canvas-container {
   width: 100%;
   height: 100%;
   position: relative;
-  transition: transform 0.2s;
+  transition: transform 220ms var(--motion-spring);
 
   &.drag-over {
-    background: var(--el-fill-color-light);
+    background-color: var(--surface-selected);
   }
 }
 
@@ -510,12 +512,12 @@ onUnmounted(() => {
   left: 50%;
   transform: translate(-50%, -50%);
   text-align: center;
-  color: var(--el-text-color-secondary);
+  color: var(--text-secondary);
 
   .el-icon {
     font-size: 48px;
     margin-bottom: 16px;
-    color: var(--el-border-color);
+    color: var(--text-tertiary);
   }
 }
 
@@ -528,16 +530,18 @@ onUnmounted(() => {
 .workflow-node {
   position: absolute;
   width: 200px;
-  background: var(--el-bg-color);
-  border: 2px solid var(--el-border-color);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
   cursor: move;
   user-select: none;
-  transition: border-color 0.2s;
+  transition: transform 180ms var(--motion-spring), border-color 180ms ease, box-shadow 180ms ease;
 
   &:hover {
-    border-color: var(--el-color-primary);
+    border-color: color-mix(in srgb, var(--apple-blue) 48%, var(--border-hairline));
+    box-shadow: 0 10px 30px rgb(15 23 42 / 0.12);
+    transform: translateY(-1px);
   }
 }
 
@@ -546,11 +550,12 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--el-border-color-light);
-  background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--border-hairline);
+  border-radius: 11px 11px 0 0;
+  background: var(--surface-sunken);
 
   &.selected {
-    background: var(--el-color-primary-light-9);
+    background: var(--surface-selected);
   }
 }
 
@@ -570,14 +575,15 @@ onUnmounted(() => {
   gap: 4px;
   margin-top: 8px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--text-secondary);
 }
 
 .connection-point {
   position: absolute;
   width: 12px;
   height: 12px;
-  background: var(--el-color-primary);
+  border: 2px solid var(--surface-elevated);
+  background: var(--apple-blue);
   border-radius: 50%;
   cursor: pointer;
   transition: transform 0.2s;
@@ -622,10 +628,13 @@ onUnmounted(() => {
   position: absolute;
   bottom: 20px;
   left: 20px;
-  background: var(--el-bg-color);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-glass);
   padding: 8px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
 }
 
 .skill-palette {
@@ -634,17 +643,19 @@ onUnmounted(() => {
   top: 0;
   width: 260px;
   height: 100%;
-  background: var(--el-bg-color);
-  border-right: 1px solid var(--el-border-color);
+  border-right: 1px solid var(--border-hairline);
+  background: var(--surface-glass);
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 8px 0 28px rgb(15 23 42 / 0.08);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
   z-index: 100;
 }
 
 .palette-header {
   padding: 16px;
-  border-bottom: 1px solid var(--el-border-color);
+  border-bottom: 1px solid var(--border-hairline);
   font-weight: 600;
 }
 
@@ -660,26 +671,27 @@ onUnmounted(() => {
   gap: 12px;
   padding: 10px;
   margin-bottom: 8px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
   cursor: grab;
-  transition: all 0.2s;
+  transition: transform 180ms var(--motion-spring), border-color 180ms ease, background-color 180ms ease;
 
   &:hover {
-    border-color: var(--el-color-primary);
-    background: var(--el-fill-color-light);
+    border-color: var(--apple-blue);
+    background: var(--surface-selected);
+    transform: translateY(-1px);
   }
 }
 
 .skill-icon {
   width: 32px;
   height: 32px;
-  background: var(--el-fill-color-light);
-  border-radius: 6px;
+  background: var(--surface-sunken);
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--el-color-primary);
+  color: var(--apple-blue);
 }
 
 .skill-info {
@@ -696,7 +708,7 @@ onUnmounted(() => {
 
 .skill-category {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--text-secondary);
 }
 
 .properties-header {
@@ -710,7 +722,7 @@ onUnmounted(() => {
   h4 {
     margin: 20px 0 12px;
     font-size: 14px;
-    color: var(--el-text-color-secondary);
+    color: var(--text-secondary);
   }
 }
 </style>

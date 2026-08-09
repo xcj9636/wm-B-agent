@@ -1,17 +1,24 @@
 <template>
-  <div class="customers">
-    <div class="page-header">
-      <h1>Customers</h1>
+  <div class="customers page-stack">
+    <header class="page-heading">
+      <div>
+        <p class="page-kicker">
+          Relationships
+        </p>
+        <h1>Customers</h1>
+        <p>Review customer identity, reach, lifecycle state and engagement context.</p>
+      </div>
       <el-button
         type="primary"
-        @click="showImportDialog = true"
+        disabled
+        title="Customer import is not enabled by the backend"
       >
         <el-icon><Upload /></el-icon>
         Import
       </el-button>
-    </div>
+    </header>
 
-    <el-card>
+    <el-card shadow="never">
       <el-table
         v-loading="loading"
         :data="customers"
@@ -73,7 +80,6 @@ const router = useRouter()
 
 const loading = ref(false)
 const customers = ref<any[]>([])
-const showImportDialog = ref(false)
 
 async function fetchCustomers() {
   loading.value = true
@@ -104,18 +110,3 @@ onMounted(() => {
   fetchCustomers()
 })
 </script>
-
-<style lang="scss" scoped>
-.customers {
-  .page-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-}
-</style>

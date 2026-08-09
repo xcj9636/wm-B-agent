@@ -1,13 +1,27 @@
 <template>
-  <div class="conversation-detail">
-    <el-page-header @back="$router.back()">
-      <template #content>
-        <span class="text-large font-600 mr-3">Conversation: {{ conversationId }}</span>
-      </template>
-    </el-page-header>
+  <div class="conversation-detail page-stack">
+    <header class="page-heading">
+      <div>
+        <el-button
+          text
+          class="back-button"
+          @click="$router.back()"
+        >
+          <el-icon><ArrowLeft /></el-icon>
+          Conversations
+        </el-button>
+        <h1>Conversation</h1>
+        <p class="conversation-id">
+          {{ conversationId }}
+        </p>
+      </div>
+    </header>
 
     <div class="conversation-content">
-      <el-card class="messages-panel">
+      <el-card
+        class="messages-panel"
+        shadow="never"
+      >
         <div class="messages-list">
           <div
             v-for="message in messages"
@@ -45,7 +59,10 @@
         </div>
       </el-card>
 
-      <el-card class="info-panel">
+      <el-card
+        class="info-panel"
+        shadow="never"
+      >
         <template #header>
           Conversation Info
         </template>
@@ -162,21 +179,31 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .conversation-detail {
-  .text-large {
-    font-size: 20px;
+  .back-button {
+    margin: 0 0 8px -12px;
+    color: var(--text-secondary);
+  }
+
+  .conversation-id {
+    max-width: min(720px, 82vw);
+    overflow: hidden;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .conversation-content {
     display: grid;
     grid-template-columns: 1fr 300px;
     gap: 20px;
-    margin-top: 20px;
   }
 
   .messages-panel {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 200px);
+    min-height: 560px;
+    height: calc(100dvh - 220px);
   }
 
   .messages-list {
@@ -190,7 +217,7 @@ onMounted(() => {
 
     &.user {
       .message-bubble {
-        background: var(--el-color-primary);
+        background: var(--apple-blue);
         color: white;
         margin-left: auto;
       }
@@ -198,15 +225,15 @@ onMounted(() => {
 
     &.assistant {
       .message-bubble {
-        background: var(--el-fill-color-light);
+        background: var(--surface-sunken);
       }
     }
   }
 
   .message-bubble {
     max-width: 70%;
-    padding: 12px;
-    border-radius: 12px;
+    padding: 10px 13px;
+    border-radius: 17px;
 
     .message-role {
       font-size: 12px;
@@ -228,7 +255,7 @@ onMounted(() => {
 
   .message-input {
     padding: 16px;
-    border-top: 1px solid var(--el-border-color);
+    border-top: 1px solid var(--border-hairline);
 
     .el-textarea {
       margin-bottom: 12px;
@@ -237,6 +264,16 @@ onMounted(() => {
 
   .info-panel {
     height: fit-content;
+  }
+}
+
+@media (max-width: 980px) {
+  .conversation-detail .conversation-content {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-detail .messages-panel {
+    height: min(640px, calc(100dvh - 180px));
   }
 }
 </style>

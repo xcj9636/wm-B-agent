@@ -1,8 +1,23 @@
 <template>
-  <div class="conversations">
-    <h1>Conversations</h1>
+  <div class="conversations page-stack">
+    <header class="page-heading">
+      <div>
+        <p class="page-kicker">
+          Customer engagement
+        </p>
+        <h1>Conversations</h1>
+        <p>Monitor active exchanges, intent and AI handling state.</p>
+      </div>
+      <el-button
+        :loading="loading"
+        @click="fetchConversations"
+      >
+        <el-icon><Refresh /></el-icon>
+        Refresh
+      </el-button>
+    </header>
 
-    <el-card>
+    <el-card shadow="never">
       <el-table
         v-loading="loading"
         :data="conversations"
@@ -104,11 +119,3 @@ onMounted(() => {
   fetchConversations()
 })
 </script>
-
-<style lang="scss" scoped>
-.conversations {
-  h1 {
-    margin-bottom: 20px;
-  }
-}
-</style>

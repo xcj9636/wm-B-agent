@@ -1,6 +1,8 @@
 <template>
   <div class="workflow-editor">
     <WorkflowToolbar
+      :title="workflowForm.name"
+      @back="router.push('/workflows')"
       @save="onSave"
       @execute="onExecute"
       @export="onExport"
@@ -92,7 +94,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import WorkflowToolbar from '@/components/WorkflowEditor/WorkflowToolbar.vue'
@@ -103,6 +105,7 @@ import { workflowApi } from '@/api/workflow'
 import { skillApi } from '@/api/skill'
 
 const route = useRoute()
+const router = useRouter()
 
 // Workflow form
 interface WorkflowForm {
@@ -317,7 +320,13 @@ onMounted(() => {
 .workflow-editor {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 60px);
+  height: calc(100dvh - 124px);
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-window);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
 }
 
 .editor-layout {
@@ -327,15 +336,15 @@ onMounted(() => {
 }
 
 .editor-panel {
-  width: 350px;
-  padding: 16px;
-  border-left: 1px solid var(--el-border-color);
-  background: var(--el-bg-color-page);
+  width: 330px;
+  padding: 14px;
+  border-left: 1px solid var(--border-hairline);
+  background: var(--surface-sidebar);
 }
 
 .properties-card {
   :deep(.el-card__body) {
-    padding: 20px;
+    padding: 16px;
   }
 
   h4 {
@@ -349,5 +358,11 @@ onMounted(() => {
     gap: 8px;
     margin-top: 20px;
   }
+}
+
+@media (max-width: 980px) {
+  .workflow-editor { height: auto; min-height: calc(100dvh - 108px); }
+  .editor-layout { min-height: 720px; flex-direction: column; }
+  .editor-panel { width: 100%; border-top: 1px solid var(--border-hairline); border-left: 0; }
 }
 </style>
