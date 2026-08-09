@@ -105,6 +105,8 @@ docker compose up --build
 ## 架构计划
 
 - [B-agent × OmniRoute 二次改造实施蓝图](plans/b-agent-omniroute-integration-blueprint.md)
+- [OmniRoute 生产部署与回滚 Runbook](docs/runbooks/omniroute-deployment.md)
+- [可靠执行与 Outbox 运维 Runbook](docs/runbooks/reliable-execution.md)
 - [项目代码落实方案](项目代码落实.md)
 
 ## 许可证
