@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.database import AIChatMessage, AgentRun, AgentTurn, User
+from app.services.agent_concurrency import ConcurrencyLimitExceeded
 from app.services.ai_chat import AIChatService
 from app.services.data_policy import DataPolicyUnavailable
 from app.services.idempotency import IdempotencyConflict
@@ -59,7 +60,24 @@ class StreamingChatBackend(ChatBackend):
         yield LLMStreamChunk(request_id=request.request_id, delta="[[EMAIL_1]]")
 
 
-def user_and_session(db_session, backend):
+class ConcurrencyGate:
+    def __init__(self, *, fail_scope=None):
+        self.fail_scope = fail_scope
+        self.acquired = []
+        self.released = []
+
+    async def acquire(self, request, *, now, lease_seconds):
+        self.acquired.append((request, now, lease_seconds))
+        if self.fail_scope is not None:
+            raise ConcurrencyLimitExceeded(self.fail_scope)
+        return SimpleNamespace(lease_id="test-concurrency-lease")
+
+    async def release(self, lease):
+        self.released.append(lease)
+        return True
+
+
+def user_and_session(db_session, backend, concurrency=None):
     user = User(
         username="turn-user",
         email="turn-user@example.com",
@@ -68,7 +86,11 @@ def user_and_session(db_session, backend):
     )
     db_session.add(user)
     db_session.commit()
-    service = AIChatService(db_session, ChatRuntime(backend))
+    service = AIChatService(
+        db_session,
+        ChatRuntime(backend),
+        concurrency=concurrency or ConcurrencyGate(),
+    )
     session = service.create_session(user.id, "Fenced chat")
     return user, session, service
 
@@ -97,6 +119,13 @@ async def test_ai_chat_completion_atomically_completes_a_fenced_turn(db_session)
     assert run.turn_id == turn.id
     assert run.generation_epoch == turn.generation_epoch
     assert "Hello" not in repr(run.__dict__)
+    assert len(service._concurrency.acquired) == 1
+    request = service._concurrency.acquired[0][0]
+    assert request.org_id == run.org_id
+    assert request.user_id == user.id
+    assert request.provider_id is None
+    assert request.tool_name is None
+    assert len(service._concurrency.released) == 1
     assert backend.closed is True
 
 
@@ -120,6 +149,7 @@ async def test_ai_chat_failure_leaves_a_durable_failed_turn(db_session):
     assert run.status == "failed"
     assert run.error_code == "agent_execution_failed"
     assert run.completed_at is not None
+    assert len(service._concurrency.released) == 1
     assert backend.closed is True
 
 
@@ -155,6 +185,7 @@ async def test_ai_chat_idempotent_replay_returns_persisted_answer_without_new_ll
     assert backend.call_count == 1
     assert db_session.query(AgentTurn).count() == 1
     assert db_session.query(AgentRun).count() == 1
+    assert len(service._concurrency.acquired) == 1
 
 
 @pytest.mark.asyncio
@@ -250,6 +281,7 @@ async def test_restricted_secret_is_rejected_before_message_or_llm_persistence(d
     assert run.status == "failed"
     assert run.sensitivity == "restricted"
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in repr(run.__dict__)
+    assert service._concurrency.acquired == []
 
 
 @pytest.mark.asyncio
@@ -274,6 +306,28 @@ async def test_stream_redacts_provider_input_and_rehydrates_done_snapshot(db_ses
     assert events[-1]["event"] == "done"
     assert events[-1]["data"]["content"] == "Contact buyer@example.com"
     assert db_session.query(AgentRun).one().status == "completed"
+    assert len(service._concurrency.released) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrency_limit_fails_run_before_model_invocation(db_session):
+    backend = ChatBackend()
+    gate = ConcurrencyGate(fail_scope="user")
+    user, session, service = user_and_session(db_session, backend, gate)
+
+    with pytest.raises(ConcurrencyLimitExceeded) as blocked:
+        await service.complete(
+            session.id,
+            user.id,
+            "Hello",
+            idempotency_key="chat-concurrency-limited",
+        )
+
+    assert blocked.value.scope == "user"
+    assert backend.requests == []
+    assert db_session.query(AIChatMessage).count() == 0
+    assert db_session.query(AgentRun).one().status == "failed"
+    assert gate.released == []
 
 
 @pytest.mark.asyncio

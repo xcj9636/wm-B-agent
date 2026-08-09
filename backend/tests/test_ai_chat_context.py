@@ -15,7 +15,11 @@ def test_ai_chat_uses_token_budgeted_untrusted_context_in_chronological_order():
     ]
     current = message("user", "current-request")
     session = SimpleNamespace(messages=[*history, current])
-    service = AIChatService(db=None, runtime=None)
+    service = AIChatService(
+        db=None,
+        runtime=None,
+        concurrency=SimpleNamespace(),
+    )
 
     messages = service._messages_for_model(session, current)
 
