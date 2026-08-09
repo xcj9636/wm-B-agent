@@ -22,6 +22,8 @@ from app.services.ai_runtime import (
     AIRuntimeService,
     get_ai_runtime_service,
 )
+from app.services.agent_runtime.turns import TurnBusy
+from app.services.idempotency import IdempotencyConflict
 
 
 router = APIRouter()
@@ -167,6 +169,8 @@ async def create_chat_message(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (IdempotencyConflict, TurnBusy) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/chat/sessions/{session_id}/messages/stream")
