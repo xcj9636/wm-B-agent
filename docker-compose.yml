@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
     command: alembic upgrade head
     environment:
-      - DATABASE_URL=postgresql://admin:password@db:5432/trade_ai
+      - DATABASE_URL=postgresql+pg8000://admin:password@db:5432/trade_ai
     depends_on:
       db:
         condition: service_healthy
@@ -58,7 +58,7 @@ services:
       dockerfile: Dockerfile
     container_name: trade_ai_backend
     environment:
-      - DATABASE_URL=postgresql://admin:password@db:5432/trade_ai
+      - DATABASE_URL=postgresql+pg8000://admin:password@db:5432/trade_ai
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/2
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
@@ -99,7 +99,7 @@ services:
     container_name: trade_ai_celery_worker
     command: celery -A app.tasks.celery_worker worker --loglevel=info --concurrency=4
     environment:
-      - DATABASE_URL=postgresql://admin:password@db:5432/trade_ai
+      - DATABASE_URL=postgresql+pg8000://admin:password@db:5432/trade_ai
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/2
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
@@ -177,7 +177,7 @@ services:
     container_name: trade_ai_celery_beat
     command: celery -A app.tasks.celery_worker beat --loglevel=info --schedule=/var/lib/celery/celerybeat-schedule
     environment:
-      - DATABASE_URL=postgresql://admin:password@db:5432/trade_ai
+      - DATABASE_URL=postgresql+pg8000://admin:password@db:5432/trade_ai
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/2
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
