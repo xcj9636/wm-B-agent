@@ -24,7 +24,14 @@ from app.models.database import (
 )
 from app.core.agent import get_agent
 from app.services.outbox import OutboxService
-from app.services.agent_runs import AgentRunService
+from app.services.agent_concurrency import (
+    close_agent_concurrency_limiter,
+    get_agent_concurrency_limiter,
+)
+from app.services.agent_runs import AgentRunService, RunLeaseConflict
+from app.services.ai_chat import AIChatService
+from app.services.ai_runtime import AIRuntimeService
+from app.services.llm.contracts import LLMUseCase
 from app.services.outbox_delivery import (
     DeliveryResult,
     get_outbox_delivery_router,
@@ -43,6 +50,7 @@ from app.services.prospecting_jobs import (
 )
 
 logger = logging.getLogger(__name__)
+AGENT_CHAT_RUN_LEASE_SECONDS = 300
 
 
 @celery.task(
@@ -59,6 +67,101 @@ def sweep_agent_runs_task():
             metric = "requeued" if run.status == "queued" else run.status
             if metric in counters:
                 counters[metric] += 1
+        return counters
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+async def _resume_claimed_chat_runs(db, runs, *, worker_id: str):
+    counters = {
+        "completed": 0,
+        "failed": 0,
+        "lease_conflict": 0,
+    }
+    chat = AIChatService(
+        db,
+        AIRuntimeService(db),
+        concurrency=get_agent_concurrency_limiter(),
+    )
+    try:
+        for run in runs:
+            try:
+                await chat.resume_claimed(
+                    run.id,
+                    worker_id=worker_id,
+                    fencing_token=run.fencing_token,
+                )
+                counters["completed"] += 1
+            except RunLeaseConflict:
+                counters["lease_conflict"] += 1
+            except Exception as exc:
+                counters["failed"] += 1
+                logger.warning(
+                    "Queued AI chat run failed",
+                    extra={
+                        "run_id": str(run.id),
+                        "error_type": type(exc).__name__,
+                    },
+                )
+    finally:
+        try:
+            await close_agent_concurrency_limiter()
+        except Exception as exc:
+            logger.warning(
+                "Agent concurrency client cleanup failed",
+                extra={"error_type": type(exc).__name__},
+            )
+    return counters
+
+
+@celery.task(
+    bind=True,
+    name="app.tasks.task_functions.run_agent_chat_runs_task",
+    max_retries=0,
+    acks_late=True,
+    soft_time_limit=240,
+    time_limit=270,
+)
+def run_agent_chat_runs_task(
+    self,
+    worker_id: str = None,
+    batch_size: int = 10,
+):
+    """Claim and resume a bounded batch of durable operator-chat runs."""
+    if batch_size <= 0 or batch_size > 50:
+        raise ValueError("batch_size must contain 1 to 50 runs")
+    worker_id = str(
+        worker_id
+        or getattr(self.request, "hostname", "agent-chat-worker")
+    )[:100]
+    db = SessionLocal()
+    try:
+        runs = AgentRunService(db).claim_batch(
+            worker_id=worker_id,
+            now=datetime.utcnow(),
+            limit=batch_size,
+            lease_seconds=AGENT_CHAT_RUN_LEASE_SECONDS,
+            use_cases=(LLMUseCase.LIVE_REPLY.value,),
+        )
+        counters = {
+            "claimed": len(runs),
+            "completed": 0,
+            "failed": 0,
+            "lease_conflict": 0,
+        }
+        if runs:
+            counters.update(
+                asyncio.run(
+                    _resume_claimed_chat_runs(
+                        db,
+                        runs,
+                        worker_id=worker_id,
+                    )
+                )
+            )
         return counters
     except Exception:
         db.rollback()

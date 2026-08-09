@@ -1,7 +1,7 @@
 """Durable agent-run leasing, fencing, and crash recovery."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -154,17 +154,27 @@ class AgentRunService:
         now: datetime,
         limit: int,
         lease_seconds: int,
+        use_cases: Optional[Sequence[str]] = None,
     ) -> List[AgentRun]:
         self._validate_lease_request(worker_id, limit, lease_seconds)
         now = self._naive_utc(now)
         self.recover_expired(now=now)
-        rows = (
+        query = (
             self._db.query(AgentRun)
             .filter(
                 AgentRun.status == "queued",
                 AgentRun.deadline_at > now,
             )
-            .order_by(AgentRun.created_at, AgentRun.id)
+        )
+        if use_cases is not None:
+            normalized_use_cases = tuple(dict.fromkeys(use_cases))
+            if not normalized_use_cases or any(
+                not value or len(value) > 50 for value in normalized_use_cases
+            ):
+                raise ValueError("use_cases must contain valid execution intents")
+            query = query.filter(AgentRun.use_case.in_(normalized_use_cases))
+        rows = (
+            query.order_by(AgentRun.created_at, AgentRun.id)
             .with_for_update(skip_locked=True)
             .limit(limit)
             .all()

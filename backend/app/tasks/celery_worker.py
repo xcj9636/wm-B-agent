@@ -39,6 +39,10 @@ celery.conf.update(
             "task": "app.tasks.task_functions.sweep_agent_runs_task",
             "schedule": 15.0,
         },
+        "execute-agent-chat-runs": {
+            "task": "app.tasks.task_functions.run_agent_chat_runs_task",
+            "schedule": 5.0,
+        },
     },
 )
 

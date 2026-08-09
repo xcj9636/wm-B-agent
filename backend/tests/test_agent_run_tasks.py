@@ -50,6 +50,8 @@ def test_agent_chat_queue_runner_claims_only_supported_runs(
             deadline_at=now + timedelta(hours=1),
         )
     )
+    chat_run_id = chat_run.id
+    other_run_id = other_run.id
     resumed = []
 
     class FakeChatService:
@@ -95,9 +97,9 @@ def test_agent_chat_queue_runner_claims_only_supported_runs(
         "failed": 0,
         "lease_conflict": 0,
     }
-    assert resumed == [(chat_run.id, "chat-worker-1", 1)]
-    assert db_session.get(AgentRun, chat_run.id).status == "completed"
-    assert db_session.get(AgentRun, other_run.id).status == "queued"
+    assert resumed == [(chat_run_id, "chat-worker-1", 1)]
+    assert db_session.get(AgentRun, chat_run_id).status == "completed"
+    assert db_session.get(AgentRun, other_run_id).status == "queued"
 
 
 def test_agent_run_sweeper_requeues_expired_safe_work(
