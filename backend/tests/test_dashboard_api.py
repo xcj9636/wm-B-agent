@@ -3,6 +3,19 @@ from datetime import datetime, timedelta
 from app.models.database import AuditLog, Customer, IntentLevel
 
 
+def test_dashboard_endpoint_serializes_empty_daily_stats(api_context):
+    client, _, _ = api_context
+
+    response = client.get("/api/v1/stats/dashboard")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["today"]["new_customers"] == 0
+    assert payload["week"]["workflows_failed"] == 0
+    assert payload["month"]["emails_sent"] == 0
+    assert payload["conversion_rate"] == 0
+
+
 def test_high_intent_endpoint_returns_only_prioritized_leads(api_context):
     client, db, _ = api_context
     db.add_all(
