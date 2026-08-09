@@ -380,3 +380,113 @@ def test_schedule_task_sanitizes_queue_failures(
     assert result["results"][0]["error"] == "outreach_queue_failed"
     assert private_detail not in str(result)
     assert private_detail not in caplog.text
+
+
+def test_schedule_task_persists_batch_delivery_spacing(session_factory):
+    first_customer_id, _ = create_customer_and_account(session_factory)
+    session = session_factory()
+    try:
+        second_customer = Customer(
+            username="buyer-spacing-2",
+            platform="email",
+            email="buyer-spacing-2@example.com",
+        )
+        session.add(second_customer)
+        session.commit()
+        second_customer_id = second_customer.id
+    finally:
+        session.close()
+
+    task_functions.schedule_outreach_task.run(
+        customer_ids=[first_customer_id, second_customer_id],
+        channel="email",
+        template_id="intro-v1",
+        schedule_config={
+            "idempotency_key": "spaced-campaign",
+            "interval_min": 30,
+            "interval_max": 30,
+        },
+    )
+
+    session = session_factory()
+    try:
+        events = (
+            session.query(OutboxEvent)
+            .order_by(OutboxEvent.available_at)
+            .all()
+        )
+        assert len(events) == 2
+        spacing = events[1].available_at - events[0].available_at
+        assert spacing.total_seconds() >= 30
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_sender_persists_spacing_without_blocking_sleep(
+    session_factory,
+    monkeypatch,
+):
+    first_customer_id, account_id = create_customer_and_account(session_factory)
+    session = session_factory()
+    try:
+        second_customer = Customer(
+            username="buyer-auto-spacing-2",
+            platform="email",
+            email="buyer-auto-spacing-2@example.com",
+        )
+        session.add(second_customer)
+        session.commit()
+        second_customer_id = second_customer.id
+    finally:
+        session.close()
+
+    async def blocking_sleep_forbidden(*args, **kwargs):
+        raise AssertionError("producer must not sleep between durable queue writes")
+
+    skill = AutoSenderSkill(
+        {
+            "dry_run": False,
+            "enable_account_rotation": True,
+        }
+    )
+    monkeypatch.setattr(skill, "_random_delay", blocking_sleep_forbidden)
+    context = ExecutionContext(
+        workflow_id="workflow-spacing",
+        execution_id="execution-spacing",
+        input_data={
+            "customers": [
+                {
+                    "id": first_customer_id,
+                    "username": "buyer-1",
+                    "email": "buyer@example.com",
+                },
+                {
+                    "id": second_customer_id,
+                    "username": "buyer-auto-spacing-2",
+                    "email": "buyer-auto-spacing-2@example.com",
+                },
+            ],
+            "messages": {"subject": "Hello", "body": "Introduction"},
+            "channel": "email",
+            "accounts": [{"id": account_id, "account_type": "email"}],
+            "send_immediately": True,
+            "schedule": {"interval_min": 30, "interval_max": 30},
+        },
+    )
+
+    result = await skill.execute(context)
+
+    session = session_factory()
+    try:
+        events = (
+            session.query(OutboxEvent)
+            .order_by(OutboxEvent.available_at)
+            .all()
+        )
+        assert len(result["results"]) == 2
+        assert len(events) == 2
+        spacing = events[1].available_at - events[0].available_at
+        assert spacing.total_seconds() >= 30
+    finally:
+        session.close()
