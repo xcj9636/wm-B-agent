@@ -10,6 +10,13 @@ from app.models.database import Account, OutreachLog, OutreachStatus
 from app.services.outbox import OutboxCommand, OutboxService
 
 
+def delivery_spacing_seconds(schedule) -> int:
+    """Return deterministic batch spacing from legacy interval settings."""
+    minimum = max(int(schedule.get("interval_min", 30)), 0)
+    maximum = max(int(schedule.get("interval_max", 120)), minimum)
+    return (minimum + maximum) // 2
+
+
 class QueueOutreachCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -2,7 +2,7 @@
 Celery任务函数
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import logging
 import uuid
@@ -28,6 +28,7 @@ from app.services.outreach_queue import (
     OutreachQuotaExceeded,
     OutreachQueueService,
     QueueOutreachCommand,
+    delivery_spacing_seconds,
 )
 
 logger = logging.getLogger(__name__)
@@ -159,9 +160,13 @@ def schedule_outreach_task(
         if not campaign_key:
             raise ValueError("schedule_config.idempotency_key is required")
 
+        # Persist spacing instead of blocking this producer between messages.
+        first_available_at = datetime.utcnow()
+        spacing_seconds = delivery_spacing_seconds(schedule_config)
+
         # Create business records and outbox events in one transaction.
         results = []
-        for customer_id in customer_ids:
+        for index, customer_id in enumerate(customer_ids):
             customer = db.query(Customer).filter(Customer.id == customer_id).first()
             if not customer:
                 logger.warning(f"Customer not found: {customer_id}")
@@ -169,8 +174,9 @@ def schedule_outreach_task(
 
             try:
                 # Check timezone and schedule time
-                send_time = _calculate_send_time(customer, schedule_config)
-                now = datetime.utcnow()
+                send_time = first_available_at + timedelta(
+                    seconds=index * spacing_seconds
+                )
 
                 if channel == "email":
                     recipient = customer.email
@@ -399,13 +405,6 @@ def update_message_status_task(message_id: str):
         return {"success": False, "error": str(e)}
     finally:
         db.close()
-
-
-def _calculate_send_time(customer: Customer, schedule_config: Dict[str, Any]) -> datetime:
-    """计算最佳发送时间"""
-    # Simple implementation - return now
-    # In production, would consider timezone and business hours
-    return datetime.utcnow()
 
 
 def _sync_outreach_result(

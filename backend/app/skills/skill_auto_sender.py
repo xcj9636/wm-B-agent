@@ -19,6 +19,7 @@ from app.services.outreach_queue import (
     OutreachQuotaExceeded,
     OutreachQueueService,
     QueueOutreachCommand,
+    delivery_spacing_seconds,
 )
 
 
@@ -160,6 +161,7 @@ class AutoSenderSkill(BaseSkill):
         failed_count = 0
         scheduled_count = 0
         queued_count = 0
+        spacing_seconds = delivery_spacing_seconds(schedule)
 
         # Process messages
         if isinstance(messages, list) and len(messages) == len(customers):
@@ -175,6 +177,7 @@ class AutoSenderSkill(BaseSkill):
                     business_key=(
                         f"auto:{context.execution_id}:{i}:{channel}"
                     ),
+                    queue_delay_seconds=i * spacing_seconds,
                 )
                 results.append(result)
 
@@ -186,10 +189,6 @@ class AutoSenderSkill(BaseSkill):
                     queued_count += 1
                 else:
                     failed_count += 1
-
-                # Random delay between sends
-                if not dry_run and i < len(customers) - 1:
-                    await self._random_delay(schedule)
 
         else:
             # Single message for all customers
@@ -204,6 +203,7 @@ class AutoSenderSkill(BaseSkill):
                     business_key=(
                         f"auto:{context.execution_id}:{i}:{channel}"
                     ),
+                    queue_delay_seconds=i * spacing_seconds,
                 )
                 results.append(result)
 
@@ -215,10 +215,6 @@ class AutoSenderSkill(BaseSkill):
                     queued_count += 1
                 else:
                     failed_count += 1
-
-                # Random delay between sends
-                if not dry_run and i < len(customers) - 1:
-                    await self._random_delay(schedule)
 
         # Update metrics
         context.set_state("send_stats", {
@@ -248,6 +244,7 @@ class AutoSenderSkill(BaseSkill):
         send_immediately: bool,
         dry_run: bool,
         business_key: str,
+        queue_delay_seconds: int,
     ) -> Dict[str, Any]:
         """Send a single message"""
         result = {
@@ -260,10 +257,15 @@ class AutoSenderSkill(BaseSkill):
         }
 
         try:
-            available_at = datetime.utcnow()
+            available_at = datetime.utcnow() + timedelta(
+                seconds=queue_delay_seconds
+            )
             # Check if should schedule instead of immediate send
             if not send_immediately and schedule:
-                available_at = self._calculate_send_time(customer, schedule)
+                available_at = self._calculate_send_time(
+                    customer,
+                    schedule,
+                ) + timedelta(seconds=queue_delay_seconds)
 
             # Get account
             account = self._get_next_account(channel, customer)
