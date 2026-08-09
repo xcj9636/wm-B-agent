@@ -1,14 +1,33 @@
 <template>
-  <el-card class="recent-activity" shadow="never">
+  <el-card
+    class="recent-activity"
+    shadow="never"
+  >
     <template #header>
       <div class="card-header">
         <div><strong>Recent activity</strong><span>Latest auditable workspace events</span></div>
-        <el-button text type="primary" :loading="loading" @click="refresh">Refresh</el-button>
+        <el-button
+          text
+          type="primary"
+          :loading="loading"
+          @click="refresh"
+        >
+          Refresh
+        </el-button>
       </div>
     </template>
 
-    <el-alert v-if="errorMessage" :title="errorMessage" type="warning" :closable="false" show-icon />
-    <div v-loading="loading" class="activity-content">
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <div
+      v-loading="loading"
+      class="activity-content"
+    >
       <el-timeline v-if="displayActivities.length">
         <el-timeline-item
           v-for="activity in displayActivities"
@@ -17,11 +36,22 @@
           :type="activityTypes[activity.type] || 'info'"
         >
           <div class="activity-item">
-            <el-icon class="activity-icon"><component :is="activityIcons[activity.type] || 'Notification'" /></el-icon>
+            <el-icon class="activity-icon">
+              <component :is="activityIcons[activity.type] || 'Notification'" />
+            </el-icon>
             <div>
               <p>{{ activity.description }}</p>
-              <div v-if="safeMetadata(activity.metadata).length" class="activity-meta">
-                <el-tag v-for="entry in safeMetadata(activity.metadata)" :key="entry" size="small" type="info" effect="plain">
+              <div
+                v-if="safeMetadata(activity.metadata).length"
+                class="activity-meta"
+              >
+                <el-tag
+                  v-for="entry in safeMetadata(activity.metadata)"
+                  :key="entry"
+                  size="small"
+                  type="info"
+                  effect="plain"
+                >
                   {{ entry }}
                 </el-tag>
               </div>
@@ -29,7 +59,10 @@
           </div>
         </el-timeline-item>
       </el-timeline>
-      <el-empty v-else-if="!loading" description="No recent activity" />
+      <el-empty
+        v-else-if="!loading"
+        description="No recent activity"
+      />
     </div>
   </el-card>
 </template>

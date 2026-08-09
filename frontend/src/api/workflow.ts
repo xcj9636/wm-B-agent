@@ -48,9 +48,11 @@ export const workflowApi = {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        let streamDone = false
 
-        while (true) {
+        while (!streamDone) {
           const { done, value } = await reader.read()
+          streamDone = done
           buffer += decoder.decode(value, { stream: !done })
           const lines = buffer.split('\n')
           buffer = lines.pop() || ''
@@ -69,8 +71,6 @@ export const workflowApi = {
             }
             if (event.error && !settled) throw new Error(event.error)
           }
-
-          if (done) break
         }
 
         if (!settled) throw new Error('Execution started without an execution identifier')

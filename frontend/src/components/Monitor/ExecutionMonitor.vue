@@ -1,5 +1,8 @@
 <template>
-  <el-card class="execution-monitor" shadow="never">
+  <el-card
+    class="execution-monitor"
+    shadow="never"
+  >
     <template #header>
       <div class="monitor-header">
         <div>
@@ -7,52 +10,155 @@
           <span>{{ liveExecution ? `Execution ${liveExecution.id}` : 'Waiting for an execution' }}</span>
         </div>
         <div class="header-actions">
-          <el-tag v-if="liveExecution" :type="statusType" effect="plain">{{ liveExecution.status }}</el-tag>
-          <el-button :disabled="!executionId" :loading="loading" @click="() => refresh()"><el-icon><Refresh /></el-icon></el-button>
+          <el-tag
+            v-if="liveExecution"
+            :type="statusType"
+            effect="plain"
+          >
+            {{ liveExecution.status }}
+          </el-tag>
+          <el-button
+            :disabled="!executionId"
+            :loading="loading"
+            @click="() => refresh()"
+          >
+            <el-icon><Refresh /></el-icon>
+          </el-button>
         </div>
       </div>
     </template>
 
-    <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon />
-    <div v-loading="loading" class="monitor-content">
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      :closable="false"
+      show-icon
+    />
+    <div
+      v-loading="loading"
+      class="monitor-content"
+    >
       <template v-if="liveExecution">
         <div class="progress-block">
           <div><span>Progress</span><strong>{{ progress }}%</strong></div>
-          <el-progress :percentage="progress" :status="progressStatus" />
+          <el-progress
+            :percentage="progress"
+            :status="progressStatus"
+          />
         </div>
 
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="Workflow ID">{{ liveExecution.workflow_id }}</el-descriptions-item>
-          <el-descriptions-item label="Current step">{{ liveExecution.current_step || 'None' }}</el-descriptions-item>
-          <el-descriptions-item label="Started">{{ formatTime(liveExecution.started_at) }}</el-descriptions-item>
-          <el-descriptions-item label="Finished">{{ formatTime(liveExecution.finished_at) }}</el-descriptions-item>
-          <el-descriptions-item label="Completed steps">{{ liveExecution.completed_steps.length }}</el-descriptions-item>
-          <el-descriptions-item label="Failed steps">{{ liveExecution.failed_steps.length }}</el-descriptions-item>
+        <el-descriptions
+          :column="2"
+          border
+        >
+          <el-descriptions-item label="Workflow ID">
+            {{ liveExecution.workflow_id }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Current step">
+            {{ liveExecution.current_step || 'None' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Started">
+            {{ formatTime(liveExecution.started_at) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Finished">
+            {{ formatTime(liveExecution.finished_at) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Completed steps">
+            {{ liveExecution.completed_steps.length }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Failed steps">
+            {{ liveExecution.failed_steps.length }}
+          </el-descriptions-item>
         </el-descriptions>
 
-        <el-alert v-if="liveExecution.error_msg" class="execution-error" :title="liveExecution.error_msg" type="error" :closable="false" show-icon />
+        <el-alert
+          v-if="liveExecution.error_msg"
+          class="execution-error"
+          :title="liveExecution.error_msg"
+          type="error"
+          :closable="false"
+          show-icon
+        />
 
         <div class="step-columns">
-          <section><h4>Completed</h4><el-tag v-for="step in liveExecution.completed_steps" :key="step" type="success" effect="plain">{{ step }}</el-tag><span v-if="!liveExecution.completed_steps.length">None</span></section>
-          <section><h4>Failed</h4><el-tag v-for="step in liveExecution.failed_steps" :key="step" type="danger" effect="plain">{{ step }}</el-tag><span v-if="!liveExecution.failed_steps.length">None</span></section>
+          <section>
+            <h4>Completed</h4><el-tag
+              v-for="step in liveExecution.completed_steps"
+              :key="step"
+              type="success"
+              effect="plain"
+            >
+              {{ step }}
+            </el-tag><span v-if="!liveExecution.completed_steps.length">None</span>
+          </section>
+          <section>
+            <h4>Failed</h4><el-tag
+              v-for="step in liveExecution.failed_steps"
+              :key="step"
+              type="danger"
+              effect="plain"
+            >
+              {{ step }}
+            </el-tag><span v-if="!liveExecution.failed_steps.length">None</span>
+          </section>
         </div>
 
         <el-collapse v-if="metricEntries.length">
-          <el-collapse-item title="Execution metrics" name="metrics">
-            <el-descriptions :column="1" border>
-              <el-descriptions-item v-for="[key, value] in metricEntries" :key="key" :label="key">{{ formatMetric(value) }}</el-descriptions-item>
+          <el-collapse-item
+            title="Execution metrics"
+            name="metrics"
+          >
+            <el-descriptions
+              :column="1"
+              border
+            >
+              <el-descriptions-item
+                v-for="[key, value] in metricEntries"
+                :key="key"
+                :label="key"
+              >
+                {{ formatMetric(value) }}
+              </el-descriptions-item>
             </el-descriptions>
           </el-collapse-item>
         </el-collapse>
 
         <div class="execution-actions">
-          <el-button v-if="liveExecution.status === 'running'" type="warning" :loading="actionLoading" @click="pauseExecution">Pause</el-button>
-          <el-button v-if="liveExecution.status === 'paused'" type="success" :loading="actionLoading" @click="resumeExecution">Resume</el-button>
-          <el-button v-if="isActive" type="danger" plain :loading="actionLoading" @click="cancelExecution">Cancel</el-button>
-          <el-button @click="emit('view-details', liveExecution)">View details</el-button>
+          <el-button
+            v-if="liveExecution.status === 'running'"
+            type="warning"
+            :loading="actionLoading"
+            @click="pauseExecution"
+          >
+            Pause
+          </el-button>
+          <el-button
+            v-if="liveExecution.status === 'paused'"
+            type="success"
+            :loading="actionLoading"
+            @click="resumeExecution"
+          >
+            Resume
+          </el-button>
+          <el-button
+            v-if="isActive"
+            type="danger"
+            plain
+            :loading="actionLoading"
+            @click="cancelExecution"
+          >
+            Cancel
+          </el-button>
+          <el-button @click="emit('view-details', liveExecution)">
+            View details
+          </el-button>
         </div>
       </template>
-      <el-empty v-else-if="!loading" description="Start a workflow to monitor its execution" />
+      <el-empty
+        v-else-if="!loading"
+        description="Start a workflow to monitor its execution"
+      />
     </div>
   </el-card>
 </template>

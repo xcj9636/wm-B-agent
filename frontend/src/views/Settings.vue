@@ -2,18 +2,26 @@
   <div class="page-stack settings-page">
     <header class="page-heading">
       <div>
-        <p class="page-kicker">System configuration</p>
+        <p class="page-kicker">
+          System configuration
+        </p>
         <h1>Settings</h1>
         <p>Configure the browser-to-backend connection and inspect linked delivery accounts.</p>
       </div>
-      <el-button :loading="loadingAccounts" @click="loadAccounts">
+      <el-button
+        :loading="loadingAccounts"
+        @click="loadAccounts"
+      >
         <el-icon><Refresh /></el-icon>
         Refresh accounts
       </el-button>
     </header>
 
     <el-row :gutter="16">
-      <el-col :xs="24" :xl="15">
+      <el-col
+        :xs="24"
+        :xl="15"
+      >
         <el-card class="settings-card">
           <template #header>
             <div class="card-title">
@@ -22,29 +30,49 @@
                 <strong>Backend API</strong>
                 <span>Applied immediately in this browser</span>
               </div>
-              <el-tag :type="connectionTagType" effect="plain">{{ connectionLabel }}</el-tag>
+              <el-tag
+                :type="connectionTagType"
+                effect="plain"
+              >
+                {{ connectionLabel }}
+              </el-tag>
             </div>
           </template>
 
-          <el-form label-position="top" @submit.prevent="saveBackendUrl">
+          <el-form
+            label-position="top"
+            @submit.prevent="saveBackendUrl"
+          >
             <el-form-item label="Base URL">
               <el-input
                 v-model="backendUrl"
                 clearable
                 placeholder="Leave empty to use the Vite or reverse-proxy origin"
               >
-                <template #prepend>HTTP(S)</template>
+                <template #prepend>
+                  HTTP(S)
+                </template>
               </el-input>
               <p class="field-help">
                 Example: http://localhost:8000. Empty uses the current origin and development proxy.
               </p>
             </el-form-item>
             <div class="form-actions">
-              <el-button type="primary" native-type="submit">Save and apply</el-button>
-              <el-button :loading="testingConnection" @click="testBackendConnection">
+              <el-button
+                type="primary"
+                native-type="submit"
+              >
+                Save and apply
+              </el-button>
+              <el-button
+                :loading="testingConnection"
+                @click="testBackendConnection"
+              >
                 Test connection
               </el-button>
-              <el-button @click="resetBackendUrl">Use proxy default</el-button>
+              <el-button @click="resetBackendUrl">
+                Use proxy default
+              </el-button>
             </div>
           </el-form>
 
@@ -57,11 +85,24 @@
             show-icon
           />
 
-          <el-descriptions v-if="health" class="health-grid" :column="2" border>
-            <el-descriptions-item label="Service">{{ health.app || 'B-Agent API' }}</el-descriptions-item>
-            <el-descriptions-item label="Version">{{ health.version || 'Not reported' }}</el-descriptions-item>
-            <el-descriptions-item label="Status">{{ health.status }}</el-descriptions-item>
-            <el-descriptions-item label="Effective URL">{{ effectiveUrl || 'Same origin' }}</el-descriptions-item>
+          <el-descriptions
+            v-if="health"
+            class="health-grid"
+            :column="2"
+            border
+          >
+            <el-descriptions-item label="Service">
+              {{ health.app || 'B-Agent API' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Version">
+              {{ health.version || 'Not reported' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Status">
+              {{ health.status }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Effective URL">
+              {{ effectiveUrl || 'Same origin' }}
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
 
@@ -73,7 +114,9 @@
                 <strong>Connected accounts</strong>
                 <span>Delivery identities exposed by the administration API</span>
               </div>
-              <el-tag effect="plain">{{ accounts.length }}</el-tag>
+              <el-tag effect="plain">
+                {{ accounts.length }}
+              </el-tag>
             </div>
           </template>
 
@@ -84,8 +127,17 @@
             :closable="false"
             show-icon
           />
-          <el-table v-else v-loading="loadingAccounts" :data="accounts" stripe>
-            <el-table-column prop="name" label="Account" min-width="170">
+          <el-table
+            v-else
+            v-loading="loadingAccounts"
+            :data="accounts"
+            stripe
+          >
+            <el-table-column
+              prop="name"
+              label="Account"
+              min-width="170"
+            >
               <template #default="{ row }">
                 <div class="account-name">
                   <strong>{{ row.name }}</strong>
@@ -93,15 +145,28 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="account_type" label="Type" width="170" />
-            <el-table-column label="State" width="120">
+            <el-table-column
+              prop="account_type"
+              label="Type"
+              width="170"
+            />
+            <el-table-column
+              label="State"
+              width="120"
+            >
               <template #default="{ row }">
-                <el-tag :type="row.is_active && row.is_verified ? 'success' : 'info'" effect="plain">
+                <el-tag
+                  :type="row.is_active && row.is_verified ? 'success' : 'info'"
+                  effect="plain"
+                >
                   {{ row.is_active ? (row.is_verified ? 'Ready' : 'Unverified') : 'Disabled' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="Daily usage" min-width="180">
+            <el-table-column
+              label="Daily usage"
+              min-width="180"
+            >
               <template #default="{ row }">
                 <el-progress
                   :percentage="usagePercentage(row)"
@@ -110,11 +175,17 @@
               </template>
             </el-table-column>
           </el-table>
-          <el-empty v-if="!loadingAccounts && !accountsError && accounts.length === 0" description="No connected accounts" />
+          <el-empty
+            v-if="!loadingAccounts && !accountsError && accounts.length === 0"
+            description="No connected accounts"
+          />
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :xl="9">
+      <el-col
+        :xs="24"
+        :xl="9"
+      >
         <el-card class="settings-card">
           <template #header>
             <div class="card-title">
@@ -123,16 +194,27 @@
             </div>
           </template>
           <div class="profile">
-            <el-avatar :size="48">{{ userInitial }}</el-avatar>
+            <el-avatar :size="48">
+              {{ userInitial }}
+            </el-avatar>
             <div>
               <strong>{{ authStore.user?.fullName || authStore.user?.username || 'Unknown user' }}</strong>
               <span>{{ authStore.user?.email || 'No email' }}</span>
             </div>
           </div>
-          <el-descriptions :column="1" border>
-            <el-descriptions-item label="Role">{{ authStore.user?.role || 'user' }}</el-descriptions-item>
-            <el-descriptions-item label="Administrator">{{ authStore.isAdmin ? 'Yes' : 'No' }}</el-descriptions-item>
-            <el-descriptions-item label="User ID">{{ authStore.user?.id || 'Unavailable' }}</el-descriptions-item>
+          <el-descriptions
+            :column="1"
+            border
+          >
+            <el-descriptions-item label="Role">
+              {{ authStore.user?.role || 'user' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Administrator">
+              {{ authStore.isAdmin ? 'Yes' : 'No' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="User ID">
+              {{ authStore.user?.id || 'Unavailable' }}
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
 

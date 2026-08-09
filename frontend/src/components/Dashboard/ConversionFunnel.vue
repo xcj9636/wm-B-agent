@@ -1,26 +1,58 @@
 <template>
-  <el-card class="conversion-funnel" shadow="never">
+  <el-card
+    class="conversion-funnel"
+    shadow="never"
+  >
     <template #header>
       <div class="card-header">
         <div><strong>Conversion funnel</strong><span>{{ days }}-day customer journey</span></div>
-        <el-button text type="primary" :loading="loading" @click="fetchFunnelData">Refresh</el-button>
+        <el-button
+          text
+          type="primary"
+          :loading="loading"
+          @click="fetchFunnelData"
+        >
+          Refresh
+        </el-button>
       </div>
     </template>
-    <el-alert v-if="errorMessage" :title="errorMessage" type="warning" :closable="false" show-icon />
-    <div v-loading="loading" class="funnel-content">
-      <div v-if="stages.length" class="funnel-list">
-        <div v-for="(stage, index) in stages" :key="stage.name" class="funnel-row">
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <div
+      v-loading="loading"
+      class="funnel-content"
+    >
+      <div
+        v-if="stages.length"
+        class="funnel-list"
+      >
+        <div
+          v-for="(stage, index) in stages"
+          :key="stage.name"
+          class="funnel-row"
+        >
           <div class="stage-heading">
             <span>{{ stage.name }}</span>
             <strong>{{ stage.value.toLocaleString() }}</strong>
           </div>
           <div class="stage-track">
-            <div class="stage-fill" :style="{ width: stageWidth(stage.value) }" />
+            <div
+              class="stage-fill"
+              :style="{ width: stageWidth(stage.value) }"
+            />
           </div>
           <span class="stage-rate">{{ index === 0 ? 'Baseline' : `${rateFor(stage.name).toFixed(1)}% from previous stage` }}</span>
         </div>
       </div>
-      <el-empty v-else-if="!loading" description="No funnel data for this period" />
+      <el-empty
+        v-else-if="!loading"
+        description="No funnel data for this period"
+      />
     </div>
   </el-card>
 </template>

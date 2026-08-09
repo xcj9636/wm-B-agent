@@ -2,66 +2,168 @@
   <div class="page-stack">
     <header class="page-heading">
       <div>
-        <p class="page-kicker">Live workspace</p>
+        <p class="page-kicker">
+          Live workspace
+        </p>
         <h1>Dashboard</h1>
         <p>Today’s customer, outreach and automation signals from the backend.</p>
       </div>
-      <el-button :loading="loading" @click="loadDashboard">
+      <el-button
+        :loading="loading"
+        @click="loadDashboard"
+      >
         <el-icon><Refresh /></el-icon>
         Refresh
       </el-button>
     </header>
 
-    <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon>
-      <template #default><el-button text type="primary" @click="loadDashboard">Try again</el-button></template>
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      :closable="false"
+      show-icon
+    >
+      <template #default>
+        <el-button
+          text
+          type="primary"
+          @click="loadDashboard"
+        >
+          Try again
+        </el-button>
+      </template>
     </el-alert>
 
-    <el-row v-loading="loading && !stats" :gutter="16">
-      <el-col v-for="metric in metrics" :key="metric.label" :xs="24" :sm="12" :xl="6">
+    <el-row
+      v-loading="loading && !stats"
+      :gutter="16"
+    >
+      <el-col
+        v-for="metric in metrics"
+        :key="metric.label"
+        :xs="24"
+        :sm="12"
+        :xl="6"
+      >
         <StatCard v-bind="metric" />
       </el-col>
     </el-row>
 
     <el-row :gutter="16">
-      <el-col :xs="24" :xl="16">
-        <RecentActivity :activities="activities" :auto-load="false" />
+      <el-col
+        :xs="24"
+        :xl="16"
+      >
+        <RecentActivity
+          :activities="activities"
+          :auto-load="false"
+        />
       </el-col>
-      <el-col :xs="24" :xl="8">
+      <el-col
+        :xs="24"
+        :xl="8"
+      >
         <el-card class="leads-card">
           <template #header>
             <div class="card-header">
               <div><strong>High-intent leads</strong><span>Prioritized by latest customer state</span></div>
-              <el-tag type="danger" effect="plain">{{ highIntentLeads.length }}</el-tag>
+              <el-tag
+                type="danger"
+                effect="plain"
+              >
+                {{ highIntentLeads.length }}
+              </el-tag>
             </div>
           </template>
-          <el-table v-loading="loading" :data="highIntentLeads" size="small">
-            <el-table-column prop="name" label="Lead" min-width="120" />
-            <el-table-column prop="platform" label="Channel" width="100" />
-            <el-table-column label="Intent" width="100">
+          <el-table
+            v-loading="loading"
+            :data="highIntentLeads"
+            size="small"
+          >
+            <el-table-column
+              prop="name"
+              label="Lead"
+              min-width="120"
+            />
+            <el-table-column
+              prop="platform"
+              label="Channel"
+              width="100"
+            />
+            <el-table-column
+              label="Intent"
+              width="100"
+            >
               <template #default="{ row }">
-                <el-tag :type="row.intent === 'very_high' ? 'danger' : 'warning'" effect="plain" size="small">
+                <el-tag
+                  :type="row.intent === 'very_high' ? 'danger' : 'warning'"
+                  effect="plain"
+                  size="small"
+                >
                   {{ row.intent.replace('_', ' ') }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column width="64" align="right">
-              <template #default="{ row }"><el-button text type="primary" @click="router.push(`/customers/${row.id}`)">View</el-button></template>
+            <el-table-column
+              width="64"
+              align="right"
+            >
+              <template #default="{ row }">
+                <el-button
+                  text
+                  type="primary"
+                  @click="router.push(`/customers/${row.id}`)"
+                >
+                  View
+                </el-button>
+              </template>
             </el-table-column>
           </el-table>
-          <el-empty v-if="!loading && highIntentLeads.length === 0" description="No high-intent leads" />
+          <el-empty
+            v-if="!loading && highIntentLeads.length === 0"
+            description="No high-intent leads"
+          />
         </el-card>
       </el-col>
     </el-row>
 
-    <el-card v-if="stats" class="period-card">
-      <template #header><strong>Period comparison</strong></template>
-      <el-table :data="periodRows" size="small">
-        <el-table-column prop="period" label="Period" width="100" />
-        <el-table-column prop="customers" label="Customers" />
-        <el-table-column prop="messages" label="Messages" />
-        <el-table-column prop="replies" label="Replies" />
-        <el-table-column prop="workflows" label="Workflows" />
-        <el-table-column prop="failures" label="Failures" />
+    <el-card
+      v-if="stats"
+      class="period-card"
+    >
+      <template #header>
+        <strong>Period comparison</strong>
+      </template>
+      <el-table
+        :data="periodRows"
+        size="small"
+      >
+        <el-table-column
+          prop="period"
+          label="Period"
+          width="100"
+        />
+        <el-table-column
+          prop="customers"
+          label="Customers"
+        />
+        <el-table-column
+          prop="messages"
+          label="Messages"
+        />
+        <el-table-column
+          prop="replies"
+          label="Replies"
+        />
+        <el-table-column
+          prop="workflows"
+          label="Workflows"
+        />
+        <el-table-column
+          prop="failures"
+          label="Failures"
+        />
       </el-table>
     </el-card>
   </div>

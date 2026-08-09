@@ -1,9 +1,16 @@
 <template>
-  <section class="operations page-stack" aria-labelledby="operations-title">
+  <section
+    class="operations page-stack"
+    aria-labelledby="operations-title"
+  >
     <header class="page-heading">
       <div>
-        <p class="page-kicker">System control</p>
-        <h1 id="operations-title">Operations</h1>
+        <p class="page-kicker">
+          System control
+        </p>
+        <h1 id="operations-title">
+          Operations
+        </h1>
         <p>Monitor API connectivity, AI routing, durable execution and background tasks.</p>
       </div>
       <el-button
@@ -74,14 +81,20 @@
           <div><dt>Retry</dt><dd>{{ outboxCount('retry') }}</dd></div>
           <div><dt>Expired leases</dt><dd>{{ reliable?.expired_outbox_leases || 0 }}</dd></div>
         </dl>
-        <router-link class="panel-link" to="/operations/dead-letters">
+        <router-link
+          class="panel-link"
+          to="/operations/dead-letters"
+        >
           Open dead-letter console
         </router-link>
       </article>
     </div>
 
     <el-row :gutter="20">
-      <el-col :xs="24" :xl="14">
+      <el-col
+        :xs="24"
+        :xl="14"
+      >
         <el-card shadow="never">
           <template #header>
             <div class="card-heading">
@@ -96,34 +109,83 @@
                 aria-label="Filter tasks by status"
                 @change="loadTasks"
               >
-                <el-option label="Pending" value="pending" />
-                <el-option label="Running" value="running" />
-                <el-option label="Completed" value="completed" />
-                <el-option label="Failed" value="failed" />
-                <el-option label="Retry" value="retry" />
+                <el-option
+                  label="Pending"
+                  value="pending"
+                />
+                <el-option
+                  label="Running"
+                  value="running"
+                />
+                <el-option
+                  label="Completed"
+                  value="completed"
+                />
+                <el-option
+                  label="Failed"
+                  value="failed"
+                />
+                <el-option
+                  label="Retry"
+                  value="retry"
+                />
               </el-select>
             </div>
           </template>
-          <el-table :data="tasks" v-loading="tasksLoading" row-key="id">
-            <el-table-column prop="task_type" label="Task" min-width="150" />
-            <el-table-column prop="status" label="Status" width="120">
+          <el-table
+            v-loading="tasksLoading"
+            :data="tasks"
+            row-key="id"
+          >
+            <el-table-column
+              prop="task_type"
+              label="Task"
+              min-width="150"
+            />
+            <el-table-column
+              prop="status"
+              label="Status"
+              width="120"
+            >
               <template #default="{ row }">
-                <el-tag :type="taskTagType(row.status)" effect="plain">
+                <el-tag
+                  :type="taskTagType(row.status)"
+                  effect="plain"
+                >
                   {{ row.status || 'unknown' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="Scheduled" min-width="170">
-              <template #default="{ row }">{{ formatTime(row.scheduled_at) }}</template>
+            <el-table-column
+              label="Scheduled"
+              min-width="170"
+            >
+              <template #default="{ row }">
+                {{ formatTime(row.scheduled_at) }}
+              </template>
             </el-table-column>
-            <el-table-column prop="error_msg" label="Error" min-width="180" show-overflow-tooltip />
+            <el-table-column
+              prop="error_msg"
+              label="Error"
+              min-width="180"
+              show-overflow-tooltip
+            />
           </el-table>
-          <el-empty v-if="!tasksLoading && tasks.length === 0" description="No task records" />
+          <el-empty
+            v-if="!tasksLoading && tasks.length === 0"
+            description="No task records"
+          />
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :xl="10">
-        <el-card shadow="never" class="execution-card">
+      <el-col
+        :xs="24"
+        :xl="10"
+      >
+        <el-card
+          shadow="never"
+          class="execution-card"
+        >
           <template #header>
             <div class="card-heading">
               <div>
@@ -133,19 +195,34 @@
             </div>
           </template>
           <div class="count-grid">
-            <div v-for="(count, status) in reliable?.llm_invocation_counts" :key="status">
+            <div
+              v-for="(count, status) in reliable?.llm_invocation_counts"
+              :key="status"
+            >
               <span>{{ status }}</span>
               <strong>{{ count }}</strong>
             </div>
           </div>
           <el-divider />
-          <div v-if="gateway?.issues.length" class="issues">
+          <div
+            v-if="gateway?.issues.length"
+            class="issues"
+          >
             <span>Gateway issues</span>
-            <el-tag v-for="issue in gateway.issues" :key="issue" type="warning" effect="plain">
+            <el-tag
+              v-for="issue in gateway.issues"
+              :key="issue"
+              type="warning"
+              effect="plain"
+            >
               {{ issue }}
             </el-tag>
           </div>
-          <el-empty v-else description="No gateway issues reported" :image-size="72" />
+          <el-empty
+            v-else
+            description="No gateway issues reported"
+            :image-size="72"
+          />
         </el-card>
       </el-col>
     </el-row>

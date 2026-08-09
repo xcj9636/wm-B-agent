@@ -2,71 +2,183 @@
   <div class="page-stack">
     <header class="page-heading">
       <div>
-        <p class="page-kicker">Performance intelligence</p>
+        <p class="page-kicker">
+          Performance intelligence
+        </p>
         <h1>Analytics</h1>
         <p>Compare outreach, conversion and customer distribution across a selected window.</p>
       </div>
       <div class="heading-actions">
-        <el-select v-model="days" style="width: 140px" @change="loadAnalytics">
-          <el-option label="Last 7 days" :value="7" />
-          <el-option label="Last 30 days" :value="30" />
-          <el-option label="Last 90 days" :value="90" />
+        <el-select
+          v-model="days"
+          style="width: 140px"
+          @change="loadAnalytics"
+        >
+          <el-option
+            label="Last 7 days"
+            :value="7"
+          />
+          <el-option
+            label="Last 30 days"
+            :value="30"
+          />
+          <el-option
+            label="Last 90 days"
+            :value="90"
+          />
         </el-select>
-        <el-button :loading="loading" @click="loadAnalytics"><el-icon><Refresh /></el-icon>Refresh</el-button>
+        <el-button
+          :loading="loading"
+          @click="loadAnalytics"
+        >
+          <el-icon><Refresh /></el-icon>Refresh
+        </el-button>
       </div>
     </header>
 
-    <el-alert v-if="errorMessage" :title="errorMessage" type="warning" :closable="false" show-icon />
-    <el-row v-loading="loading && !stats" :gutter="16">
-      <el-col v-for="metric in metrics" :key="metric.label" :xs="24" :sm="12" :xl="6">
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <el-row
+      v-loading="loading && !stats"
+      :gutter="16"
+    >
+      <el-col
+        v-for="metric in metrics"
+        :key="metric.label"
+        :xs="24"
+        :sm="12"
+        :xl="6"
+      >
         <StatCard v-bind="metric" />
       </el-col>
     </el-row>
 
     <el-row :gutter="16">
-      <el-col :xs="24" :xl="16">
-        <el-card shadow="never" class="trend-card">
+      <el-col
+        :xs="24"
+        :xl="16"
+      >
+        <el-card
+          shadow="never"
+          class="trend-card"
+        >
           <template #header>
-            <div class="card-header"><div><strong>Daily trends</strong><span>Backend observations only</span></div><el-tag effect="plain">{{ trends.length }} points</el-tag></div>
+            <div class="card-header">
+              <div><strong>Daily trends</strong><span>Backend observations only</span></div><el-tag effect="plain">
+                {{ trends.length }} points
+              </el-tag>
+            </div>
           </template>
-          <el-table :data="trends" size="small" max-height="430">
-            <el-table-column prop="date" label="Date" width="120" />
-            <el-table-column prop="new_customers" label="Customers" />
+          <el-table
+            :data="trends"
+            size="small"
+            max-height="430"
+          >
+            <el-table-column
+              prop="date"
+              label="Date"
+              width="120"
+            />
+            <el-table-column
+              prop="new_customers"
+              label="Customers"
+            />
             <el-table-column label="Messages">
-              <template #default="{ row }">{{ row.emails_sent + row.whatsapp_sent }}</template>
+              <template #default="{ row }">
+                {{ row.emails_sent + row.whatsapp_sent }}
+              </template>
             </el-table-column>
-            <el-table-column prop="emails_replied" label="Replies" />
-            <el-table-column prop="conversions" label="Conversions" />
+            <el-table-column
+              prop="emails_replied"
+              label="Replies"
+            />
+            <el-table-column
+              prop="conversions"
+              label="Conversions"
+            />
           </el-table>
-          <el-empty v-if="!loading && trends.length === 0" description="No daily observations for this period" />
+          <el-empty
+            v-if="!loading && trends.length === 0"
+            description="No daily observations for this period"
+          />
         </el-card>
       </el-col>
-      <el-col :xs="24" :xl="8"><ConversionFunnel :days="days" /></el-col>
+      <el-col
+        :xs="24"
+        :xl="8"
+      >
+        <ConversionFunnel :days="days" />
+      </el-col>
     </el-row>
 
     <el-row :gutter="16">
-      <el-col :xs="24" :lg="12">
+      <el-col
+        :xs="24"
+        :lg="12"
+      >
         <el-card shadow="never">
-          <template #header><div class="card-header"><div><strong>Customers by platform</strong><span>New customer source</span></div></div></template>
-          <div v-if="platforms.length" class="rank-list">
-            <div v-for="item in platforms" :key="item.platform" class="rank-row">
+          <template #header>
+            <div class="card-header">
+              <div><strong>Customers by platform</strong><span>New customer source</span></div>
+            </div>
+          </template>
+          <div
+            v-if="platforms.length"
+            class="rank-list"
+          >
+            <div
+              v-for="item in platforms"
+              :key="item.platform"
+              class="rank-row"
+            >
               <span>{{ item.platform || 'Unknown' }}</span><strong>{{ item.count }}</strong>
-              <el-progress :percentage="relativePercent(item.count, platforms)" :show-text="false" />
+              <el-progress
+                :percentage="relativePercent(item.count, platforms)"
+                :show-text="false"
+              />
             </div>
           </div>
-          <el-empty v-else-if="!loading" description="No platform distribution data" />
+          <el-empty
+            v-else-if="!loading"
+            description="No platform distribution data"
+          />
         </el-card>
       </el-col>
-      <el-col :xs="24" :lg="12">
+      <el-col
+        :xs="24"
+        :lg="12"
+      >
         <el-card shadow="never">
-          <template #header><div class="card-header"><div><strong>Customers by country</strong><span>Top 20 locations</span></div></div></template>
-          <div v-if="countries.length" class="rank-list">
-            <div v-for="item in countries" :key="item.country" class="rank-row">
+          <template #header>
+            <div class="card-header">
+              <div><strong>Customers by country</strong><span>Top 20 locations</span></div>
+            </div>
+          </template>
+          <div
+            v-if="countries.length"
+            class="rank-list"
+          >
+            <div
+              v-for="item in countries"
+              :key="item.country"
+              class="rank-row"
+            >
               <span>{{ item.country }}</span><strong>{{ item.count }}</strong>
-              <el-progress :percentage="relativePercent(item.count, countries)" :show-text="false" />
+              <el-progress
+                :percentage="relativePercent(item.count, countries)"
+                :show-text="false"
+              />
             </div>
           </div>
-          <el-empty v-else-if="!loading" description="No country distribution data" />
+          <el-empty
+            v-else-if="!loading"
+            description="No country distribution data"
+          />
         </el-card>
       </el-col>
     </el-row>

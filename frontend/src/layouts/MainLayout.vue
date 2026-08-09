@@ -1,5 +1,8 @@
 <template>
-  <div class="console-shell" :class="{ 'is-collapsed': isCollapsed, 'mobile-open': mobileOpen }">
+  <div
+    class="console-shell"
+    :class="{ 'is-collapsed': isCollapsed, 'mobile-open': mobileOpen }"
+  >
     <button
       v-if="mobileOpen"
       type="button"
@@ -10,8 +13,13 @@
 
     <aside class="console-sidebar">
       <div class="brand">
-        <div class="brand-mark">B</div>
-        <div v-if="!isCollapsed" class="brand-copy">
+        <div class="brand-mark">
+          B
+        </div>
+        <div
+          v-if="!isCollapsed"
+          class="brand-copy"
+        >
           <strong>B-agent</strong>
           <span>Revenue operations</span>
         </div>
@@ -25,50 +33,71 @@
       >
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
-          <template #title>Overview</template>
+          <template #title>
+            Overview
+          </template>
         </el-menu-item>
 
         <el-menu-item-group title="Automation">
           <el-menu-item index="/workflows">
             <el-icon><Operation /></el-icon>
-            <template #title>Workflows</template>
+            <template #title>
+              Workflows
+            </template>
           </el-menu-item>
           <el-menu-item index="/skills">
             <el-icon><SetUp /></el-icon>
-            <template #title>Skills</template>
+            <template #title>
+              Skills
+            </template>
           </el-menu-item>
         </el-menu-item-group>
 
         <el-menu-item-group title="Relationships">
           <el-menu-item index="/customers">
             <el-icon><User /></el-icon>
-            <template #title>Customers</template>
+            <template #title>
+              Customers
+            </template>
           </el-menu-item>
           <el-menu-item index="/conversations">
             <el-icon><ChatDotRound /></el-icon>
-            <template #title>Conversations</template>
+            <template #title>
+              Conversations
+            </template>
           </el-menu-item>
         </el-menu-item-group>
 
         <el-menu-item index="/analytics">
           <el-icon><TrendCharts /></el-icon>
-          <template #title>Analytics</template>
+          <template #title>
+            Analytics
+          </template>
         </el-menu-item>
 
-        <el-menu-item-group v-if="authStore.isAdmin" title="Administration">
+        <el-menu-item-group
+          v-if="authStore.isAdmin"
+          title="Administration"
+        >
           <el-menu-item index="/operations">
             <el-icon><Monitor /></el-icon>
-            <template #title>Operations</template>
+            <template #title>
+              Operations
+            </template>
           </el-menu-item>
           <el-menu-item index="/operations/dead-letters">
             <el-icon><WarningFilled /></el-icon>
-            <template #title>Dead Letters</template>
+            <template #title>
+              Dead Letters
+            </template>
           </el-menu-item>
         </el-menu-item-group>
 
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
-          <template #title>Settings</template>
+          <template #title>
+            Settings
+          </template>
         </el-menu-item>
       </el-menu>
 
@@ -101,7 +130,10 @@
         </div>
 
         <div class="header-actions">
-          <el-tooltip content="Toggle color theme" placement="bottom">
+          <el-tooltip
+            content="Toggle color theme"
+            placement="bottom"
+          >
             <el-button
               circle
               text
@@ -113,8 +145,13 @@
           </el-tooltip>
 
           <el-dropdown trigger="click">
-            <button type="button" class="user-control">
-              <el-avatar :size="32">{{ userInitial }}</el-avatar>
+            <button
+              type="button"
+              class="user-control"
+            >
+              <el-avatar :size="32">
+                {{ userInitial }}
+              </el-avatar>
               <span class="user-copy">
                 <strong>{{ authStore.user?.username }}</strong>
                 <small>{{ authStore.isAdmin ? 'Administrator' : authStore.user?.role }}</small>
@@ -123,8 +160,15 @@
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item @click="router.push('/settings')">Settings</el-dropdown-item>
-                <el-dropdown-item divided @click="logout">Sign out</el-dropdown-item>
+                <el-dropdown-item @click="router.push('/settings')">
+                  Settings
+                </el-dropdown-item>
+                <el-dropdown-item
+                  divided
+                  @click="logout"
+                >
+                  Sign out
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>

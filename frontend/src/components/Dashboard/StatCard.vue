@@ -1,11 +1,22 @@
 <template>
-  <el-card class="stat-card" shadow="never">
+  <el-card
+    class="stat-card"
+    shadow="never"
+  >
     <div class="stat-content">
-      <div class="stat-icon" :class="colorClass"><component :is="icon" /></div>
+      <div
+        class="stat-icon"
+        :class="colorClass"
+      >
+        <component :is="icon" />
+      </div>
       <div class="stat-info">
         <span class="stat-label">{{ label }}</span>
         <strong class="stat-value">{{ formattedValue }}<small v-if="suffix">{{ suffix }}</small></strong>
-        <div v-if="trend !== undefined" class="stat-trend">
+        <div
+          v-if="trend !== undefined"
+          class="stat-trend"
+        >
           <span :class="trend >= 0 ? 'trend-up' : 'trend-down'">{{ trend >= 0 ? '+' : '' }}{{ trend }}%</span>
           <span>vs {{ period }}</span>
         </div>
@@ -25,7 +36,13 @@ const props = withDefaults(defineProps<{
   period?: string
   color?: 'primary' | 'success' | 'warning' | 'danger' | 'info'
   icon?: string
-}>(), { suffix: '', period: 'previous period', color: 'primary', icon: 'DataLine' })
+}>(), {
+  suffix: '',
+  trend: undefined,
+  period: 'previous period',
+  color: 'primary',
+  icon: 'DataLine',
+})
 
 const colorClass = computed(() => `stat-icon--${props.color}`)
 const formattedValue = computed(() => Number.isInteger(props.value) ? props.value.toLocaleString() : props.value.toFixed(1))

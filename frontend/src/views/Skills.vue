@@ -1,28 +1,59 @@
 <template>
-  <section class="skills page-stack" aria-labelledby="skills-title">
+  <section
+    class="skills page-stack"
+    aria-labelledby="skills-title"
+  >
     <header class="page-heading">
       <div>
-        <p class="page-kicker">Automation catalog</p>
-        <h1 id="skills-title">Skills</h1>
+        <p class="page-kicker">
+          Automation catalog
+        </p>
+        <h1 id="skills-title">
+          Skills
+        </h1>
         <p>Inspect every registered capability available to workflow authors.</p>
       </div>
-      <el-button :loading="loading" aria-label="Refresh skills" @click="loadSkills">
+      <el-button
+        :loading="loading"
+        aria-label="Refresh skills"
+        @click="loadSkills"
+      >
         <el-icon><Refresh /></el-icon>
         Refresh
       </el-button>
     </header>
 
     <div class="filters">
-      <el-input v-model="query" clearable placeholder="Search skills" aria-label="Search skills">
-        <template #prefix><el-icon><Search /></el-icon></template>
+      <el-input
+        v-model="query"
+        clearable
+        placeholder="Search skills"
+        aria-label="Search skills"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
       </el-input>
-      <el-select v-model="category" clearable placeholder="All categories" aria-label="Filter skills">
-        <el-option v-for="item in categories" :key="item" :label="item" :value="item" />
+      <el-select
+        v-model="category"
+        clearable
+        placeholder="All categories"
+        aria-label="Filter skills"
+      >
+        <el-option
+          v-for="item in categories"
+          :key="item"
+          :label="item"
+          :value="item"
+        />
       </el-select>
       <span aria-live="polite">{{ filteredSkills.length }} capabilities</span>
     </div>
 
-    <div v-loading="loading" class="skill-grid">
+    <div
+      v-loading="loading"
+      class="skill-grid"
+    >
       <button
         v-for="skill in filteredSkills"
         :key="skill.name"
@@ -36,15 +67,33 @@
         <span class="skill-meta">{{ skill.name }} / {{ skill.version }}</span>
       </button>
     </div>
-    <el-empty v-if="!loading && filteredSkills.length === 0" description="No skills match the filter" />
+    <el-empty
+      v-if="!loading && filteredSkills.length === 0"
+      description="No skills match the filter"
+    />
 
-    <el-drawer v-model="drawerOpen" title="Skill contract" size="min(520px, 92vw)">
+    <el-drawer
+      v-model="drawerOpen"
+      title="Skill contract"
+      size="min(520px, 92vw)"
+    >
       <template v-if="selectedSkill">
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="Display name">{{ selectedSkill.displayName }}</el-descriptions-item>
-          <el-descriptions-item label="Registry name"><code>{{ selectedSkill.name }}</code></el-descriptions-item>
-          <el-descriptions-item label="Category">{{ selectedSkill.category }}</el-descriptions-item>
-          <el-descriptions-item label="Version">{{ selectedSkill.version }}</el-descriptions-item>
+        <el-descriptions
+          :column="1"
+          border
+        >
+          <el-descriptions-item label="Display name">
+            {{ selectedSkill.displayName }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Registry name">
+            <code>{{ selectedSkill.name }}</code>
+          </el-descriptions-item>
+          <el-descriptions-item label="Category">
+            {{ selectedSkill.category }}
+          </el-descriptions-item>
+          <el-descriptions-item label="Version">
+            {{ selectedSkill.version }}
+          </el-descriptions-item>
         </el-descriptions>
         <h3>Input schema</h3>
         <pre>{{ formatSchema(selectedSkill.inputSchema) }}</pre>
