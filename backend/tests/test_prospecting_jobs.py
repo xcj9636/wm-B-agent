@@ -248,10 +248,11 @@ async def test_retryable_failure_backoffs_and_manual_resume_keeps_offset(
 ):
     _, db, user = configured_api
     service = ProspectingJobService(db)
-    job = service.create_job(
+    created = service.create_job(
         job_command(domains=["acme.com"], request_budget=2),
         user_id=user.id,
     )
+    job = db.get(ProspectingJob, created.id)
     retryable = HunterConnectorError(
         error_code="rate_limited",
         retryable=True,
@@ -293,10 +294,11 @@ async def test_expired_read_lease_is_recovered_without_skipping_page(
 ):
     _, db, user = configured_api
     service = ProspectingJobService(db)
-    job = service.create_job(
+    created = service.create_job(
         job_command(domains=["acme.com"], request_budget=2),
         user_id=user.id,
     )
+    job = db.get(ProspectingJob, created.id)
     item = db.query(ProspectingJobItem).one()
     job.status = ProspectingJobStatus.RUNNING.value
     job.leased_by = "lost-worker"
@@ -318,6 +320,43 @@ async def test_expired_read_lease_is_recovered_without_skipping_page(
     assert result.status == ProspectingJobStatus.COMPLETED
     assert hunter.calls[0]["offset"] == 0
     assert db.query(ProspectingContact).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_late_worker_cannot_advance_cursor_after_lease_is_replaced(
+    configured_api,
+):
+    _, db, user = configured_api
+    created = ProspectingJobService(db).create_job(
+        job_command(domains=["acme.com"], request_budget=2),
+        user_id=user.id,
+    )
+
+    class LeaseStealingHunter(FakeBatchHunter):
+        async def domain_search_page(self, **kwargs):
+            self.calls.append(kwargs)
+            row = db.get(ProspectingJob, created.id)
+            row.lease_version += 1
+            row.leased_by = "replacement-worker"
+            row.lease_until = datetime(2026, 8, 9, 12, 5, 0)
+            db.commit()
+            return page("acme.com", ["late@acme.com"], 1)
+
+    result = await ProspectingJobRunner(db).run_slice(
+        created.id,
+        hunter=LeaseStealingHunter(),
+        worker_id="late-worker",
+        max_requests=1,
+        now=datetime(2026, 8, 9, 12, 0, 0),
+    )
+
+    db.expire_all()
+    job = db.get(ProspectingJob, created.id)
+    item = db.query(ProspectingJobItem).one()
+    assert result.status == ProspectingJobStatus.RUNNING
+    assert job.leased_by == "replacement-worker"
+    assert item.next_offset == 0
+    assert db.query(ProspectingContact).count() == 0
 
 
 def test_other_user_cannot_view_or_resume_job(configured_api, monkeypatch):
