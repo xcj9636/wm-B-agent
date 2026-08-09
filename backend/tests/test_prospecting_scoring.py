@@ -1,6 +1,6 @@
 from app.api.v1.auth import get_current_active_user
 from app.main import app
-from app.models.database import ProspectingContact, ProspectingSearch, User
+from app.models.database import Customer, ProspectingContact, ProspectingSearch, User
 
 
 def seed_rankable_search(db, user):
@@ -188,3 +188,40 @@ def test_other_user_cannot_score_or_read_search_ranking(api_context):
     assert client.get(
         f"/api/v1/prospecting/searches/{search.id}/ranking"
     ).status_code == 404
+
+
+def test_approved_import_carries_icp_evidence_into_customer_context(api_context):
+    client, db, user = api_context
+    search = seed_rankable_search(db, user)
+    client.put("/api/v1/prospecting/icp-profile", json=profile_payload())
+    ranking = client.post(
+        f"/api/v1/prospecting/searches/{search.id}/score"
+    ).json()
+    best = ranking["scores"][0]
+    client.patch(
+        f"/api/v1/prospecting/scores/{best['id']}/review",
+        json={
+            "review_status": "qualified",
+            "score_adjustment": 3,
+            "review_reason": "Confirmed purchasing authority",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/prospecting/contacts/import",
+        json={"contact_ids": [best["contact_id"]]},
+    )
+
+    assert response.status_code == 200, response.text
+    customer = db.query(Customer).one()
+    assert customer.custom_fields["icp_tier"] == "A"
+    assert customer.custom_fields["icp_recommended"] is True
+    assert customer.custom_fields["icp_review_status"] == "qualified"
+    icp_evidence = customer.source_data_json["icp"]
+    assert icp_evidence["profile_version"] == 2
+    assert set(icp_evidence["factor_scores"]) == {
+        "role_fit",
+        "contact_quality",
+        "evidence_quality",
+    }
+    assert icp_evidence["reasons"]
