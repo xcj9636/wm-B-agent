@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     OMNIROUTE_API_KEY: str = ""
     OMNIROUTE_API_KEY_FILE: str = ""
     AI_RUNTIME_SECRET_FILE: str = "./data/secrets/omniroute_api_key"
+    CONNECTOR_SECRET_DIR: str = "./data/secrets/connectors"
     OMNIROUTE_ALLOWED_PROVIDERS: List[str] = []
     OMNIROUTE_TIMEOUT_SECONDS: float = 60.0
     OMNIROUTE_MODEL_LEAD_CLASSIFICATION: str = ""

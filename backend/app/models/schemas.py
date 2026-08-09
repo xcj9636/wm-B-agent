@@ -275,7 +275,8 @@ class CustomerResponse(BaseModel):
     job_title: Optional[str]
     status: str
     intent_level: Optional[str]
-    tags: List[str]
+    tags: List[str] = Field(validation_alias="tags_json")
+    custom_fields: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

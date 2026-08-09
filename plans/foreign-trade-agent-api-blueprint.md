@@ -1,7 +1,7 @@
 # B-agent 外贸业务链路与 API 实施蓝图
 
 > 日期：2026-08-09  
-> 状态：Phase 1 AI control plane implemented; business connectors planned  
+> 状态：Phase 1 AI control plane and Sprint B1 Hunter connector implemented
 > 范围：单组织部署。浏览器只调用 B-agent API，所有第三方凭据、OAuth token、Webhook secret 和 OmniRoute key 都由后端保管。
 
 ## 1. 产品目标
@@ -293,7 +293,8 @@ AI 只负责理解、生成和辅助决策。抓取、发送、报价、承诺�
 
 ### Sprint B：最短营收闭环
 
-- Hunter/商业数据源 connector。
+- Hunter connector 控制面、邮箱核验、451 法务抑制和外发阻断，已完成 B1。
+- Hunter Domain Search / Email Finder 工作流与批量 enrichment job，待 B2。
 - Gmail + Microsoft 发送/回复 Webhook。
 - 外发审批、outbox、退订和邮箱核验。
 - 客户时间线、回复意图、AI 草稿。

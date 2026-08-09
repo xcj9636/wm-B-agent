@@ -1,6 +1,14 @@
 import api from './index'
 import type { Customer, CustomerCreate } from '@/types'
 
+export interface ContactVerification {
+  status: string
+  score?: number
+  retryable: boolean
+  legal_restricted: boolean
+  details: Record<string, boolean>
+}
+
 export const customerApi = {
   async list(params?: {
     page?: number
@@ -57,6 +65,13 @@ export const customerApi = {
     const response = await api.delete<{ tags: string[] }>(`/api/v1/customers/${id}/tags`, {
       data: tags,
     })
+    return response.data
+  },
+
+  async verifyEmail(id: number) {
+    const response = await api.post<ContactVerification>(
+      `/api/v1/customers/${id}/email-verification`,
+    )
     return response.data
   },
 }

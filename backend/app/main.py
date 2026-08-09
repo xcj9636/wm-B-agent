@@ -77,7 +77,7 @@ async def root():
 
 
 # Import routers
-from app.api.v1 import agent, ai, auth, workflow, skill, customer, conversation, stats, admin
+from app.api.v1 import agent, ai, auth, workflow, skill, customer, conversation, stats, admin, connectors
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
@@ -89,6 +89,7 @@ app.include_router(customer.router, prefix="/api/v1/customers", tags=["Customers
 app.include_router(conversation.router, prefix="/api/v1/conversations", tags=["Conversations"])
 app.include_router(stats.router, prefix="/api/v1/stats", tags=["Statistics"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(connectors.router, prefix="/api/v1/connectors", tags=["Connectors"])
 
 
 # Exception handlers

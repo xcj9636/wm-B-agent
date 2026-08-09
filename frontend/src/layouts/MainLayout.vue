@@ -111,6 +111,12 @@
               {{ $t('Operations') }}
             </template>
           </el-menu-item>
+          <el-menu-item index="/connectors">
+            <el-icon><Connection /></el-icon>
+            <template #title>
+              {{ $t('Connectors') }}
+            </template>
+          </el-menu-item>
           <el-menu-item index="/operations/dead-letters">
             <el-icon><WarningFilled /></el-icon>
             <template #title>

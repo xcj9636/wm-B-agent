@@ -227,11 +227,78 @@ class Customer(Base):
     # Relationships
     conversations = relationship("Conversation", back_populates="customer", cascade="all, delete-orphan")
     outreach_logs = relationship("OutreachLog", back_populates="customer", cascade="all, delete-orphan")
+    contact_verifications = relationship(
+        "ContactVerification",
+        back_populates="customer",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index('idx_customer_platform_status', 'platform', 'status'),
         Index('idx_customer_country_category', 'country', 'category'),
         UniqueConstraint('username', 'platform', name='uq_customer_username_platform'),
+    )
+
+
+class ConnectorConfiguration(Base):
+    """Versioned connector metadata; provider secrets live outside the database."""
+
+    __tablename__ = "connector_configurations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(String(50), nullable=False)
+    name = Column(String(100), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    config_json = Column(JSON, nullable=False, default=dict)
+    secret_ref = Column(String(500), nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    last_status = Column(String(30), nullable=False, default="not_tested")
+    last_error_code = Column(String(100))
+    last_tested_at = Column(DateTime)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("provider", "name", name="uq_connector_provider_name"),
+        Index("idx_connector_provider_enabled", "provider", "enabled"),
+    )
+
+
+class ContactVerification(Base):
+    """Auditable outcome of one contact verification request."""
+
+    __tablename__ = "contact_verifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id = Column(
+        Integer,
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    email = Column(String(255), nullable=False)
+    provider = Column(String(50), nullable=False)
+    status = Column(String(30), nullable=False)
+    score = Column(Integer)
+    retryable = Column(Boolean, nullable=False, default=False)
+    legal_restricted = Column(Boolean, nullable=False, default=False)
+    details_json = Column(JSON, nullable=False, default=dict)
+    verified_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    customer = relationship("Customer", back_populates="contact_verifications")
+
+    __table_args__ = (
+        Index(
+            "idx_contact_verification_customer_verified",
+            "customer_id",
+            "verified_at",
+        ),
+        Index("idx_contact_verification_email_status", "email", "status"),
     )
 
 

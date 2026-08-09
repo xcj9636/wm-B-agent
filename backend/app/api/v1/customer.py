@@ -1,12 +1,19 @@
 """
 客户管理相关API
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.database import User, Customer, IntentLevel
+from app.integrations.hunter import (
+    EmailVerificationResult,
+    HunterClient,
+    HunterConnectorError,
+    get_hunter_client,
+)
+from app.models.database import ContactVerification, User, Customer, IntentLevel
 from app.models.schemas import (
     CustomerCreate, CustomerUpdate, CustomerResponse,
     CustomerListResponse, HighIntentLeadResponse, SearchFilters
@@ -14,6 +21,77 @@ from app.models.schemas import (
 from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
+
+
+class ContactVerificationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    status: str
+    score: Optional[int] = None
+    retryable: bool
+    legal_restricted: bool
+    details: Dict[str, Any]
+
+
+SAFE_VERIFICATION_DETAILS = {
+    "regexp",
+    "gibberish",
+    "disposable",
+    "webmail",
+    "mx_records",
+    "smtp_server",
+    "smtp_check",
+    "accept_all",
+    "block",
+}
+
+
+def _record_verification(
+    db: Session,
+    customer: Customer,
+    result: EmailVerificationResult,
+    *,
+    legal_restricted: bool = False,
+) -> ContactVerificationResponse:
+    safe_details = {
+        key: value
+        for key, value in result.details.items()
+        if key in SAFE_VERIFICATION_DETAILS
+    }
+    record = ContactVerification(
+        customer_id=customer.id,
+        email=customer.email,
+        provider="hunter",
+        status=result.status,
+        score=result.score,
+        retryable=result.retryable,
+        legal_restricted=legal_restricted,
+        details_json=safe_details,
+    )
+    fields = dict(customer.custom_fields or {})
+    fields["email_verification_status"] = result.status
+    if legal_restricted or result.status in {"invalid", "disposable"}:
+        fields["contact_suppressed"] = True
+        fields["suppression_reason"] = (
+            "legal_restriction"
+            if legal_restricted
+            else f"email_{result.status}"
+        )
+    elif result.status == "valid":
+        suppression_reason = str(fields.get("suppression_reason") or "")
+        if not fields.get("contact_suppressed") or suppression_reason.startswith("email_"):
+            fields["contact_suppressed"] = False
+            fields.pop("suppression_reason", None)
+    customer.custom_fields = fields
+    db.add(record)
+    db.commit()
+    return ContactVerificationResponse(
+        status=result.status,
+        score=result.score,
+        retryable=result.retryable,
+        legal_restricted=legal_restricted,
+        details=safe_details,
+    )
 
 
 @router.get("", response_model=CustomerListResponse)
@@ -26,7 +104,7 @@ async def list_customers(
     status: Optional[str] = None,
     intent_level: Optional[str] = None,
     search: Optional[str] = None,
-    current_user: User = Depends(get_current_active_user),
+    _: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """列出客户"""
@@ -112,6 +190,46 @@ async def list_high_intent_customers(
         )
         for customer in customers
     ]
+
+
+@router.post(
+    "/{customer_id}/email-verification",
+    response_model=ContactVerificationResponse,
+)
+async def verify_customer_email(
+    customer_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    hunter: HunterClient = Depends(get_hunter_client),
+):
+    """Verify one saved contact and persist a suppression-safe audit result."""
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if not customer.email:
+        raise HTTPException(status_code=409, detail="Customer email is not configured")
+    try:
+        result = await hunter.verify_email(customer.email)
+    except HunterConnectorError as exc:
+        if exc.legal_restriction:
+            _record_verification(
+                db,
+                customer,
+                EmailVerificationResult(
+                    status="legal_restricted",
+                    retryable=False,
+                ),
+                legal_restricted=True,
+            )
+            raise HTTPException(
+                status_code=451,
+                detail="Contact is legally restricted and has been suppressed",
+            ) from exc
+        raise HTTPException(
+            status_code=503 if exc.retryable else 422,
+            detail=exc.error_code,
+        ) from exc
+    return _record_verification(db, customer, result)
 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)

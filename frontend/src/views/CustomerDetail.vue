@@ -22,7 +22,25 @@
       border
     >
       <el-descriptions-item :label="$t('Email')">
-        {{ customer.email }}
+        <div class="email-verification">
+          <span>{{ customer.email || $t('No email') }}</span>
+          <el-tag
+            v-if="verificationStatus"
+            :type="verificationTagType"
+            effect="light"
+            round
+          >
+            {{ $t(verificationStatus) }}
+          </el-tag>
+          <el-button
+            v-if="customer.email"
+            size="small"
+            :loading="verifying"
+            @click="verifyEmail"
+          >
+            {{ $t('Verify email') }}
+          </el-button>
+        </div>
       </el-descriptions-item>
       <el-descriptions-item :label="$t('WhatsApp')">
         {{ customer.whatsapp }}
@@ -66,18 +84,47 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { customerApi } from '@/api/customer'
+import { translate } from '@/i18n'
 
 const route = useRoute()
 const customer = ref<any>(null)
+const verifying = ref(false)
+const verificationStatus = ref('')
+
+const verificationTagType = computed(() => {
+  if (verificationStatus.value === 'valid') return 'success'
+  if (['invalid', 'disposable', 'legal_restricted'].includes(verificationStatus.value)) {
+    return 'danger'
+  }
+  return 'warning'
+})
 
 async function fetchCustomer() {
   try {
     customer.value = await customerApi.get(Number(route.params.id))
+    verificationStatus.value = customer.value.custom_fields?.email_verification_status || ''
   } catch {
     // Handle error
+  }
+}
+
+async function verifyEmail() {
+  verifying.value = true
+  try {
+    const result = await customerApi.verifyEmail(Number(route.params.id))
+    verificationStatus.value = result.status
+    ElMessage.success(translate('Email verification completed.'))
+  } catch (error: any) {
+    if (error?.response?.status === 451) {
+      verificationStatus.value = 'legal_restricted'
+      ElMessage.error(translate('This contact is legally restricted and outreach is blocked.'))
+    }
+  } finally {
+    verifying.value = false
   }
 }
 
@@ -119,6 +166,13 @@ onMounted(() => {
   border-radius: var(--radius-card);
   background: var(--surface-elevated);
   box-shadow: var(--shadow-card);
+}
+
+.email-verification {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 760px) {

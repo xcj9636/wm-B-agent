@@ -89,6 +89,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Operations', requiresAdmin: true },
       },
       {
+        path: 'connectors',
+        name: 'Connectors',
+        component: () => import('@/views/Connectors.vue'),
+        meta: { title: 'Connectors', requiresAdmin: true },
+      },
+      {
         path: 'operations/dead-letters',
         name: 'DeadLetters',
         component: () => import('@/views/DeadLetters.vue'),

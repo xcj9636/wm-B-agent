@@ -6,7 +6,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.models.database import Account, OutreachLog, OutreachStatus
+from app.models.database import Account, Customer, OutreachLog, OutreachStatus
 from app.services.outbox import OutboxCommand, OutboxService
 
 
@@ -46,6 +46,15 @@ class OutreachQuotaExceeded(RuntimeError):
         super().__init__(self.error_code)
 
 
+class ContactSuppressed(RuntimeError):
+    """External delivery is forbidden by the customer's latest compliance state."""
+
+    error_code = "contact_suppressed"
+
+    def __init__(self) -> None:
+        super().__init__(self.error_code)
+
+
 class OutreachQueueService:
     """Create the business record and external side effect atomically."""
 
@@ -57,6 +66,11 @@ class OutreachQueueService:
         self,
         command: QueueOutreachCommand,
     ) -> Tuple[OutreachLog, bool]:
+        customer = self._session.get(Customer, command.customer_id)
+        if customer is None:
+            raise ValueError("outreach customer does not exist")
+        if (customer.custom_fields or {}).get("contact_suppressed") is True:
+            raise ContactSuppressed()
         log_id = uuid.uuid4()
         available_at = command.available_at or datetime.utcnow()
         payload = self._delivery_payload(command)
