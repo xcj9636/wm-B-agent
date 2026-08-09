@@ -298,6 +298,32 @@ class AgentRunService:
             self._db.refresh(row)
         return row
 
+    def requeue(
+        self,
+        run_id: UUID,
+        *,
+        worker_id: str,
+        fencing_token: int,
+        now: datetime,
+        error_code: str,
+    ) -> AgentRun:
+        """Release safe leased work for a later attempt without closing it."""
+        if not error_code or len(error_code) > 100:
+            raise ValueError("error_code must contain 1 to 100 characters")
+        now = self._naive_utc(now)
+        row = self._leased_row(run_id, worker_id, fencing_token, now)
+        if row.effect_state != "none":
+            raise RunLeaseConflict(
+                "Agent run cannot be requeued after an effect started"
+            )
+        row.status = "queued"
+        row.error_code = error_code
+        row.completed_at = None
+        self._clear_lease(row)
+        self._db.commit()
+        self._db.refresh(row)
+        return row
+
     def recover_expired(self, *, now: datetime) -> List[AgentRun]:
         now = self._naive_utc(now)
         rows = (

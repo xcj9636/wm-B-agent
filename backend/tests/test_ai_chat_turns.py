@@ -254,6 +254,7 @@ async def test_resumed_chat_capacity_limit_requeues_without_closing_turn(db_sess
         now=datetime.utcnow(),
         lease_seconds=60,
     )
+    first_fencing_token = claimed.fencing_token
     user_message = service._append_user_message(session, "Retry this request")
     turn.user_message_id = user_message.id
     db_session.commit()
@@ -262,7 +263,7 @@ async def test_resumed_chat_capacity_limit_requeues_without_closing_turn(db_sess
         await service.resume_claimed(
             run.id,
             worker_id="celery-worker-1",
-            fencing_token=claimed.fencing_token,
+            fencing_token=first_fencing_token,
         )
 
     db_session.refresh(run)
@@ -278,7 +279,7 @@ async def test_resumed_chat_capacity_limit_requeues_without_closing_turn(db_sess
         now=datetime.utcnow(),
         lease_seconds=60,
     )
-    assert reclaimed.fencing_token == claimed.fencing_token + 1
+    assert reclaimed.fencing_token == first_fencing_token + 1
 
 
 @pytest.mark.asyncio

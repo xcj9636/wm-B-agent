@@ -25,6 +25,7 @@ from app.services.agent_runtime.prompts import get_default_prompt_registry
 from app.services.agent_runtime.turns import AgentTurnCoordinator
 from app.services.agent_concurrency import (
     ConcurrencyLease,
+    ConcurrencyLimitExceeded,
     ConcurrencyRequest,
     ConcurrencyUnavailable,
     DistributedConcurrencyLimiter,
@@ -489,19 +490,39 @@ class AIChatService:
             )
             self._finish_turn(session, assistant, turn=turn)
             return self._message_response(assistant)
-        except BaseException:
+        except BaseException as exc:
             self._db.rollback()
             if lease_validated:
-                self._fail_run(
-                    run_service,
-                    run,
-                    worker_id=worker_id,
-                )
-                if turn is not None:
-                    coordinator.fail(
-                        turn.id,
-                        generation_epoch=turn.generation_epoch,
+                if isinstance(
+                    exc,
+                    (ConcurrencyLimitExceeded, ConcurrencyUnavailable),
+                ):
+                    error_code = (
+                        "agent_capacity_exhausted"
+                        if isinstance(exc, ConcurrencyLimitExceeded)
+                        else "agent_capacity_coordination_unavailable"
                     )
+                    try:
+                        run_service.requeue(
+                            run.id,
+                            worker_id=worker_id,
+                            fencing_token=fencing_token,
+                            now=datetime.utcnow(),
+                            error_code=error_code,
+                        )
+                    except RunLeaseConflict:
+                        run_service.recover_expired(now=datetime.utcnow())
+                else:
+                    self._fail_run(
+                        run_service,
+                        run,
+                        worker_id=worker_id,
+                    )
+                    if turn is not None:
+                        coordinator.fail(
+                            turn.id,
+                            generation_epoch=turn.generation_epoch,
+                        )
             raise
         finally:
             if redaction_vault is not None and turn is not None:
