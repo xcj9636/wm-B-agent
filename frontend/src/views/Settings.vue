@@ -1,644 +1,264 @@
-"""
-前端Settings视图页面
-"""
 <template>
-  <div class="settings">
-    <h1>Settings</h1>
+  <div class="page-stack settings-page">
+    <header class="page-heading">
+      <div>
+        <p class="page-kicker">System configuration</p>
+        <h1>Settings</h1>
+        <p>Configure the browser-to-backend connection and inspect linked delivery accounts.</p>
+      </div>
+      <el-button :loading="loadingAccounts" @click="loadAccounts">
+        <el-icon><Refresh /></el-icon>
+        Refresh accounts
+      </el-button>
+    </header>
 
-    <el-row :gutter="20">
-      <el-col
-        :xs="24"
-        :lg="16"
-      >
-        <!-- General Settings -->
+    <el-row :gutter="16">
+      <el-col :xs="24" :xl="15">
         <el-card class="settings-card">
           <template #header>
-            <div class="card-header">
-              <el-icon><Setting /></el-icon>
-              <span>General</span>
+            <div class="card-title">
+              <el-icon><Connection /></el-icon>
+              <div>
+                <strong>Backend API</strong>
+                <span>Applied immediately in this browser</span>
+              </div>
+              <el-tag :type="connectionTagType" effect="plain">{{ connectionLabel }}</el-tag>
             </div>
           </template>
 
-          <el-form
-            :model="generalForm"
-            label-width="150px"
-          >
-            <el-form-item label="Application Name">
-              <el-input v-model="generalForm.appName" />
-            </el-form-item>
-
-            <el-form-item label="Theme">
-              <el-radio-group v-model="generalForm.theme">
-                <el-radio label="light">
-                  Light
-                </el-radio>
-                <el-radio label="dark">
-                  Dark
-                </el-radio>
-                <el-radio label="auto">
-                  Auto
-                </el-radio>
-              </el-radio-group>
-            </el-form-item>
-
-            <el-form-item label="Language">
-              <el-select v-model="generalForm.language">
-                <el-option
-                  label="English"
-                  value="en"
-                />
-                <el-option
-                  label="中文"
-                  value="zh"
-                />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item label="Timezone">
-              <el-select
-                v-model="generalForm.timezone"
-                filterable
+          <el-form label-position="top" @submit.prevent="saveBackendUrl">
+            <el-form-item label="Base URL">
+              <el-input
+                v-model="backendUrl"
+                clearable
+                placeholder="Leave empty to use the Vite or reverse-proxy origin"
               >
-                <el-option
-                  v-for="tz in timezones"
-                  :key="tz.value"
-                  :label="tz.label"
-                  :value="tz.value"
-                />
-              </el-select>
+                <template #prepend>HTTP(S)</template>
+              </el-input>
+              <p class="field-help">
+                Example: http://localhost:8000. Empty uses the current origin and development proxy.
+              </p>
             </el-form-item>
-
-            <el-form-item label="Date Format">
-              <el-select v-model="generalForm.dateFormat">
-                <el-option
-                  label="YYYY-MM-DD"
-                  value="yyyy-MM-dd"
-                />
-                <el-option
-                  label="MM/DD/YYYY"
-                  value="MM/dd/yyyy"
-                />
-                <el-option
-                  label="DD/MM/YYYY"
-                  value="dd/MM/yyyy"
-                />
-              </el-select>
-            </el-form-item>
+            <div class="form-actions">
+              <el-button type="primary" native-type="submit">Save and apply</el-button>
+              <el-button :loading="testingConnection" @click="testBackendConnection">
+                Test connection
+              </el-button>
+              <el-button @click="resetBackendUrl">Use proxy default</el-button>
+            </div>
           </el-form>
+
+          <el-alert
+            v-if="connectionMessage"
+            class="connection-result"
+            :title="connectionMessage"
+            :type="connectionState === 'healthy' ? 'success' : 'error'"
+            :closable="false"
+            show-icon
+          />
+
+          <el-descriptions v-if="health" class="health-grid" :column="2" border>
+            <el-descriptions-item label="Service">{{ health.app || 'B-Agent API' }}</el-descriptions-item>
+            <el-descriptions-item label="Version">{{ health.version || 'Not reported' }}</el-descriptions-item>
+            <el-descriptions-item label="Status">{{ health.status }}</el-descriptions-item>
+            <el-descriptions-item label="Effective URL">{{ effectiveUrl || 'Same origin' }}</el-descriptions-item>
+          </el-descriptions>
         </el-card>
 
-        <!-- Notification Settings -->
         <el-card class="settings-card">
           <template #header>
-            <div class="card-header">
-              <el-icon><Bell /></el-icon>
-              <span>Notifications</span>
+            <div class="card-title">
+              <el-icon><Link /></el-icon>
+              <div>
+                <strong>Connected accounts</strong>
+                <span>Delivery identities exposed by the administration API</span>
+              </div>
+              <el-tag effect="plain">{{ accounts.length }}</el-tag>
             </div>
           </template>
 
-          <el-form
-            :model="notificationForm"
-            label-width="150px"
-          >
-            <el-form-item label="Email Notifications">
-              <el-switch v-model="notificationForm.email" />
-            </el-form-item>
-
-            <el-form-item label="Push Notifications">
-              <el-switch v-model="notificationForm.push" />
-            </el-form-item>
-
-            <el-form-item label="Browser Notifications">
-              <el-switch v-model="notificationForm.browser" />
-            </el-form-item>
-
-            <el-divider />
-
-            <el-form-item label="Digest Email">
-              <el-switch v-model="notificationForm.digest" />
-            </el-form-item>
-
-            <el-form-item label="Digest Schedule">
-              <el-select
-                v-model="notificationForm.digestSchedule"
-                :disabled="!notificationForm.digest"
-              >
-                <el-option
-                  label="Daily"
-                  value="daily"
+          <el-alert
+            v-if="accountsError"
+            :title="accountsError"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <el-table v-else v-loading="loadingAccounts" :data="accounts" stripe>
+            <el-table-column prop="name" label="Account" min-width="170">
+              <template #default="{ row }">
+                <div class="account-name">
+                  <strong>{{ row.name }}</strong>
+                  <span>{{ row.email || row.phone_number || 'No address' }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="account_type" label="Type" width="170" />
+            <el-table-column label="State" width="120">
+              <template #default="{ row }">
+                <el-tag :type="row.is_active && row.is_verified ? 'success' : 'info'" effect="plain">
+                  {{ row.is_active ? (row.is_verified ? 'Ready' : 'Unverified') : 'Disabled' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="Daily usage" min-width="180">
+              <template #default="{ row }">
+                <el-progress
+                  :percentage="usagePercentage(row)"
+                  :format="() => `${row.today_sent} / ${row.daily_limit}`"
                 />
-                <el-option
-                  label="Weekly"
-                  value="weekly"
-                />
-                <el-option
-                  label="Monthly"
-                  value="monthly"
-                />
-              </el-select>
-            </el-form-item>
-          </el-form>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!loadingAccounts && !accountsError && accounts.length === 0" description="No connected accounts" />
         </el-card>
       </el-col>
 
-      <el-col
-        :xs="24"
-        :lg="8"
-      >
-        <!-- Account Settings -->
+      <el-col :xs="24" :xl="9">
         <el-card class="settings-card">
           <template #header>
-            <div class="card-header">
+            <div class="card-title">
               <el-icon><UserFilled /></el-icon>
-              <span>Account</span>
+              <div><strong>Signed-in account</strong><span>Identity and access context</span></div>
             </div>
           </template>
-
-          <div class="account-info">
-            <el-avatar :size="80">
-              {{ userStore.user?.username?.charAt(0).toUpperCase() }}
-            </el-avatar>
-            <div class="user-details">
-              <div class="user-name">
-                {{ userStore.user?.fullName || userStore.user?.username }}
-              </div>
-              <div class="user-email">
-                {{ userStore.user?.email }}
-              </div>
-              <div class="user-role">
-                <el-tag :type="userStore.isAdmin ? 'danger' : 'info'">
-                  {{ userStore.user?.role?.toUpperCase() }}
-                </el-tag>
-              </div>
+          <div class="profile">
+            <el-avatar :size="48">{{ userInitial }}</el-avatar>
+            <div>
+              <strong>{{ authStore.user?.fullName || authStore.user?.username || 'Unknown user' }}</strong>
+              <span>{{ authStore.user?.email || 'No email' }}</span>
             </div>
           </div>
-
-          <el-divider />
-
-          <el-button
-            type="primary"
-            @click="showPasswordDialog = true"
-          >
-            Change Password
-          </el-button>
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="Role">{{ authStore.user?.role || 'user' }}</el-descriptions-item>
+            <el-descriptions-item label="Administrator">{{ authStore.isAdmin ? 'Yes' : 'No' }}</el-descriptions-item>
+            <el-descriptions-item label="User ID">{{ authStore.user?.id || 'Unavailable' }}</el-descriptions-item>
+          </el-descriptions>
         </el-card>
 
-        <!-- Connected Accounts -->
         <el-card class="settings-card">
           <template #header>
-            <div class="card-header">
-              <el-icon><Connection /></el-icon>
-              <span>Connected Accounts</span>
+            <div class="card-title">
+              <el-icon><InfoFilled /></el-icon>
+              <div><strong>Connection behavior</strong><span>How runtime configuration is resolved</span></div>
             </div>
           </template>
-
-          <div class="accounts-list">
-            <div
-              v-for="account in accounts"
-              :key="account.id"
-              class="account-item"
-            >
-              <div class="account-icon">
-                <el-icon><component :is="getAccountIcon(account.type)" /></el-icon>
-              </div>
-              <div class="account-info">
-                <div class="account-name">
-                  {{ account.name }}
-                </div>
-                <div class="account-email">
-                  {{ account.email || account.phone }}
-                </div>
-              </div>
-              <div class="account-status">
-                <el-tag
-                  :type="account.isVerified ? 'success' : 'info'"
-                  size="small"
-                >
-                  {{ account.isVerified ? 'Verified' : 'Pending' }}
-                </el-tag>
-              </div>
-            </div>
-
-            <el-empty
-              v-if="accounts.length === 0"
-              description="No connected accounts"
-            />
-          </div>
-
-          <el-button
-            type="primary"
-            style="width: 100%"
-            @click="showAddAccountDialog = true"
-          >
-            <el-icon><Plus /></el-icon>
-            Add Account
-          </el-button>
-        </el-card>
-
-        <!-- API Keys -->
-        <el-card class="settings-card">
-          <template #header>
-            <div class="card-header">
-              <el-icon><Key /></el-icon>
-              <span>API Keys</span>
-            </div>
-          </template>
-
-          <div class="api-keys">
-            <div
-              v-for="provider in apiProviders"
-              :key="provider.key"
-              class="api-key-item"
-            >
-              <div class="provider-icon">
-                <component :is="provider.icon" />
-              </div>
-              <div class="provider-info">
-                <div class="provider-name">
-                  {{ provider.name }}
-                </div>
-                <div class="provider-status">
-                  <el-tag
-                    v-if="provider.hasKey"
-                    type="success"
-                  >
-                    Configured
-                  </el-tag>
-                  <el-tag
-                    v-else
-                    type="info"
-                  >
-                    Not Configured
-                  </el-tag>
-                </div>
-              </div>
-              <el-button
-                text
-                @click="configureProvider(provider.key)"
-              >
-                {{ provider.hasKey ? 'Update' : 'Configure' }}
-              </el-button>
-            </div>
-          </div>
+          <ol class="behavior-list">
+            <li>A saved browser URL has highest priority.</li>
+            <li>Otherwise the Vite build-time API URL is used.</li>
+            <li>An empty value uses the same origin and Vite proxy during development.</li>
+          </ol>
         </el-card>
       </el-col>
     </el-row>
-
-    <!-- Change Password Dialog -->
-    <el-dialog
-      v-model="showPasswordDialog"
-      title="Change Password"
-      width="400px"
-    >
-      <el-form
-        :model="passwordForm"
-        label-width="120px"
-      >
-        <el-form-item label="Current Password">
-          <el-input
-            v-model="passwordForm.current"
-            type="password"
-          />
-        </el-form-item>
-        <el-form-item label="New Password">
-          <el-input
-            v-model="passwordForm.new"
-            type="password"
-          />
-        </el-form-item>
-        <el-form-item label="Confirm Password">
-          <el-input
-            v-model="passwordForm.confirm"
-            type="password"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showPasswordDialog = false">
-          Cancel
-        </el-button>
-        <el-button
-          type="primary"
-          @click="changePassword"
-        >
-          Save
-        </el-button>
-      </template>
-    </el-dialog>
-
-    <!-- Add Account Dialog -->
-    <el-dialog
-      v-model="showAddAccountDialog"
-      title="Add Account"
-      width="500px"
-    >
-      <el-form
-        :model="accountForm"
-        label-width="120px"
-      >
-        <el-form-item label="Account Type">
-          <el-select v-model="accountForm.type">
-            <el-option
-              label="Gmail"
-              value="gmail"
-            />
-            <el-option
-              label="Outlook"
-              value="outlook"
-            />
-            <el-option
-              label="SMTP"
-              value="smtp"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Account Name">
-          <el-input v-model="accountForm.name" />
-        </el-form-item>
-        <el-form-item
-          v-if="accountForm.type !== 'whatsapp'"
-          label="Email"
-        >
-          <el-input v-model="accountForm.email" />
-        </el-form-item>
-        <el-form-item
-          v-if="accountForm.type === 'whatsapp'"
-          label="Phone"
-        >
-          <el-input v-model="accountForm.phone" />
-        </el-form-item>
-        <el-form-item label="App Password">
-          <el-input
-            v-model="accountForm.password"
-            type="password"
-          />
-        </el-form-item>
-        <el-form-item label="Daily Limit">
-          <el-input-number
-            v-model="accountForm.dailyLimit"
-            :min="10"
-            :max="500"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showAddAccountDialog = false">
-          Cancel
-        </el-button>
-        <el-button
-          type="primary"
-          @click="addAccount"
-        >
-          Add
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useAuthStore } from '@/stores'
+import { api, updateBackendApiUrl } from '@/api'
+import { resolveBackendApiUrl } from '@/api/runtimeConfig'
+import { useAuthStore } from '@/stores/auth'
 
-const userStore = useAuthStore()
-
-// Dialog states
-const showPasswordDialog = ref(false)
-const showAddAccountDialog = ref(false)
-
-// Forms
-const generalForm = reactive({
-  appName: 'Trade AI Agent',
-  theme: 'light',
-  language: 'en',
-  timezone: 'UTC',
-  dateFormat: 'yyyy-MM-dd',
-})
-
-const notificationForm = reactive({
-  email: true,
-  push: false,
-  browser: false,
-  digest: true,
-  digestSchedule: 'daily',
-})
-
-const passwordForm = reactive({
-  current: '',
-  new: '',
-  confirm: '',
-})
-
-const accountForm = reactive({
-  type: 'gmail',
-  name: '',
-  email: '',
-  phone: '',
-  password: '',
-  dailyLimit: 100,
-})
-
-// Data
-const timezones = [
-  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
-  { value: 'America/New_York', label: 'Eastern Time (US & Canada)' },
-  { value: 'America/Los_Angeles', label: 'Pacific Time (US & Canada)' },
-  { value: 'Europe/London', label: 'Greenwich Mean Time' },
-  { value: 'Europe/Paris', label: 'Central European Time' },
-  { value: 'Asia/Shanghai', label: 'China Standard Time' },
-  { value: 'Asia/Tokyo', label: 'Japan Standard Time' },
-  { value: 'Australia/Sydney', label: 'Australian Eastern Time' },
-]
-
-interface ConnectedAccount {
+interface HealthResponse { status: string; app?: string; version?: string }
+interface AccountResponse {
   id: number
-  type: string
+  account_type: string
   name: string
   email?: string
-  phone?: string
-  isVerified: boolean
+  phone_number?: string
+  is_active: boolean
+  is_verified: boolean
+  daily_limit: number
+  today_sent: number
 }
 
-const accounts = ref<ConnectedAccount[]>([
-  { id: 1, type: 'gmail', name: 'Work Email', email: 'work@company.com', isVerified: true },
-  { id: 2, type: 'outlook', name: 'Personal', email: 'personal@outlook.com', isVerified: true },
-])
+const authStore = useAuthStore()
+const backendUrl = ref(resolveBackendApiUrl())
+const effectiveUrl = ref(resolveBackendApiUrl())
+const testingConnection = ref(false)
+const connectionState = ref<'idle' | 'healthy' | 'failed'>('idle')
+const connectionMessage = ref('')
+const health = ref<HealthResponse | null>(null)
+const accounts = ref<AccountResponse[]>([])
+const accountsError = ref('')
+const loadingAccounts = ref(false)
 
-const apiProviders = ref([
-  { key: 'tongyi', name: 'Tongyi Qwen', icon: 'MagicStick', hasKey: false },
-  { key: 'qwen', name: 'Qwen', icon: 'Grid', hasKey: false },
-  { key: 'openai', name: 'OpenAI', icon: 'ChatDotRound', hasKey: false },
-])
+const userInitial = computed(() => (authStore.user?.username || '?').charAt(0).toUpperCase())
+const connectionLabel = computed(() => ({ idle: 'Not tested', healthy: 'Connected', failed: 'Unavailable' })[connectionState.value])
+const connectionTagType = computed(() => connectionState.value === 'healthy' ? 'success' : connectionState.value === 'failed' ? 'danger' : 'info')
 
-// Methods
-async function changePassword() {
-  if (passwordForm.new !== passwordForm.confirm) {
-    ElMessage.error('Passwords do not match')
-    return
-  }
-
+function saveBackendUrl() {
   try {
-    // Call API to change password
-    ElMessage.success('Password changed successfully')
-    showPasswordDialog.value = false
-    passwordForm.current = ''
-    passwordForm.new = ''
-    passwordForm.confirm = ''
-  } catch {
-    ElMessage.error('Failed to change password')
+    effectiveUrl.value = updateBackendApiUrl(backendUrl.value)
+    backendUrl.value = effectiveUrl.value
+    connectionState.value = 'idle'
+    connectionMessage.value = ''
+    health.value = null
+    ElMessage.success('Backend API configuration applied')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : 'Invalid backend URL')
   }
 }
 
-async function addAccount() {
+function resetBackendUrl() {
+  backendUrl.value = ''
+  saveBackendUrl()
+}
+
+async function testBackendConnection() {
+  testingConnection.value = true
   try {
-    // Call API to add account
-    ElMessage.success('Account added successfully')
-    showAddAccountDialog.value = false
+    saveBackendUrl()
+    const response = await api.get<HealthResponse>('/health', { timeout: 8000 })
+    health.value = response.data
+    connectionState.value = response.data.status === 'healthy' ? 'healthy' : 'failed'
+    connectionMessage.value = connectionState.value === 'healthy'
+      ? 'Backend connection is healthy.'
+      : `Backend responded with status: ${response.data.status}`
   } catch {
-    ElMessage.error('Failed to add account')
+    health.value = null
+    connectionState.value = 'failed'
+    connectionMessage.value = 'The backend could not be reached with this configuration.'
+  } finally {
+    testingConnection.value = false
   }
 }
 
-function configureProvider(provider: string) {
-  ElMessage.info(`Configure ${provider} API key`)
+async function loadAccounts() {
+  loadingAccounts.value = true
+  accountsError.value = ''
+  try {
+    const response = await api.get<AccountResponse[]>('/api/v1/admin/accounts')
+    accounts.value = response.data
+  } catch {
+    accounts.value = []
+    accountsError.value = 'Accounts are unavailable. Verify the connection and your access permissions.'
+  } finally {
+    loadingAccounts.value = false
+  }
 }
 
-function getAccountIcon(type: string) {
-  const icons: Record<string, any> = {
-    gmail: 'Message',
-    outlook: 'Message',
-    smtp: 'Message',
-    whatsapp: 'ChatDotRound',
-  }
-  return icons[type] || 'Link'
+function usagePercentage(account: AccountResponse) {
+  return Math.min(100, Math.round((account.today_sent / Math.max(account.daily_limit, 1)) * 100))
 }
+
+onMounted(() => {
+  void loadAccounts()
+})
 </script>
 
-<style lang="scss" scoped>
-.settings {
-  h1 {
-    margin-bottom: 20px;
-  }
-}
-
-.settings-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-
-.account-info {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--el-border-color-light);
-}
-
-.user-details {
-  text-align: center;
-}
-
-.user-name {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.user-email {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 8px;
-}
-
-.account-list {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.account-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  background: var(--el-fill-color-light);
-}
-
-.account-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--el-bg-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--el-color-primary);
-  font-size: 18px;
-}
-
-.account-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.account-name {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.account-email {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.api-keys {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.api-key-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--el-border-color-light);
-}
-
-.provider-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--el-fill-color-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--el-color-primary);
-  font-size: 20px;
-}
-
-.provider-info {
-  flex: 1;
-}
-
-.provider-name {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.provider-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+<style scoped lang="scss">
+.settings-card { margin-bottom: 16px; }
+.card-title { display: flex; align-items: center; gap: 10px; }
+.card-title > div { display: grid; flex: 1; gap: 2px; }
+.card-title span, .profile span, .account-name span { color: var(--el-text-color-secondary); font-size: 12px; }
+.field-help { margin: 6px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.connection-result, .health-grid { margin-top: 16px; }
+.profile { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.profile > div, .account-name { display: grid; gap: 3px; }
+.behavior-list { margin: 0; padding-left: 20px; color: var(--el-text-color-regular); line-height: 1.7; }
+@media (max-width: 640px) { .form-actions > * { flex: 1 1 100%; } }
 </style>

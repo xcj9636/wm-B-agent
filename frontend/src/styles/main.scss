@@ -2,7 +2,7 @@
 @import './mixins.scss';
 
 :root {
-  --color-primary: #409eff;
+  --color-primary: #255c99;
   --color-success: #67c23a;
   --color-warning: #e6a23c;
   --color-danger: #f56c6c;
@@ -12,6 +12,13 @@
   --border-radius-md: 8px;
   --border-radius-lg: 12px;
   --border-radius-xl: 16px;
+  --console-radius: 8px;
+  --el-color-primary: #255c99;
+  --el-color-primary-light-3: #6289b7;
+  --el-color-primary-light-5: #92acc9;
+  --el-color-primary-light-7: #becfe0;
+  --el-color-primary-light-9: #e9eff5;
+  --el-color-primary-dark-2: #1e4a7a;
 }
 
 * {
@@ -24,6 +31,10 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-width: 320px;
+  min-height: 100dvh;
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color-page);
 }
 
 a {
@@ -134,4 +145,49 @@ a {
 // Dark mode transitions
 .dark {
   color-scheme: dark;
+}
+
+.page-stack {
+  display: grid;
+  gap: 20px;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.page-heading h1 {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.2;
+}
+
+.page-heading p:not(.page-kicker) {
+  max-width: 680px;
+  margin: 7px 0 0;
+  color: var(--el-text-color-secondary);
+  line-height: 1.55;
+}
+
+.page-kicker {
+  margin: 0 0 5px;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.el-card {
+  border-radius: var(--console-radius);
+}
+
+@media (max-width: 680px) {
+  .page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }

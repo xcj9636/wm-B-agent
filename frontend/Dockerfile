@@ -1,33 +1,25 @@
-FROM node:20-alpine as builder
+FROM node:20-alpine AS dependencies
 
 WORKDIR /app
-
-# Copy package files
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci
 
-# Copy source code
-COPY . .
+FROM dependencies AS development
 
-# Build application
+COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+FROM dependencies AS build
+
+COPY . .
 RUN npm run build
 
-# Production stage
-FROM nginx:alpine
+FROM nginx:1.27-alpine AS production
 
-# Copy built assets
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy nginx config
+COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Expose port
 EXPOSE 80
-
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost/ || exit 1
-
+  CMD wget --no-verbose --tries=1 --spider http://localhost/ || exit 1
 CMD ["nginx", "-g", "daemon off;"]

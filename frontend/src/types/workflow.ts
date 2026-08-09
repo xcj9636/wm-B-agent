@@ -59,14 +59,15 @@ export interface WorkflowUpdate {
 
 export interface Execution {
   id: string
-  workflowId: string
-  workflowName: string
+  workflow_id: string
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
-  currentStep?: string
-  contextJson?: Record<string, any>
-  errorMsg?: string
-  startedAt: string
-  finishedAt?: string
+  current_step?: string
+  error_msg?: string
+  started_at?: string
+  finished_at?: string
+  completed_steps: string[]
+  failed_steps: string[]
+  metrics: Record<string, unknown>
 }
 
 // For backward compatibility with existing code

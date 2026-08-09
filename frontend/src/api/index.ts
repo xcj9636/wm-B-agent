@@ -1,9 +1,10 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { resolveBackendApiUrl, setBackendApiUrl } from './runtimeConfig'
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '',
+  baseURL: resolveBackendApiUrl(),
   timeout: 30000,
 })
 
@@ -54,5 +55,11 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+export function updateBackendApiUrl(value: string) {
+  const normalized = setBackendApiUrl(value)
+  api.defaults.baseURL = normalized
+  return normalized
+}
 
 export default api

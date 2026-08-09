@@ -1,287 +1,73 @@
 <template>
-  <el-card class="conversion-funnel" shadow="hover">
+  <el-card class="conversion-funnel" shadow="never">
     <template #header>
       <div class="card-header">
-        <span>Conversion Funnel</span>
-        <el-dropdown trigger="click">
-          <el-button text>
-            <el-icon><MoreFilled /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item @click="refresh">Refresh</el-dropdown-item>
-              <el-dropdown-item @click="exportData">Export Data</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <div><strong>Conversion funnel</strong><span>{{ days }}-day customer journey</span></div>
+        <el-button text type="primary" :loading="loading" @click="fetchFunnelData">Refresh</el-button>
       </div>
     </template>
-
+    <el-alert v-if="errorMessage" :title="errorMessage" type="warning" :closable="false" show-icon />
     <div v-loading="loading" class="funnel-content">
-      <div class="funnel-chart">
-        <div
-          v-for="(stage, index) in stages"
-          :key="stage.name"
-          class="funnel-stage"
-          :style="{ width: getStageWidth(index) }"
-        >
-          <div class="stage-bar" :style="{ background: stage.color }">
-            <span class="stage-label">{{ stage.name }}</span>
-            <span class="stage-value">{{ stage.value.toLocaleString() }}</span>
+      <div v-if="stages.length" class="funnel-list">
+        <div v-for="(stage, index) in stages" :key="stage.name" class="funnel-row">
+          <div class="stage-heading">
+            <span>{{ stage.name }}</span>
+            <strong>{{ stage.value.toLocaleString() }}</strong>
           </div>
-          <div class="stage-rate">
-            <span class="rate-label">Conversion Rate:</span>
-            <span class="rate-value" :class="getRateClass(stage.rate)">
-              {{ stage.rate }}%
-            </span>
+          <div class="stage-track">
+            <div class="stage-fill" :style="{ width: stageWidth(stage.value) }" />
           </div>
+          <span class="stage-rate">{{ index === 0 ? 'Baseline' : `${rateFor(stage.name).toFixed(1)}% from previous stage` }}</span>
         </div>
       </div>
-
-      <div class="funnel-details">
-        <div
-          v-for="stage in stages"
-          :key="stage.name"
-          class="detail-item"
-        >
-          <div class="detail-color" :style="{ background: stage.color }"></div>
-          <div class="detail-info">
-            <div class="detail-label">{{ stage.name }}</div>
-            <div class="detail-stats">
-              <span class="detail-value">{{ stage.value.toLocaleString() }}</span>
-              <span class="detail-rate">{{ stage.rate }}%</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <el-empty v-else-if="!loading" description="No funnel data for this period" />
     </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted, ref, watch } from 'vue'
+import { api } from '@/api'
+import type { FunnelResponse, FunnelStage } from '@/types'
 
-interface Stage {
-  name: string
-  value: number
-  rate: number
-  color: string
-}
-
+const props = withDefaults(defineProps<{ days?: number }>(), { days: 30 })
 const loading = ref(false)
-const stages = ref<Stage[]>([])
-
-const stageColors = [
-  '#409eff', // blue
-  '#67c23a', // green
-  '#e6a23c', // orange
-  '#f56c6c', // red
-]
+const errorMessage = ref('')
+const stages = ref<FunnelStage[]>([])
+const rates = ref<Record<string, number>>({})
 
 async function fetchFunnelData() {
   loading.value = true
-
+  errorMessage.value = ''
   try {
-    // Mock data - replace with API call
-    const data = {
-      total_customers: 1000,
-      contacted: 650,
-      engaged: 320,
-      replied: 120,
-      converted: 25,
-    }
-
-    stages.value = [
-      {
-        name: 'Total Customers',
-        value: data.total_customers,
-        rate: 100,
-        color: stageColors[0],
-      },
-      {
-        name: 'Contacted',
-        value: data.contacted,
-        rate: Number(((data.contacted / data.total_customers) * 100).toFixed(1)),
-        color: stageColors[1],
-      },
-      {
-        name: 'Engaged',
-        value: data.engaged,
-        rate: Number(((data.engaged / data.contacted) * 100).toFixed(1)),
-        color: stageColors[2],
-      },
-      {
-        name: 'Replied',
-        value: data.replied,
-        rate: Number(((data.replied / data.engaged) * 100).toFixed(1)),
-        color: stageColors[2],
-      },
-      {
-        name: 'Converted',
-        value: data.converted,
-        rate: Number(((data.converted / data.replied) * 100).toFixed(1)),
-        color: stageColors[3],
-      },
-    ]
-  } catch (error) {
-    console.error('Failed to fetch funnel data:', error)
+    const response = await api.get<FunnelResponse>('/api/v1/stats/conversion-funnel', { params: { days: props.days } })
+    stages.value = response.data.stages
+    rates.value = Object.fromEntries(response.data.conversion_rates.map((item) => [item.stage, item.rate]))
+  } catch {
+    stages.value = []
+    rates.value = {}
+    errorMessage.value = 'Conversion funnel data is temporarily unavailable.'
   } finally {
     loading.value = false
   }
 }
 
-function getStageWidth(index: number) {
-  // Calculate width based on stage position
-  const widths = ['100%', '90%', '80%', '70%', '60%']
-  return widths[index] || '100%'
+function stageWidth(value: number) {
+  const baseline = Math.max(stages.value[0]?.value || 0, 1)
+  return `${Math.max(value > 0 ? 4 : 0, Math.min(100, (value / baseline) * 100))}%`
 }
+function rateFor(stage: string) { return rates.value[stage] || 0 }
 
-function getRateClass(rate: number) {
-  if (rate >= 50) return 'rate-high'
-  if (rate >= 20) return 'rate-medium'
-  return 'rate-low'
-}
-
-function refresh() {
-  fetchFunnelData()
-  ElMessage.info('Refreshing funnel data...')
-}
-
-function exportData() {
-  ElMessage.info('Exporting funnel data...')
-}
-
-onMounted(() => {
-  fetchFunnelData()
-})
+watch(() => props.days, () => { void fetchFunnelData() })
+onMounted(() => { void fetchFunnelData() })
 </script>
 
-<style lang="scss" scoped>
-.conversion-funnel {
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-weight: 600;
-  }
-}
-
-.funnel-content {
-  min-height: 350px;
-}
-
-.funnel-chart {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px;
-  background: var(--el-fill-color-blank);
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.funnel-stage {
-  margin-bottom: 8px;
-}
-
-.stage-bar {
-  width: 100%;
-  padding: 12px 20px;
-  color: white;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: 500;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.stage-label {
-  font-size: 14px;
-}
-
-.stage-value {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.stage-rate {
-  text-align: center;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.rate-label {
-  display: block;
-  margin-bottom: 2px;
-  font-size: 12px;
-}
-
-.rate-value {
-  font-size: 20px;
-  font-weight: 700;
-
-  &.rate-high {
-    color: var(--el-color-success);
-  }
-
-  &.rate-medium {
-    color: var(--el-color-warning);
-  }
-
-  &.rate-low {
-    color: var(--el-color-danger);
-  }
-}
-
-.funnel-details {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.detail-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  background: var(--el-fill-color-lighter);
-  border-radius: 6px;
-}
-
-.detail-color {
-  width: 8px;
-  height: 8px;
-  border-radius: 4px;
-}
-
-.detail-info {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.detail-label {
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-}
-
-.detail-stats {
-  display: flex;
-  gap: 16px;
-}
-
-.detail-value {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.detail-rate {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
+<style scoped lang="scss">
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-header > div { display: grid; gap: 3px; }.card-header span { color: var(--el-text-color-secondary); font-size: 12px; }
+.funnel-content { min-height: 290px; }.funnel-list { display: grid; gap: 18px; }
+.stage-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.stage-track { height: 9px; margin-top: 6px; overflow: hidden; border-radius: 3px; background: var(--el-fill-color); }
+.stage-fill { height: 100%; border-radius: inherit; background: var(--el-color-primary); }
+.stage-rate { display: block; margin-top: 4px; color: var(--el-text-color-secondary); font-size: 11px; }
 </style>

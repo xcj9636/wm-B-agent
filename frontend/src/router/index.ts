@@ -28,6 +28,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Workflows' },
       },
       {
+        path: 'skills',
+        name: 'Skills',
+        component: () => import('@/views/Skills.vue'),
+        meta: { title: 'Skills' },
+      },
+      {
         path: 'workflows/:id',
         name: 'WorkflowEditor',
         component: () => import('@/views/WorkflowEditor.vue'),
@@ -62,6 +68,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Analytics',
         component: () => import('@/views/Analytics.vue'),
         meta: { title: 'Analytics' },
+      },
+      {
+        path: 'operations',
+        name: 'Operations',
+        component: () => import('@/views/Operations.vue'),
+        meta: { title: 'Operations', requiresAdmin: true },
       },
       {
         path: 'operations/dead-letters',

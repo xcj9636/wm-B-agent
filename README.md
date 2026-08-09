@@ -71,6 +71,10 @@ npm test
 npm run build
 ```
 
+本机开发可运行 `npm run dev`；默认把 `/api` 与 `/health` 代理到
+`http://127.0.0.1:8000`。如后端地址不同，设置 `VITE_API_PROXY_TARGET`。
+登录后也可以在 Settings 页面保存并立即测试浏览器专用的后端 Base URL。
+
 ### 后端
 
 建议使用 Python 3.11：
@@ -90,6 +94,11 @@ cp .env.example .env
 docker compose config
 docker compose up --build
 ```
+
+Compose 中的前端使用 Vite development 镜像，源码目录以 bind mount 挂载，
+保存 Vue/TypeScript/SCSS 文件后会通过 HMR 自动更新页面。容器内代理目标固定为
+`http://backend:8000`；跨机器访问时可通过 `VITE_HMR_HOST` 与
+`VITE_HMR_CLIENT_PORT` 调整浏览器连接地址。
 
 启动后默认地址：
 

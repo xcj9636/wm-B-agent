@@ -1,239 +1,132 @@
 <template>
-  <div class="dashboard">
-    <h1>Dashboard</h1>
+  <div class="page-stack">
+    <header class="page-heading">
+      <div>
+        <p class="page-kicker">Live workspace</p>
+        <h1>Dashboard</h1>
+        <p>Today’s customer, outreach and automation signals from the backend.</p>
+      </div>
+      <el-button :loading="loading" @click="loadDashboard">
+        <el-icon><Refresh /></el-icon>
+        Refresh
+      </el-button>
+    </header>
 
-    <el-row
-      :gutter="20"
-      class="stats-row"
-    >
-      <el-col
-        :xs="24"
-        :sm="12"
-        :md="6"
-      >
-        <StatCard
-          label="New Customers"
-          :value="stats?.today?.new_customers || 0"
-          :trend="stats?.trends?.customers || 0"
-          period="week"
-          color="primary"
-          icon="User"
-        />
-      </el-col>
+    <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon>
+      <template #default><el-button text type="primary" @click="loadDashboard">Try again</el-button></template>
+    </el-alert>
 
-      <el-col
-        :xs="24"
-        :sm="12"
-        :md="6"
-      >
-        <StatCard
-          label="Messages Sent"
-          :value="stats?.today?.emails_sent || 0"
-          :trend="stats?.trends?.messages || 0"
-          period="week"
-          color="success"
-          icon="Promotion"
-        />
-      </el-col>
-
-      <el-col
-        :xs="24"
-        :sm="12"
-        :md="6"
-      >
-        <StatCard
-          label="Replies"
-          :value="stats?.today?.emails_replied || 0"
-          :trend="stats?.trends?.replies || 0"
-          period="week"
-          color="warning"
-          icon="ChatDotRound"
-        />
-      </el-col>
-
-      <el-col
-        :xs="24"
-        :sm="12"
-        :md="6"
-      >
-        <StatCard
-          label="Conversions"
-          :value="stats?.today?.converted_customers || 0"
-          :trend="stats?.trends?.conversions || 0"
-          period="week"
-          color="danger"
-          icon="TrendCharts"
-        />
+    <el-row v-loading="loading && !stats" :gutter="16">
+      <el-col v-for="metric in metrics" :key="metric.label" :xs="24" :sm="12" :xl="6">
+        <StatCard v-bind="metric" />
       </el-col>
     </el-row>
 
-    <el-row
-      :gutter="20"
-      class="content-row"
-    >
-      <el-col
-        :xs="24"
-        :lg="16"
-      >
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>Recent Activity</span>
-            </div>
-          </template>
-          <RecentActivity
-            v-if="activities.length > 0"
-            :activities="activities"
-          />
-          <el-empty
-            v-else
-            description="No recent activity"
-          />
-        </el-card>
+    <el-row :gutter="16">
+      <el-col :xs="24" :xl="16">
+        <RecentActivity :activities="activities" :auto-load="false" />
       </el-col>
-
-      <el-col
-        :xs="24"
-        :lg="8"
-      >
-        <el-card>
+      <el-col :xs="24" :xl="8">
+        <el-card class="leads-card">
           <template #header>
             <div class="card-header">
-              <span>High Intent Leads</span>
+              <div><strong>High-intent leads</strong><span>Prioritized by latest customer state</span></div>
+              <el-tag type="danger" effect="plain">{{ highIntentLeads.length }}</el-tag>
             </div>
           </template>
-          <el-table
-            v-loading="loading"
-            :data="highIntentLeads"
-            size="small"
-          >
-            <el-table-column
-              prop="name"
-              label="Name"
-            />
-            <el-table-column
-              prop="intent"
-              label="Intent"
-            >
+          <el-table v-loading="loading" :data="highIntentLeads" size="small">
+            <el-table-column prop="name" label="Lead" min-width="120" />
+            <el-table-column prop="platform" label="Channel" width="100" />
+            <el-table-column label="Intent" width="100">
               <template #default="{ row }">
-                <el-tag
-                  :type="getIntentType(row.intent)"
-                  size="small"
-                >
-                  {{ row.intent }}
+                <el-tag :type="row.intent === 'very_high' ? 'danger' : 'warning'" effect="plain" size="small">
+                  {{ row.intent.replace('_', ' ') }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column
-              label="Action"
-              width="80"
-            >
-              <template #default="{ row }">
-                <el-button
-                  text
-                  type="primary"
-                  @click="viewLead(row)"
-                >
-                  View
-                </el-button>
-              </template>
+            <el-table-column width="64" align="right">
+              <template #default="{ row }"><el-button text type="primary" @click="router.push(`/customers/${row.id}`)">View</el-button></template>
             </el-table-column>
           </el-table>
-          <el-empty
-            v-if="!loading && highIntentLeads.length === 0"
-            description="No high intent leads"
-          />
+          <el-empty v-if="!loading && highIntentLeads.length === 0" description="No high-intent leads" />
         </el-card>
       </el-col>
     </el-row>
+
+    <el-card v-if="stats" class="period-card">
+      <template #header><strong>Period comparison</strong></template>
+      <el-table :data="periodRows" size="small">
+        <el-table-column prop="period" label="Period" width="100" />
+        <el-table-column prop="customers" label="Customers" />
+        <el-table-column prop="messages" label="Messages" />
+        <el-table-column prop="replies" label="Replies" />
+        <el-table-column prop="workflows" label="Workflows" />
+        <el-table-column prop="failures" label="Failures" />
+      </el-table>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api'
-import type { DashboardStats } from '@/types'
+import type { ActivityItem, DashboardStats, MetricCard } from '@/types'
 import StatCard from '@/components/Dashboard/StatCard.vue'
 import RecentActivity from '@/components/Dashboard/RecentActivity.vue'
 
+interface HighIntentLead { id: number; name: string; intent: string; platform: string }
+
 const router = useRouter()
-
 const loading = ref(false)
+const errorMessage = ref('')
 const stats = ref<DashboardStats | null>(null)
-const activities = ref<any[]>([])
-const highIntentLeads = ref<any[]>([])
+const activities = ref<ActivityItem[]>([])
+const highIntentLeads = ref<HighIntentLead[]>([])
 
-async function fetchStats() {
-  try {
-    const response = await api.get<DashboardStats>('/api/v1/stats/dashboard')
-    stats.value = response.data
-  } catch (error) {
-    console.error('Failed to fetch stats:', error)
-  }
-}
+const metrics = computed<MetricCard[]>(() => [
+  { label: 'New customers', value: stats.value?.today.new_customers || 0, color: 'primary', icon: 'User' },
+  { label: 'Messages sent', value: (stats.value?.today.emails_sent || 0) + (stats.value?.today.whatsapp_sent || 0), color: 'success', icon: 'Promotion' },
+  { label: 'Active conversations', value: stats.value?.today.active_conversations || 0, color: 'warning', icon: 'ChatDotRound' },
+  { label: 'Conversion rate', value: stats.value?.conversion_rate || 0, suffix: '%', color: 'danger', icon: 'TrendCharts' },
+])
 
-async function fetchActivities() {
-  try {
-    const response = await api.get('/api/v1/stats/activities')
-    activities.value = response.data || []
-  } catch (error) {
-    console.error('Failed to fetch activities:', error)
-  }
-}
-
-async function fetchHighIntentLeads() {
-  loading.value = true
-  try {
-    const response = await api.get('/api/v1/customers/high-intent')
-    highIntentLeads.value = response.data || []
-  } catch (error) {
-    console.error('Failed to fetch high intent leads:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-function viewLead(lead: any) {
-  router.push(`/customers/${lead.id}`)
-}
-
-function getIntentType(intent: string) {
-  const types: Record<string, any> = {
-    very_high: 'danger',
-    high: 'warning',
-    medium: 'primary',
-    low: 'info',
-  }
-  return types[intent] || 'info'
-}
-
-onMounted(() => {
-  fetchStats()
-  fetchActivities()
-  fetchHighIntentLeads()
+const periodRows = computed(() => {
+  if (!stats.value) return []
+  return ([['Today', stats.value.today], ['7 days', stats.value.week], ['30 days', stats.value.month]] as const).map(([period, data]) => ({
+    period,
+    customers: data.new_customers,
+    messages: data.emails_sent + data.whatsapp_sent,
+    replies: data.emails_replied,
+    workflows: data.workflows_executed,
+    failures: data.workflows_failed,
+  }))
 })
+
+async function loadDashboard() {
+  loading.value = true
+  errorMessage.value = ''
+  const [statsResult, activitiesResult, leadsResult] = await Promise.allSettled([
+    api.get<DashboardStats>('/api/v1/stats/dashboard'),
+    api.get<ActivityItem[]>('/api/v1/stats/activities'),
+    api.get<HighIntentLead[]>('/api/v1/customers/high-intent'),
+  ])
+  if (statsResult.status === 'fulfilled') stats.value = statsResult.value.data
+  if (activitiesResult.status === 'fulfilled') activities.value = activitiesResult.value.data
+  if (leadsResult.status === 'fulfilled') highIntentLeads.value = leadsResult.value.data
+  if ([statsResult, activitiesResult, leadsResult].some((result) => result.status === 'rejected')) {
+    errorMessage.value = 'Some dashboard data could not be loaded. Available results are still shown.'
+  }
+  loading.value = false
+}
+
+onMounted(() => { void loadDashboard() })
 </script>
 
-<style lang="scss" scoped>
-.dashboard {
-  h1 {
-    margin-bottom: 24px;
-  }
-}
-
-.stats-row {
-  margin-bottom: 20px;
-}
-
-.content-row {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: 600;
-}
+<style scoped lang="scss">
+.el-col { margin-bottom: 16px; }
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-header > div { display: grid; gap: 3px; }
+.card-header span { color: var(--el-text-color-secondary); font-size: 12px; }
+.leads-card { height: 100%; }
 </style>

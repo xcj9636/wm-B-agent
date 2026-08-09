@@ -216,20 +216,7 @@ async function loadWorkflow() {
 async function loadSkills() {
   try {
     const response = await skillApi.list()
-    // Transform API response to match Skill type
-    skills.value = response.skills.map((s: any) => ({
-      id: s.name,
-      name: s.name,
-      displayName: s.display_name,
-      description: s.description,
-      category: s.category,
-      inputSchema: s.input_schema,
-      outputSchema: s.output_schema,
-      configTemplate: s.config_schema,
-      icon: s.icon,
-      version: s.version,
-      enabled: true,
-    }))
+    skills.value = response.skills
   } catch (error) {
     console.error('Failed to load skills:', error)
   }
@@ -264,13 +251,10 @@ function onSave() {
 
 async function onExecute() {
   try {
-    await workflowApi.execute(workflowId.value, {})
+    const execution = await workflowApi.execute(workflowId.value, {})
     showExecutionPanel.value = true
     currentExecution.value = {
-      id: `exec_${Date.now()}`,
-      workflow_name: workflowForm.name,
-      status: 'running',
-      progress: 0,
+      id: execution.execution_id,
     }
   } catch (error) {
     console.error('Failed to execute workflow:', error)

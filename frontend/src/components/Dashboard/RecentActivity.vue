@@ -1,239 +1,100 @@
 <template>
-  <el-card
-    class="recent-activity"
-    shadow="hover"
-  >
+  <el-card class="recent-activity" shadow="never">
     <template #header>
       <div class="card-header">
-        <span>Recent Activity</span>
-        <el-button
-          text
-          @click="viewAll"
-        >
-          View All
-        </el-button>
+        <div><strong>Recent activity</strong><span>Latest auditable workspace events</span></div>
+        <el-button text type="primary" :loading="loading" @click="refresh">Refresh</el-button>
       </div>
     </template>
 
-    <div
-      v-loading="loading && props.activities.length === 0"
-      class="activity-content"
-    >
-      <el-timeline v-if="displayActivities.length > 0">
+    <el-alert v-if="errorMessage" :title="errorMessage" type="warning" :closable="false" show-icon />
+    <div v-loading="loading" class="activity-content">
+      <el-timeline v-if="displayActivities.length">
         <el-timeline-item
           v-for="activity in displayActivities"
           :key="activity.id"
           :timestamp="formatTimestamp(activity.timestamp)"
-          :type="getActivityType(activity.type)"
+          :type="activityTypes[activity.type] || 'info'"
         >
           <div class="activity-item">
-            <div class="activity-icon">
-              <el-icon><component :is="getActivityIcon(activity.type)" /></el-icon>
-            </div>
-            <div class="activity-detail">
-              <div class="activity-description">
-                {{ activity.description }}
-              </div>
-              <div
-                v-if="activity.metadata"
-                class="activity-meta"
-              >
-                <el-tag
-                  v-for="(value, key) in activity.metadata"
-                  :key="key"
-                  size="small"
-                  type="info"
-                >
-                  {{ key }}: {{ value }}
+            <el-icon class="activity-icon"><component :is="activityIcons[activity.type] || 'Notification'" /></el-icon>
+            <div>
+              <p>{{ activity.description }}</p>
+              <div v-if="safeMetadata(activity.metadata).length" class="activity-meta">
+                <el-tag v-for="entry in safeMetadata(activity.metadata)" :key="entry" size="small" type="info" effect="plain">
+                  {{ entry }}
                 </el-tag>
               </div>
             </div>
           </div>
         </el-timeline-item>
       </el-timeline>
-
-      <el-empty
-        v-if="displayActivities.length === 0"
-        description="No recent activity"
-      />
+      <el-empty v-else-if="!loading" description="No recent activity" />
     </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import { api } from '@/api'
 import type { ActivityItem } from '@/types'
 
 dayjs.extend(relativeTime)
 
-interface Props {
-  activities?: ActivityItem[]
-}
-
-const props = withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<{ activities?: ActivityItem[]; autoLoad?: boolean }>(), {
   activities: () => [],
+  autoLoad: true,
 })
-
-const router = useRouter()
 const loading = ref(false)
+const errorMessage = ref('')
 const internalActivities = ref<ActivityItem[]>([])
+const displayActivities = computed(() => props.activities.length ? props.activities : internalActivities.value)
 
-const displayActivities = computed(() => {
-  return props.activities.length > 0 ? props.activities : internalActivities.value
-})
-
-type TimelineItemType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
-
-const activityTypes: Record<ActivityItem['type'], TimelineItemType> = {
-  message_sent: 'primary',
-  message_delivered: 'success',
-  message_opened: 'warning',
-  reply_received: 'danger',
-  workflow_started: 'info',
-  workflow_completed: 'success',
-  workflow_failed: 'danger',
-  customer_created: 'primary',
-  customer_updated: 'info',
-  takeover_requested: 'warning',
-  system_alert: 'danger',
+const activityTypes: Record<string, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
+  message_sent: 'primary', message_delivered: 'success', message_opened: 'warning', reply_received: 'primary',
+  workflow_started: 'info', workflow_completed: 'success', workflow_failed: 'danger', customer_created: 'primary',
+  customer_updated: 'info', takeover_requested: 'warning', system_alert: 'danger',
+}
+const activityIcons: Record<string, string> = {
+  message_sent: 'Promotion', message_delivered: 'SuccessFilled', message_opened: 'View', reply_received: 'ChatDotRound',
+  workflow_started: 'Operation', workflow_completed: 'CircleCheck', workflow_failed: 'CircleClose', customer_created: 'User',
+  customer_updated: 'Edit', takeover_requested: 'Warning', system_alert: 'WarningFilled',
 }
 
-const activityIcons: any = {
-  message_sent: 'Promotion',
-  message_delivered: 'SuccessFilled',
-  message_opened: 'View',
-  reply_received: 'ChatDotRound',
-  workflow_started: 'Operation',
-  workflow_completed: 'CircleCheck',
-  workflow_failed: 'CircleClose',
-  customer_created: 'User',
-  customer_updated: 'Edit',
-  takeover_requested: 'Warning',
-  system_alert: 'WarningFilled',
-}
-
-async function fetchActivities() {
-  // Only fetch if no activities are provided via props
-  if (props.activities.length > 0) return
-
+async function refresh() {
   loading.value = true
-
+  errorMessage.value = ''
   try {
-    // In a real app, this would be an API call
-    // const response = await api.get('/api/v1/stats/activities')
-
-    // Mock data for now
-    internalActivities.value = [
-      {
-        id: '1',
-        type: 'message_sent',
-        description: 'Email sent to @brand123',
-        timestamp: dayjs().subtract(5, 'minutes').toISOString(),
-      },
-      {
-        id: '2',
-        type: 'reply_received',
-        description: 'New reply from @retailer456: "What\'s your pricing?"',
-        timestamp: dayjs().subtract(15, 'minutes').toISOString(),
-        metadata: { platform: 'email', customer: '@retailer456' },
-      },
-      {
-        id: '3',
-        type: 'workflow_completed',
-        description: 'Workflow "Lead Generation" completed successfully',
-        timestamp: dayjs().subtract(1, 'hour').toISOString(),
-        metadata: { workflow: 'Lead Generation', customers: 45 },
-      },
-      {
-        id: '4',
-        type: 'customer_created',
-        description: '15 new customers imported from TikTok',
-        timestamp: dayjs().subtract(2, 'hours').toISOString(),
-        metadata: { source: 'TikTok', count: 15 },
-      },
-      {
-        id: '5',
-        type: 'message_opened',
-        description: 'Email opened by @fashion_brand',
-        timestamp: dayjs().subtract(3, 'hours').toISOString(),
-      },
-    ]
-  } catch (error) {
-    console.error('Failed to fetch activities:', error)
+    const response = await api.get<ActivityItem[]>('/api/v1/stats/activities')
+    internalActivities.value = response.data
+  } catch {
+    errorMessage.value = 'Activity events are temporarily unavailable.'
   } finally {
     loading.value = false
   }
 }
 
-function getActivityType(type: ActivityItem['type']): TimelineItemType {
-  return activityTypes[type]
+function safeMetadata(metadata?: Record<string, unknown>) {
+  if (!metadata) return []
+  return Object.entries(metadata)
+    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${String(value).slice(0, 80)}`)
 }
 
-function getActivityIcon(type: string) {
-  return activityIcons[type as keyof typeof activityIcons] || 'Notification'
-}
+function formatTimestamp(timestamp: string) { return dayjs(timestamp).fromNow() }
 
-function formatTimestamp(timestamp: string) {
-  return dayjs(timestamp).fromNow()
-}
-
-function viewAll() {
-  router.push('/analytics')
-}
-
-onMounted(() => {
-  fetchActivities()
-})
+watch(() => props.activities, (value) => { if (value.length) internalActivities.value = value }, { immediate: true })
+onMounted(() => { if (props.autoLoad && !props.activities.length) void refresh() })
 </script>
 
-<style lang="scss" scoped>
-.recent-activity {
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-weight: 600;
-  }
-}
-
-.activity-content {
-  min-height: 300px;
-}
-
-.activity-item {
-  display: flex;
-  gap: 12px;
-}
-
-.activity-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--el-fill-color-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--el-text-color-secondary);
-  flex-shrink: 0;
-}
-
-.activity-detail {
-  flex: 1;
-}
-
-.activity-description {
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-  line-height: 1.5;
-}
-
-.activity-meta {
-  margin-top: 4px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+<style scoped lang="scss">
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-header > div { display: grid; gap: 3px; }.card-header span { color: var(--el-text-color-secondary); font-size: 12px; }
+.activity-content { min-height: 280px; padding-top: 4px; }
+.activity-item { display: flex; gap: 10px; }.activity-item p { margin: 0; line-height: 1.5; }
+.activity-icon { margin-top: 2px; color: var(--el-text-color-secondary); }
+.activity-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
 </style>

@@ -1,41 +1,27 @@
+export interface DailyStats {
+  date: string
+  new_customers: number
+  active_customers: number
+  converted_customers: number
+  emails_sent: number
+  whatsapp_sent: number
+  emails_opened: number
+  emails_replied: number
+  new_conversations: number
+  active_conversations: number
+  ai_handled: number
+  manual_takeovers: number
+  workflows_executed: number
+  workflows_completed: number
+  workflows_failed: number
+}
+
 export interface DashboardStats {
   today: DailyStats
   week: DailyStats
   month: DailyStats
-  conversionRate: number
-  avgResponseTime: number
-  activeConversations: number
-  highIntentLeads: number
-  trends?: Trends
-}
-
-export interface Trends {
-  customers: number
-  messages: number
-  replies: number
-  conversions: number
-}
-
-export interface DailyStats {
-  date: string
-  newCustomers: number
-  new_customers?: number  // Alternative naming for compatibility
-  activeCustomers: number
-  convertedCustomers: number
-  converted_customers?: number  // Alternative naming for compatibility
-  emailsSent: number
-  emails_sent?: number  // Alternative naming for compatibility
-  whatsappSent: number
-  emailsOpened: number
-  emailsReplied: number
-  emails_replied?: number  // Alternative naming for compatibility
-  newConversations: number
-  activeConversations: number
-  aiHandled: number
-  manualTakeovers: number
-  workflowsExecuted: number
-  workflowsCompleted: number
-  workflowsFailed: number
+  conversion_rate: number
+  avg_response_time: number
 }
 
 export interface ActivityItem {
@@ -43,8 +29,7 @@ export interface ActivityItem {
   type: ActivityType
   description: string
   timestamp: string
-  metadata?: Record<string, any>
-  userId?: number
+  metadata?: Record<string, unknown>
 }
 
 export type ActivityType =
@@ -63,20 +48,25 @@ export type ActivityType =
 export interface FunnelStage {
   name: string
   value: number
-  rate: number
-  color: string
 }
 
-export interface ChartData {
-  labels: string[]
-  datasets: ChartDataset[]
+export interface FunnelResponse {
+  stages: FunnelStage[]
+  conversion_rates: Array<{ stage: string; rate: number }>
 }
 
-export interface ChartDataset {
-  label: string
-  data: number[]
-  backgroundColor?: string
-  borderColor?: string
+export interface TrendPoint {
+  date: string
+  new_customers: number
+  emails_sent: number
+  whatsapp_sent: number
+  emails_replied: number
+  conversions: number
+}
+
+export interface TrendsResponse {
+  days: number
+  stats: TrendPoint[]
 }
 
 export interface MetricCard {
@@ -87,12 +77,4 @@ export interface MetricCard {
   period?: string
   color?: 'primary' | 'success' | 'warning' | 'danger' | 'info'
   icon?: string
-}
-
-export interface TopLead {
-  customerId: number
-  customerName: string
-  intentLevel: string
-  engagementScore: number
-  lastActivity: string
 }
