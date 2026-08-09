@@ -2,7 +2,7 @@
 
 import re
 from collections import defaultdict
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -107,11 +107,22 @@ class RedactionVault:
         self._counters[run_id] = dict(counters)
         return RedactionResult(text=result, placeholders=new_placeholders)
 
-    def rehydrate(self, text: str, *, run_id: str) -> str:
+    def rehydrate(
+        self,
+        text: str,
+        *,
+        run_id: str,
+        allowed_placeholders: Optional[Set[str]] = None,
+    ) -> str:
         if run_id not in self._values:
             raise PermissionError("Redaction mapping is not available for this run")
         result = text
         for placeholder, value in self._values[run_id].items():
+            if (
+                allowed_placeholders is not None
+                and placeholder not in allowed_placeholders
+            ):
+                continue
             result = result.replace(placeholder, value)
         return result
 

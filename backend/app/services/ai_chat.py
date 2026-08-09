@@ -123,6 +123,7 @@ class AIChatService:
             return self._replay_completed_turn(turn)
         backend = None
         redaction_vault = None
+        rehydration_placeholders = set()
         try:
             self._enforce_current_input_policy(content)
             user_message = self._append_user_message(session, content)
@@ -135,7 +136,11 @@ class AIChatService:
                 audit_sink=SessionInvocationAuditSink(self._db),
                 backend_name=runtime_config.backend,
             )
-            model_messages, redaction_vault = self._redact_model_messages(
+            (
+                model_messages,
+                redaction_vault,
+                rehydration_placeholders,
+            ) = self._redact_model_messages(
                 self._messages_for_model(session, user_message),
                 run_id=str(turn.id),
             )
@@ -149,6 +154,7 @@ class AIChatService:
             response_content = redaction_vault.rehydrate(
                 response.content,
                 run_id=str(turn.id),
+                allowed_placeholders=rehydration_placeholders,
             )
 
             assistant = AIChatMessage(
@@ -206,6 +212,7 @@ class AIChatService:
             return
         backend = None
         redaction_vault = None
+        rehydration_placeholders = set()
         fragments: List[str] = []
         metadata: Dict[str, object] = {}
         try:
@@ -220,7 +227,11 @@ class AIChatService:
                 audit_sink=SessionInvocationAuditSink(self._db),
                 backend_name=runtime_config.backend,
             )
-            model_messages, redaction_vault = self._redact_model_messages(
+            (
+                model_messages,
+                redaction_vault,
+                rehydration_placeholders,
+            ) = self._redact_model_messages(
                 self._messages_for_model(session, user_message),
                 run_id=str(turn.id),
             )
@@ -246,6 +257,7 @@ class AIChatService:
             response_content = redaction_vault.rehydrate(
                 "".join(fragments),
                 run_id=str(turn.id),
+                allowed_placeholders=rehydration_placeholders,
             )
             assistant = AIChatMessage(
                 session_id=session.id,
@@ -319,7 +331,7 @@ class AIChatService:
         messages: List[Dict[str, str]],
         *,
         run_id: str,
-    ) -> tuple[List[Dict[str, str]], RedactionVault]:
+    ) -> tuple[List[Dict[str, str]], RedactionVault, set[str]]:
         classifier = SensitiveDataClassifier()
         classifications = [
             classifier.classify(
@@ -336,17 +348,14 @@ class AIChatService:
                 "Restricted context cannot be sent to the configured model route"
             )
         vault = RedactionVault()
-        redacted = [
-            {
-                **message,
-                "content": vault.redact(
-                    message["content"],
-                    run_id=run_id,
-                ).text,
-            }
-            for message in messages
-        ]
-        return redacted, vault
+        redacted: List[Dict[str, str]] = []
+        current_placeholders: set[str] = set()
+        for index, message in enumerate(messages):
+            result = vault.redact(message["content"], run_id=run_id)
+            redacted.append({**message, "content": result.text})
+            if index == len(messages) - 1:
+                current_placeholders = set(result.placeholders)
+        return redacted, vault, current_placeholders
 
     @staticmethod
     def _normalize_content(content: str) -> str:
