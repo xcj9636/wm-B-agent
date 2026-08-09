@@ -23,6 +23,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent Center' },
       },
       {
+        path: 'ai-chat',
+        name: 'AIChat',
+        component: () => import('@/views/AIChat.vue'),
+        meta: { title: 'AI Chat' },
+      },
+      {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),

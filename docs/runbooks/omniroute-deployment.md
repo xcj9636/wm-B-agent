@@ -76,7 +76,7 @@ docker compose exec backend sh -lc 'curl -fsS -H "Authorization: Bearer $(cat /r
 GET /api/v1/admin/ai-gateway/status
 ```
 
-只有 `enabled=true`、`ready=true`、`reachable=true`、`issues=[]` 才能进入 canary。再用不含敏感信息的请求验证 draft 和 reply 两个 use case，并确认每次响应都有允许值的 `X-OmniRoute-Provider`；缺少该头时 B-agent 会 fail-closed，不能放量。当前受 provider 校验约束的 streaming 路径默认拒绝，不得绕过。
+只有 `enabled=true`、`ready=true`、`reachable=true`、`issues=[]` 才能进入 canary。再用不含敏感信息的请求验证 draft 和 reply 两个 use case，并确认普通及 streaming 响应都有允许值的 `X-OmniRoute-Provider`；缺少该头时 B-agent 会 fail-closed，不能放量。
 
 ## 6. backup / restore
 

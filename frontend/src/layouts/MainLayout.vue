@@ -50,6 +50,13 @@
           </template>
         </el-menu-item>
 
+        <el-menu-item index="/ai-chat">
+          <el-icon><ChatLineRound /></el-icon>
+          <template #title>
+            {{ $t('AI Chat') }}
+          </template>
+        </el-menu-item>
+
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
           <template #title>
