@@ -22,7 +22,7 @@ def llm_request(**overrides):
     return LLMRequest(**values)
 
 
-def gateway_client(handler, aliases=None):
+def gateway_client(handler, aliases=None, allowed_providers=None):
     http_client = httpx.AsyncClient(
         base_url="http://omniroute.test",
         transport=httpx.MockTransport(handler),
@@ -35,6 +35,7 @@ def gateway_client(handler, aliases=None):
             if aliases is not None
             else {LLMUseCase.LEAD_CLASSIFICATION: "b-agent-intent-cheap-v1"}
         ),
+        allowed_providers=allowed_providers or [],
         http_client=http_client,
     )
 
@@ -201,3 +202,69 @@ async def test_stream_http_errors_are_normalized_before_reading_events():
 
     assert raised.value.kind == GatewayErrorKind.CONTENT_POLICY
     assert raised.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_models_contract_returns_available_fixed_aliases():
+    client = gateway_client(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [
+                    {"id": "b-agent-intent-cheap-v1"},
+                    {"id": "b-agent-reply-reliable-v1"},
+                ],
+            },
+        )
+    )
+
+    models = await client.list_models()
+
+    assert models == {
+        "b-agent-intent-cheap-v1",
+        "b-agent-reply-reliable-v1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_completion_rejects_unapproved_or_missing_resolved_provider():
+    def response(provider=None):
+        body = {
+            "id": "gw-allowlist",
+            "model": "resolved-model",
+            "choices": [{"message": {"content": "reply"}}],
+        }
+        if provider is not None:
+            body["provider"] = provider
+        return httpx.Response(200, json=body)
+
+    for provider in ("unapproved-provider", None):
+        client = gateway_client(
+            lambda request, provider=provider: response(provider),
+            allowed_providers=["approved-provider"],
+        )
+        with pytest.raises(GatewayError) as raised:
+            await client.complete(llm_request())
+        assert raised.value.kind == GatewayErrorKind.INVALID_RESPONSE
+        assert raised.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_completion_accepts_an_approved_resolved_provider():
+    client = gateway_client(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "id": "gw-approved",
+                "model": "resolved-model",
+                "provider": "approved-provider",
+                "choices": [{"message": {"content": "reply"}}],
+            },
+        ),
+        allowed_providers=["approved-provider"],
+    )
+
+    response = await client.complete(llm_request())
+
+    assert response.resolved_provider == "approved-provider"
