@@ -1,6 +1,7 @@
 """
 Celery任务函数
 """
+import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import logging
@@ -14,8 +15,86 @@ from app.models.database import (
 from app.core.agent import get_agent
 from app.integrations.email_service import get_email_service
 from app.integrations.whatsapp_service import get_whatsapp_service
+from app.models.database import OutboxStatus
+from app.services.outbox import DeliveryFailureKind, OutboxService
+from app.services.outbox_delivery import (
+    DeliveryResult,
+    get_outbox_delivery_router,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@celery.task(
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+    soft_time_limit=110,
+    time_limit=120,
+)
+def dispatch_outbox_task(
+    self,
+    worker_id: str = None,
+    batch_size: int = 10,
+):
+    """Dispatch durable events without retrying an unknown send outcome."""
+    worker_id = worker_id or getattr(
+        self.request,
+        "hostname",
+        "outbox-worker",
+    )
+    db = SessionLocal()
+    service = OutboxService(db)
+    counters = {"claimed": 0, "sent": 0, "retry": 0, "dead_letter": 0}
+
+    try:
+        events = service.claim_batch(
+            worker_id=worker_id,
+            now=datetime.utcnow(),
+            limit=batch_size,
+            lease_seconds=180,
+        )
+        counters["claimed"] = len(events)
+        db.commit()  # Persist lease before the first external side effect.
+
+        router = get_outbox_delivery_router()
+        for event in events:
+            try:
+                result = asyncio.run(router.deliver(event))
+            except Exception:
+                result = DeliveryResult.unknown_after_send(
+                    "unhandled_delivery_exception"
+                )
+
+            completed_at = datetime.utcnow()
+            if result.success:
+                service.mark_sent(
+                    event,
+                    worker_id=worker_id,
+                    external_message_id=result.external_message_id,
+                    now=completed_at,
+                )
+                counters["sent"] += 1
+            else:
+                service.mark_failure(
+                    event,
+                    worker_id=worker_id,
+                    kind=result.failure_kind,
+                    error_code=result.error_code,
+                    now=completed_at,
+                )
+                if event.status == OutboxStatus.RETRY:
+                    counters["retry"] += 1
+                else:
+                    counters["dead_letter"] += 1
+            db.commit()
+
+        return counters
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @celery.task(bind=True, max_retries=3)

@@ -9,6 +9,7 @@ celery = Celery(
     "trade_ai_agent",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    include=["app.tasks.task_functions"],
 )
 
 # Configure Celery
@@ -23,6 +24,14 @@ celery.conf.update(
     task_soft_time_limit=25 * 60,  # 25 minutes
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
+    beat_schedule={
+        "dispatch-transactional-outbox": {
+            "task": "app.tasks.task_functions.dispatch_outbox_task",
+            "schedule": 10.0,
+        },
+    },
 )
 
 # Auto-discover tasks
