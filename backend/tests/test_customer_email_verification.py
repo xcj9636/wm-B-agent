@@ -92,3 +92,22 @@ def test_hunter_451_suppresses_contact_and_outreach_queue_fails_closed(api_conte
         )
     assert db.query(OutboxEvent).count() == 0
 
+
+def test_legal_suppression_is_never_cleared_by_a_later_provider_result(api_context):
+    client, db, _ = api_context
+    customer = create_customer(db)
+    app.dependency_overrides[get_hunter_client] = lambda: LegallyRestrictedHunterClient()
+    assert (
+        client.post(f"/api/v1/customers/{customer.id}/email-verification").status_code
+        == 451
+    )
+
+    app.dependency_overrides[get_hunter_client] = lambda: ValidHunterClient()
+    assert (
+        client.post(f"/api/v1/customers/{customer.id}/email-verification").status_code
+        == 200
+    )
+
+    db.refresh(customer)
+    assert customer.custom_fields["contact_suppressed"] is True
+    assert customer.custom_fields["suppression_reason"] == "legal_restriction"
