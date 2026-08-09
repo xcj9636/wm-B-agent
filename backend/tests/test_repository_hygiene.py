@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -92,3 +93,22 @@ def test_gateway_architecture_decisions_and_notice_are_recorded():
     )
     assert "Copyright (c) 2026 diegosouzapw" in notice
     assert "MIT License" in notice
+
+
+def test_omniroute_compose_service_is_pinned_and_internal_only():
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    service = re.search(
+        r"(?ms)^  omniroute:\n(.*?)(?=^  [a-zA-Z][a-zA-Z0-9_-]*:\n|\Z)",
+        compose,
+    )
+
+    assert service is not None
+    service_config = service.group(1)
+    assert "e0ce95c592c00f100f5141371dbda976d678ddee" in service_config
+    assert "profiles: [gateway]" in service_config
+    assert "ports:" not in service_config
+    assert "ai_gateway_network" in service_config
+    assert re.search(
+        r"(?ms)^  ai_gateway_network:\n(?:    .*\n)*?    internal: true$",
+        compose,
+    )
