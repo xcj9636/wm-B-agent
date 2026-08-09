@@ -3,6 +3,10 @@ from uuid import uuid4
 
 from app.main import app
 from app.services.ai_chat import get_ai_chat_service
+from app.services.agent_concurrency import (
+    ConcurrencyLimitExceeded,
+    ConcurrencyUnavailable,
+)
 from app.services.ai_runtime import (
     AIRuntimeConfig,
     AIRuntimeProbe,
@@ -77,6 +81,15 @@ class FakeChatService:
         yield {"event": "done", "data": {"session_id": str(session_id)}}
 
 
+class FailingChatService(FakeChatService):
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    async def complete(self, session_id, user_id, content):
+        raise self.error
+
+
 def test_ai_runtime_config_is_admin_only_and_never_echoes_key(api_context):
     client, db, user = api_context
     runtime = FakeRuntimeService()
@@ -145,3 +158,38 @@ def test_ai_chat_supports_session_completion_and_sse_without_browser_gateway_acc
     assert "event: done" in streamed.text
     assert user.id
 
+
+def test_ai_chat_returns_retryable_429_when_concurrency_budget_is_full(api_context):
+    client, _, _ = api_context
+    chat = FailingChatService(ConcurrencyLimitExceeded("user"))
+    app.dependency_overrides[get_ai_chat_service] = lambda: chat
+
+    response = client.post(
+        f"/api/v1/ai/chat/sessions/{chat.session_id}/messages",
+        json={"content": "Draft a distributor reply."},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "1"
+    assert response.json() == {"detail": "AI capacity is temporarily full"}
+    assert "user" not in response.text
+
+
+def test_ai_chat_returns_503_when_concurrency_coordination_is_unavailable(api_context):
+    client, _, _ = api_context
+    chat = FailingChatService(
+        ConcurrencyUnavailable("redis://internal-host:6379 is unavailable")
+    )
+    app.dependency_overrides[get_ai_chat_service] = lambda: chat
+
+    response = client.post(
+        f"/api/v1/ai/chat/sessions/{chat.session_id}/messages",
+        json={"content": "Draft a distributor reply."},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert response.json() == {
+        "detail": "AI capacity coordination is temporarily unavailable"
+    }
+    assert "internal-host" not in response.text
