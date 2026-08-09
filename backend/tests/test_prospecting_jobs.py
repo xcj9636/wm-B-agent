@@ -18,6 +18,7 @@ from app.services.prospecting_jobs import (
     ProspectingJobStatus,
 )
 from app.integrations.hunter import (
+    build_hunter_client,
     HunterConnectorError,
     HunterDomainSearchPage,
     HunterUsage,
@@ -384,3 +385,43 @@ def test_other_user_cannot_view_or_resume_job(configured_api, monkeypatch):
         f"/api/v1/prospecting/jobs/{job.id}/resume",
         json={"additional_requests": 1},
     ).status_code == 404
+
+
+def test_worker_connector_resolution_fails_closed_after_version_change(
+    configured_api,
+):
+    _, db, user = configured_api
+    created = ProspectingJobService(db).create_job(
+        job_command(domains=["acme.com"]),
+        user_id=user.id,
+    )
+    connector = db.query(ConnectorConfiguration).one()
+    connector.version += 1
+    db.commit()
+
+    with pytest.raises(HunterConnectorError) as caught:
+        build_hunter_client(db, expected_version=created.connector_version)
+
+    assert caught.value.error_code == "connector_version_changed"
+    assert caught.value.retryable is False
+
+
+def test_dispatch_setup_failure_is_visible_in_durable_job(configured_api):
+    _, db, user = configured_api
+    service = ProspectingJobService(db)
+    created = service.create_job(
+        job_command(domains=["acme.com"]),
+        user_id=user.id,
+    )
+
+    result = service.record_dispatch_failure(
+        created.id,
+        HunterConnectorError(
+            error_code="connector_secret_unavailable",
+            retryable=False,
+        ),
+    )
+
+    assert result.status == ProspectingJobStatus.FAILED
+    assert result.error_code == "connector_secret_unavailable"
+    assert result.completed_at is not None
