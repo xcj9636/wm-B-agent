@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { translate } from '@/i18n'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -101,7 +102,7 @@ router.beforeEach(async (to) => {
   const authStore = useAuthStore()
 
   if (to.meta.title) {
-    document.title = `${to.meta.title} - Trade AI Agent`
+    document.title = `${translate(String(to.meta.title))} - B-agent`
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {

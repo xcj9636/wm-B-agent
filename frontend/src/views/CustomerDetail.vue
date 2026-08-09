@@ -8,10 +8,10 @@
           @click="$router.back()"
         >
           <el-icon><ArrowLeft /></el-icon>
-          Customers
+          {{ $t('Customers') }}
         </el-button>
-        <h1>{{ customer?.username || 'Customer details' }}</h1>
-        <p>Identity, contact details and current engagement classification.</p>
+        <h1>{{ customer?.username || $t('Customer Detail') }}</h1>
+        <p>{{ $t('Identity, contact details and current engagement classification.') }}</p>
       </div>
     </header>
 
@@ -21,38 +21,38 @@
       :column="3"
       border
     >
-      <el-descriptions-item label="Email">
+      <el-descriptions-item :label="$t('Email')">
         {{ customer.email }}
       </el-descriptions-item>
-      <el-descriptions-item label="WhatsApp">
+      <el-descriptions-item :label="$t('WhatsApp')">
         {{ customer.whatsapp }}
       </el-descriptions-item>
-      <el-descriptions-item label="Platform">
+      <el-descriptions-item :label="$t('Platform')">
         {{ customer.platform }}
       </el-descriptions-item>
-      <el-descriptions-item label="Country">
+      <el-descriptions-item :label="$t('Country')">
         {{ customer.country }}
       </el-descriptions-item>
-      <el-descriptions-item label="Category">
+      <el-descriptions-item :label="$t('Category')">
         {{ customer.category }}
       </el-descriptions-item>
-      <el-descriptions-item label="Followers">
+      <el-descriptions-item :label="$t('Followers')">
         {{ customer.follower_count }}
       </el-descriptions-item>
-      <el-descriptions-item label="Status">
+      <el-descriptions-item :label="$t('Status')">
         <el-tag :type="getStatusType(customer.status)">
-          {{ customer.status }}
+          {{ $t(customer.status) }}
         </el-tag>
       </el-descriptions-item>
-      <el-descriptions-item label="Intent Level">
+      <el-descriptions-item :label="$t('Intent Level')">
         <el-tag
           v-if="customer.intent_level"
           :type="getIntentType(customer.intent_level)"
         >
-          {{ customer.intent_level }}
+          {{ $t(customer.intent_level) }}
         </el-tag>
       </el-descriptions-item>
-      <el-descriptions-item label="Tags">
+      <el-descriptions-item :label="$t('Tags')">
         <el-tag
           v-for="tag in customer.tags"
           :key="tag"

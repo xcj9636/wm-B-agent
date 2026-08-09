@@ -7,7 +7,7 @@
       <div class="panel-header">
         <div class="panel-title">
           <el-icon><Bell /></el-icon>
-          <div><strong>Operational alerts</strong><span>Derived from current backend health</span></div>
+          <div><strong>{{ $t('Operational alerts') }}</strong><span>{{ $t('Derived from current backend health') }}</span></div>
         </div>
         <el-button
           :loading="loading"
@@ -62,7 +62,7 @@
       </article>
       <el-empty
         v-if="!loading && !errorMessage && alerts.length === 0"
-        description="No operational alerts"
+        :description="$t('No operational alerts')"
       />
     </div>
   </el-card>

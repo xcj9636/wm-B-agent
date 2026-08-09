@@ -20,34 +20,34 @@
       <div class="editor-panel">
         <el-card class="properties-card">
           <template #header>
-            <span>Workflow Properties</span>
+            <span>{{ $t('Workflow Properties') }}</span>
           </template>
 
           <el-form
             :model="workflowForm"
             label-position="top"
           >
-            <el-form-item label="Workflow Name">
+            <el-form-item :label="$t('Workflow Name')">
               <el-input
                 v-model="workflowForm.name"
               />
             </el-form-item>
 
-            <el-form-item label="Description">
+            <el-form-item :label="$t('Description')">
               <el-input
                 v-model="workflowForm.description"
                 type="textarea"
-                placeholder="Describe this workflow..."
+                :placeholder="$t('Describe this workflow...')"
               />
             </el-form-item>
 
-            <el-form-item label="Tags">
+            <el-form-item :label="$t('Tags')">
               <el-select
                 v-model="workflowForm.tags"
                 multiple
                 filterable
                 allow-create
-                placeholder="Add tags..."
+                :placeholder="$t('Add tags...')"
               >
                 <el-option
                   v-for="tag in availableTags"
@@ -62,11 +62,11 @@
             <div class="action-buttons">
               <el-button @click="validateWorkflow">
                 <el-icon><CircleCheck /></el-icon>
-                Validate
+                {{ $t('Validate') }}
               </el-button>
               <el-button @click="resetWorkflow">
                 <el-icon><RefreshLeft /></el-icon>
-                Reset
+                {{ $t('Reset') }}
               </el-button>
             </div>
           </el-form>
@@ -77,7 +77,7 @@
     <!-- Execution Panel -->
     <el-dialog
       v-model="showExecutionPanel"
-      title="Execution Progress"
+      :title="$t('Execution Progress')"
       width="700px"
       :close-on-click-modal="false"
     >
@@ -103,6 +103,7 @@ import ExecutionProgress from '@/components/Monitor/ExecutionMonitor.vue'
 import type { Skill, WorkflowStep } from '@/types'
 import { workflowApi } from '@/api/workflow'
 import { skillApi } from '@/api/skill'
+import { translate } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -115,7 +116,7 @@ interface WorkflowForm {
 }
 
 const workflowForm = reactive<WorkflowForm>({
-  name: 'New Workflow',
+  name: translate('New Workflow'),
   description: '',
   tags: [],
 })
@@ -177,7 +178,7 @@ async function loadWorkflow() {
     }
   } catch (error) {
     console.error('Failed to load workflow:', error)
-    ElMessage.error('Failed to load workflow')
+    ElMessage.error(translate('Failed to load workflow'))
   }
 }
 
@@ -192,11 +193,11 @@ async function loadSkills() {
 
 async function onSave() {
   if (!workflowId.value) {
-    ElMessage.error('Create a workflow before opening the editor')
+    ElMessage.error(translate('Create a workflow before opening the editor'))
     return
   }
   if (!workflowForm.name.trim()) {
-    ElMessage.error('Workflow name is required')
+    ElMessage.error(translate('Workflow name is required'))
     return
   }
 
@@ -224,10 +225,10 @@ async function onSave() {
 
   try {
     await workflowApi.update(workflowId.value, workflowData)
-    ElMessage.success('Workflow saved successfully')
+    ElMessage.success(translate('Workflow saved successfully'))
   } catch (error) {
     console.error('Failed to save workflow:', error)
-    ElMessage.error('Failed to save workflow')
+    ElMessage.error(translate('Failed to save workflow'))
   }
 }
 
@@ -240,7 +241,7 @@ async function onExecute() {
     }
   } catch (error) {
     console.error('Failed to execute workflow:', error)
-    ElMessage.error('Failed to execute workflow')
+    ElMessage.error(translate('Failed to execute workflow'))
   }
 }
 
@@ -262,7 +263,7 @@ function onExport() {
   link.click()
 
   URL.revokeObjectURL(url)
-  ElMessage.success('Workflow exported')
+  ElMessage.success(translate('Workflow exported'))
 }
 
 function onUpdateConnections(newConnections: any[]) {
@@ -274,23 +275,23 @@ function validateWorkflow() {
   const errors: string[] = []
 
   if (workflowSteps.value.length === 0) {
-    errors.push('Add at least one step to the workflow')
+    errors.push(translate('Add at least one step to the workflow'))
   }
 
   if (!errors.length) {
-    ElMessage.success('Workflow is valid')
+    ElMessage.success(translate('Workflow is valid'))
   } else {
-    ElMessage.error(`Workflow validation failed: ${errors.join(', ')}`)
+    ElMessage.error(translate('Workflow validation failed: {errors}', { errors: errors.join(', ') }))
   }
 }
 
 function resetWorkflow() {
   workflowSteps.value = []
   connections.value = []
-  workflowForm.name = 'New Workflow'
+  workflowForm.name = translate('New Workflow')
   workflowForm.description = ''
   workflowForm.tags = []
-  ElMessage.info('Workflow reset')
+  ElMessage.info(translate('Workflow reset'))
 }
 
 function onPauseExecution() {

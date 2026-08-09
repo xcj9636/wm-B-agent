@@ -7,7 +7,7 @@
       v-if="mobileOpen"
       type="button"
       class="mobile-backdrop"
-      aria-label="Close navigation"
+      :aria-label="$t('Close navigation')"
       @click="mobileOpen = false"
     />
 
@@ -32,7 +32,7 @@
           >
           <div class="brand-copy">
             <strong>B-agent</strong>
-            <span>Revenue operations</span>
+            <span>{{ $t('Revenue operations') }}</span>
           </div>
         </div>
       </div>
@@ -46,36 +46,36 @@
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
           <template #title>
-            Overview
+            {{ $t('Overview') }}
           </template>
         </el-menu-item>
 
-        <el-menu-item-group title="Automation">
+        <el-menu-item-group :title="$t('Automation')">
           <el-menu-item index="/workflows">
             <el-icon><Operation /></el-icon>
             <template #title>
-              Workflows
+              {{ $t('Workflows') }}
             </template>
           </el-menu-item>
           <el-menu-item index="/skills">
             <el-icon><SetUp /></el-icon>
             <template #title>
-              Skills
+              {{ $t('Skills') }}
             </template>
           </el-menu-item>
         </el-menu-item-group>
 
-        <el-menu-item-group title="Relationships">
+        <el-menu-item-group :title="$t('Relationships')">
           <el-menu-item index="/customers">
             <el-icon><User /></el-icon>
             <template #title>
-              Customers
+              {{ $t('Customers') }}
             </template>
           </el-menu-item>
           <el-menu-item index="/conversations">
             <el-icon><ChatDotRound /></el-icon>
             <template #title>
-              Conversations
+              {{ $t('Conversations') }}
             </template>
           </el-menu-item>
         </el-menu-item-group>
@@ -83,24 +83,24 @@
         <el-menu-item index="/analytics">
           <el-icon><TrendCharts /></el-icon>
           <template #title>
-            Analytics
+            {{ $t('Analytics') }}
           </template>
         </el-menu-item>
 
         <el-menu-item-group
           v-if="authStore.isAdmin"
-          title="Administration"
+          :title="$t('Administration')"
         >
           <el-menu-item index="/operations">
             <el-icon><Monitor /></el-icon>
             <template #title>
-              Operations
+              {{ $t('Operations') }}
             </template>
           </el-menu-item>
           <el-menu-item index="/operations/dead-letters">
             <el-icon><WarningFilled /></el-icon>
             <template #title>
-              Dead Letters
+              {{ $t('Dead Letters') }}
             </template>
           </el-menu-item>
         </el-menu-item-group>
@@ -108,7 +108,7 @@
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <template #title>
-            Settings
+            {{ $t('Settings') }}
           </template>
         </el-menu-item>
       </el-menu>
@@ -116,11 +116,11 @@
       <button
         type="button"
         class="collapse-control"
-        :aria-label="isCollapsed ? 'Expand navigation' : 'Collapse navigation'"
+        :aria-label="$t(isCollapsed ? 'Expand navigation' : 'Collapse navigation')"
         @click="isCollapsed = !isCollapsed"
       >
         <el-icon><Expand v-if="isCollapsed" /><Fold v-else /></el-icon>
-        <span v-if="!isCollapsed">Collapse</span>
+        <span v-if="!isCollapsed">{{ $t('Collapse') }}</span>
       </button>
     </aside>
 
@@ -130,27 +130,42 @@
           <el-button
             class="mobile-menu-button"
             text
-            aria-label="Open navigation"
+            :aria-label="$t('Open navigation')"
             @click="mobileOpen = true"
           >
             <el-icon><Menu /></el-icon>
           </el-button>
           <div>
-            <span>Workspace</span>
+            <span>{{ $t('Workspace') }}</span>
             <strong>{{ currentTitle }}</strong>
           </div>
         </div>
 
         <div class="header-actions">
           <el-tooltip
-            content="Toggle color theme"
+            :content="$t(locale === 'zh-CN' ? 'Switch to English' : 'Switch to Chinese')"
+            placement="bottom"
+          >
+            <el-button
+              class="toolbar-button locale-button"
+              circle
+              text
+              :aria-label="$t(locale === 'zh-CN' ? 'Switch to English' : 'Switch to Chinese')"
+              @click="toggleLocale"
+            >
+              {{ locale === 'zh-CN' ? 'EN' : '中' }}
+            </el-button>
+          </el-tooltip>
+
+          <el-tooltip
+            :content="$t('Toggle color theme')"
             placement="bottom"
           >
             <el-button
               class="toolbar-button"
               circle
               text
-              :aria-label="isDark ? 'Use light theme' : 'Use dark theme'"
+              :aria-label="$t(isDark ? 'Use light theme' : 'Use dark theme')"
               @click="themeStore.toggleTheme()"
             >
               <el-icon><Moon v-if="!isDark" /><Sunny v-else /></el-icon>
@@ -167,20 +182,20 @@
               </el-avatar>
               <span class="user-copy">
                 <strong>{{ authStore.user?.username }}</strong>
-                <small>{{ authStore.isAdmin ? 'Administrator' : authStore.user?.role }}</small>
+                <small>{{ authStore.isAdmin ? $t('Administrator') : authStore.user?.role }}</small>
               </span>
               <el-icon><ArrowDown /></el-icon>
             </button>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="router.push('/settings')">
-                  Settings
+                  {{ $t('Settings') }}
                 </el-dropdown-item>
                 <el-dropdown-item
                   divided
                   @click="logout"
                 >
-                  Sign out
+                  {{ $t('Sign out') }}
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -200,6 +215,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
+import { locale, toggleLocale, translate } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,7 +225,7 @@ const isCollapsed = ref(false)
 const mobileOpen = ref(false)
 
 const activeMenu = computed(() => route.path)
-const currentTitle = computed(() => String(route.meta.title || 'B-agent'))
+const currentTitle = computed(() => translate(String(route.meta.title || 'B-agent')))
 const isDark = computed(() => themeStore.isDark)
 const userInitial = computed(() => authStore.user?.username?.charAt(0).toUpperCase() || 'U')
 
@@ -413,6 +429,11 @@ async function logout() {
   height: 34px;
   color: var(--text-secondary);
   background: var(--surface-sunken);
+}
+
+.locale-button {
+  font-size: 12px;
+  font-weight: 680;
 }
 
 .user-control {

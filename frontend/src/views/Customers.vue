@@ -3,18 +3,18 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          Relationships
+          {{ $t('Relationships') }}
         </p>
-        <h1>Customers</h1>
-        <p>Review customer identity, reach, lifecycle state and engagement context.</p>
+        <h1>{{ $t('Customers') }}</h1>
+        <p>{{ $t('Review customer identity, reach, lifecycle state and engagement context.') }}</p>
       </div>
       <el-button
         type="primary"
         disabled
-        title="Customer import is not enabled by the backend"
+        :title="$t('Customer import is not enabled by the backend')"
       >
         <el-icon><Upload /></el-icon>
-        Import
+        {{ $t('Import') }}
       </el-button>
     </header>
 
@@ -25,36 +25,36 @@
       >
         <el-table-column
           prop="username"
-          label="Username"
+          :label="$t('Username')"
         />
         <el-table-column
           prop="platform"
-          label="Platform"
+          :label="$t('Platform')"
         />
         <el-table-column
           prop="email"
-          label="Email"
+          :label="$t('Email')"
         />
         <el-table-column
           prop="country"
-          label="Country"
+          :label="$t('Country')"
         />
         <el-table-column
           prop="follower_count"
-          label="Followers"
+          :label="$t('Followers')"
         />
         <el-table-column
           prop="status"
-          label="Status"
+          :label="$t('Status')"
         >
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status }}
+              {{ $t(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column
-          label="Actions"
+          :label="$t('Actions')"
           width="150"
         >
           <template #default="{ row }">
@@ -62,7 +62,7 @@
               text
               @click="viewCustomer(row.id)"
             >
-              View
+              {{ $t('View') }}
             </el-button>
           </template>
         </el-table-column>

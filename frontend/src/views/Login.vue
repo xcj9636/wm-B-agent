@@ -23,15 +23,26 @@
           <span class="window-control window-control--expand" />
         </div>
         <span>B-agent</span>
-        <el-button
-          class="theme-button"
-          circle
-          text
-          :aria-label="isDark ? 'Use light appearance' : 'Use dark appearance'"
-          @click="themeStore.toggleTheme()"
-        >
-          <el-icon><Moon v-if="!isDark" /><Sunny v-else /></el-icon>
-        </el-button>
+        <div class="titlebar-actions">
+          <el-button
+            class="locale-button"
+            circle
+            text
+            :aria-label="$t(locale === 'zh-CN' ? 'Switch to English' : 'Switch to Chinese')"
+            @click="toggleLocale"
+          >
+            {{ locale === 'zh-CN' ? 'EN' : '中' }}
+          </el-button>
+          <el-button
+            class="theme-button"
+            circle
+            text
+            :aria-label="$t(isDark ? 'Use light theme' : 'Use dark theme')"
+            @click="themeStore.toggleTheme()"
+          >
+            <el-icon><Moon v-if="!isDark" /><Sunny v-else /></el-icon>
+          </el-button>
+        </div>
       </header>
 
       <div class="login-content">
@@ -42,9 +53,9 @@
         >
         <div class="login-heading">
           <h1 id="login-title">
-            Welcome back
+            {{ $t('Welcome back') }}
           </h1>
-          <p>Sign in to manage workflows, conversations and AI operations.</p>
+          <p>{{ $t('Sign in to manage workflows, conversations and AI operations.') }}</p>
         </div>
 
         <el-form
@@ -55,13 +66,13 @@
           @submit.prevent="handleLogin"
         >
           <el-form-item
-            label="Username"
+            :label="$t('Username')"
             prop="username"
           >
             <el-input
               v-model="form.username"
               autocomplete="username"
-              placeholder="Enter your username"
+              :placeholder="$t('Enter your username')"
               size="large"
               clearable
             >
@@ -72,14 +83,14 @@
           </el-form-item>
 
           <el-form-item
-            label="Password"
+            :label="$t('Password')"
             prop="password"
           >
             <el-input
               v-model="form.password"
               type="password"
               autocomplete="current-password"
-              placeholder="Enter your password"
+              :placeholder="$t('Enter your password')"
               size="large"
               show-password
               @keyup.enter="handleLogin"
@@ -97,12 +108,12 @@
             :loading="loading"
             class="login-button"
           >
-            Sign in
+            {{ $t('Sign in') }}
           </el-button>
         </el-form>
 
         <p class="access-note">
-          Access is managed by your workspace administrator.
+          {{ $t('Access is managed by your workspace administrator.') }}
         </p>
       </div>
     </section>
@@ -116,6 +127,7 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
+import { locale, toggleLocale, translate } from '@/i18n'
 
 const router = useRouter()
 const route = useRoute()
@@ -126,10 +138,10 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const form = reactive({ username: '', password: '' })
 
-const rules: FormRules = {
-  username: [{ required: true, message: 'Please enter your username', trigger: 'blur' }],
-  password: [{ required: true, message: 'Please enter your password', trigger: 'blur' }],
-}
+const rules = computed<FormRules>(() => ({
+  username: [{ required: true, message: translate('Please enter your username'), trigger: 'blur' }],
+  password: [{ required: true, message: translate('Please enter your password'), trigger: 'blur' }],
+}))
 
 async function handleLogin() {
   if (!formRef.value) return
@@ -142,11 +154,11 @@ async function handleLogin() {
   loading.value = true
   try {
     await authStore.login(form)
-    ElMessage.success('Signed in successfully')
+    ElMessage.success(translate('Signed in successfully'))
     const redirect = (route.query.redirect as string) || '/dashboard'
     await router.push(redirect)
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || 'Sign in failed')
+    ElMessage.error(error.response?.data?.detail || translate('Sign in failed'))
   } finally {
     loading.value = false
   }
@@ -211,9 +223,20 @@ async function handleLogin() {
   font-weight: 600;
 }
 
-.theme-button {
+.titlebar-actions {
+  display: flex;
+  justify-self: end;
+}
+
+.theme-button,
+.locale-button {
   justify-self: end;
   color: var(--text-secondary);
+}
+
+.locale-button {
+  font-size: 11px;
+  font-weight: 680;
 }
 
 .login-content {

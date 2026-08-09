@@ -3,7 +3,7 @@
     <div class="list-header">
       <el-input
         v-model="searchQuery"
-        placeholder="Search conversations..."
+        :placeholder="$t('Search conversations...')"
         clearable
       >
         <template #prefix>
@@ -100,7 +100,7 @@
 
       <el-empty
         v-if="filteredConversations.length === 0"
-        description="No conversations found"
+        :description="$t('No conversations found')"
       />
     </div>
   </div>

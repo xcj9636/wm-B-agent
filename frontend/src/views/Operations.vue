@@ -6,20 +6,20 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          System control
+          {{ $t('System control') }}
         </p>
         <h1 id="operations-title">
-          Operations
+          {{ $t('Operations') }}
         </h1>
-        <p>Monitor API connectivity, AI routing, durable execution and background tasks.</p>
+        <p>{{ $t('Monitor API connectivity, AI routing, durable execution and background tasks.') }}</p>
       </div>
       <el-button
         :loading="loading"
-        aria-label="Refresh system operations"
+        :aria-label="$t('Refresh system operations')"
         @click="loadOperations"
       >
         <el-icon><Refresh /></el-icon>
-        Refresh
+        {{ $t('Refresh') }}
       </el-button>
     </header>
 
@@ -28,7 +28,7 @@
       type="error"
       :closable="false"
       show-icon
-      title="Some operational data could not be loaded."
+      :title="$t('Some operational data could not be loaded.')"
       :description="loadError"
     />
 
@@ -36,56 +36,56 @@
       <article class="health-panel">
         <div class="panel-heading">
           <div>
-            <span class="panel-label">Backend API</span>
-            <strong>{{ health?.app || 'Unavailable' }}</strong>
+            <span class="panel-label">{{ $t('Backend API') }}</span>
+            <strong>{{ health?.app || $t('Unavailable') }}</strong>
           </div>
           <el-tag :type="health?.status === 'healthy' ? 'success' : 'danger'">
-            {{ health?.status || 'unknown' }}
+            {{ $t(health?.status || 'unknown') }}
           </el-tag>
         </div>
         <dl class="detail-list">
-          <div><dt>Version</dt><dd>{{ health?.version || '-' }}</dd></div>
-          <div><dt>Checked</dt><dd>{{ formatTime(lastChecked) }}</dd></div>
+          <div><dt>{{ $t('Version') }}</dt><dd>{{ health?.version || '-' }}</dd></div>
+          <div><dt>{{ $t('Checked') }}</dt><dd>{{ formatTime(lastChecked) }}</dd></div>
         </dl>
       </article>
 
       <article class="health-panel">
         <div class="panel-heading">
           <div>
-            <span class="panel-label">AI routing</span>
-            <strong>{{ gateway?.backend || 'Unknown backend' }}</strong>
+            <span class="panel-label">{{ $t('AI routing') }}</span>
+            <strong>{{ gateway?.backend || $t('Unknown backend') }}</strong>
           </div>
           <el-tag :type="gatewayTagType">
             {{ gatewayState }}
           </el-tag>
         </div>
         <dl class="detail-list">
-          <div><dt>Reachable</dt><dd>{{ booleanLabel(gateway?.reachable) }}</dd></div>
-          <div><dt>Provider policy</dt><dd>{{ gateway?.allowed_providers.length || 0 }} allowed</dd></div>
-          <div><dt>Configured aliases</dt><dd>{{ aliasCount }}</dd></div>
+          <div><dt>{{ $t('Reachable') }}</dt><dd>{{ booleanLabel(gateway?.reachable) }}</dd></div>
+          <div><dt>{{ $t('Provider policy') }}</dt><dd>{{ $t('{count} allowed', { count: gateway?.allowed_providers.length || 0 }) }}</dd></div>
+          <div><dt>{{ $t('Configured aliases') }}</dt><dd>{{ aliasCount }}</dd></div>
         </dl>
       </article>
 
       <article class="health-panel health-panel--attention">
         <div class="panel-heading">
           <div>
-            <span class="panel-label">Durable delivery</span>
-            <strong>Outbox</strong>
+            <span class="panel-label">{{ $t('Durable delivery') }}</span>
+            <strong>{{ $t('Outbox') }}</strong>
           </div>
           <el-tag :type="deadLetterCount > 0 ? 'danger' : 'success'">
-            {{ deadLetterCount }} dead letters
+            {{ $t('{count} dead letters', { count: deadLetterCount }) }}
           </el-tag>
         </div>
         <dl class="detail-list">
-          <div><dt>Pending</dt><dd>{{ outboxCount('pending') }}</dd></div>
-          <div><dt>Retry</dt><dd>{{ outboxCount('retry') }}</dd></div>
-          <div><dt>Expired leases</dt><dd>{{ reliable?.expired_outbox_leases || 0 }}</dd></div>
+          <div><dt>{{ $t('Pending') }}</dt><dd>{{ outboxCount('pending') }}</dd></div>
+          <div><dt>{{ $t('Retry') }}</dt><dd>{{ outboxCount('retry') }}</dd></div>
+          <div><dt>{{ $t('Expired leases') }}</dt><dd>{{ reliable?.expired_outbox_leases || 0 }}</dd></div>
         </dl>
         <router-link
           class="panel-link"
           to="/operations/dead-letters"
         >
-          Open dead-letter console
+          {{ $t('Open dead-letter console') }}
         </router-link>
       </article>
     </div>
@@ -99,34 +99,34 @@
           <template #header>
             <div class="card-heading">
               <div>
-                <strong>Background tasks</strong>
-                <span>Latest scheduler records</span>
+                <strong>{{ $t('Background tasks') }}</strong>
+                <span>{{ $t('Latest scheduler records') }}</span>
               </div>
               <el-select
                 v-model="taskStatus"
-                placeholder="All statuses"
+                :placeholder="$t('All statuses')"
                 clearable
-                aria-label="Filter tasks by status"
+                :aria-label="$t('Filter tasks by status')"
                 @change="loadTasks"
               >
                 <el-option
-                  label="Pending"
+                  :label="$t('Pending')"
                   value="pending"
                 />
                 <el-option
-                  label="Running"
+                  :label="$t('Running')"
                   value="running"
                 />
                 <el-option
-                  label="Completed"
+                  :label="$t('Completed')"
                   value="completed"
                 />
                 <el-option
-                  label="Failed"
+                  :label="$t('Failed')"
                   value="failed"
                 />
                 <el-option
-                  label="Retry"
+                  :label="$t('Retry')"
                   value="retry"
                 />
               </el-select>
@@ -139,12 +139,12 @@
           >
             <el-table-column
               prop="task_type"
-              label="Task"
+              :label="$t('Task')"
               min-width="150"
             />
             <el-table-column
               prop="status"
-              label="Status"
+              :label="$t('Status')"
               width="120"
             >
               <template #default="{ row }">
@@ -152,12 +152,12 @@
                   :type="taskTagType(row.status)"
                   effect="plain"
                 >
-                  {{ row.status || 'unknown' }}
+                  {{ $t(row.status || 'unknown') }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column
-              label="Scheduled"
+              :label="$t('Scheduled')"
               min-width="170"
             >
               <template #default="{ row }">
@@ -166,14 +166,14 @@
             </el-table-column>
             <el-table-column
               prop="error_msg"
-              label="Error"
+              :label="$t('Error')"
               min-width="180"
               show-overflow-tooltip
             />
           </el-table>
           <el-empty
             v-if="!tasksLoading && tasks.length === 0"
-            description="No task records"
+            :description="$t('No task records')"
           />
         </el-card>
       </el-col>
@@ -189,8 +189,8 @@
           <template #header>
             <div class="card-heading">
               <div>
-                <strong>LLM invocations</strong>
-                <span>Durable business-level outcomes</span>
+                <strong>{{ $t('LLM invocations') }}</strong>
+                <span>{{ $t('Durable business-level outcomes') }}</span>
               </div>
             </div>
           </template>
@@ -199,7 +199,7 @@
               v-for="(count, status) in reliable?.llm_invocation_counts"
               :key="status"
             >
-              <span>{{ status }}</span>
+              <span>{{ $t(String(status)) }}</span>
               <strong>{{ count }}</strong>
             </div>
           </div>
@@ -208,7 +208,7 @@
             v-if="gateway?.issues.length"
             class="issues"
           >
-            <span>Gateway issues</span>
+            <span>{{ $t('Gateway issues') }}</span>
             <el-tag
               v-for="issue in gateway.issues"
               :key="issue"
@@ -220,7 +220,7 @@
           </div>
           <el-empty
             v-else
-            description="No gateway issues reported"
+            :description="$t('No gateway issues reported')"
             :image-size="72"
           />
         </el-card>
@@ -236,6 +236,7 @@ import { computed, onMounted, ref } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/api'
 import AlertPanel from '@/components/Monitor/AlertPanel.vue'
+import { translate } from '@/i18n'
 
 interface HealthResponse {
   status: string
@@ -307,7 +308,7 @@ async function loadOperations() {
   if (gatewayResult.status === 'fulfilled') gateway.value = gatewayResult.value.data
   if (reliableResult.status === 'fulfilled') reliable.value = reliableResult.value.data
   if ([healthResult, gatewayResult, reliableResult].some((result) => result.status === 'rejected')) {
-    loadError.value = 'Refresh after confirming the backend URL and administrator permissions.'
+    loadError.value = translate('Refresh after confirming the backend URL and administrator permissions.')
   }
   lastChecked.value = new Date().toISOString()
   loading.value = false
@@ -331,9 +332,9 @@ function outboxCount(status: string) {
 }
 
 function booleanLabel(value: boolean | null | undefined) {
-  if (value === true) return 'Yes'
-  if (value === false) return 'No'
-  return 'Not checked'
+  if (value === true) return translate('Yes')
+  if (value === false) return translate('No')
+  return translate('Not checked')
 }
 
 function taskTagType(status: string | null) {

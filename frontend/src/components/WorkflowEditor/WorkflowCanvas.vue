@@ -15,7 +15,7 @@
         <el-icon size="48">
           <Connection />
         </el-icon>
-        <p>Drag skills here to build your workflow</p>
+        <p>{{ $t('Drag skills here to build your workflow') }}</p>
       </div>
 
       <div
@@ -135,7 +135,7 @@
     >
       <template #header>
         <div class="properties-header">
-          <span>Node Properties</span>
+          <span>{{ $t('Node Properties') }}</span>
           <el-button
             text
             @click="showProperties = false"
@@ -153,14 +153,14 @@
           :model="selectedStep"
           label-position="top"
         >
-          <el-form-item label="Step Name">
+          <el-form-item :label="$t('Step Name')">
             <el-input
               v-model="selectedStep.name"
               @change="updateStep"
             />
           </el-form-item>
 
-          <el-form-item label="Skill">
+          <el-form-item :label="$t('Skill')">
             <el-select
               v-model="selectedStep.skillName"
               @change="updateStep"
@@ -176,15 +176,15 @@
 
           <el-divider />
 
-          <h4>Configuration</h4>
-          <el-form-item label="Retry on Failure">
+          <h4>{{ $t('Configuration') }}</h4>
+          <el-form-item :label="$t('Retry on Failure')">
             <el-switch
               v-model="selectedStep.retryOnFailure"
               @change="updateStep"
             />
           </el-form-item>
 
-          <el-form-item label="Max Retries">
+          <el-form-item :label="$t('Max Retries')">
             <el-input-number
               v-model="selectedStep.maxRetries"
               :min="0"
@@ -193,7 +193,7 @@
             />
           </el-form-item>
 
-          <el-form-item label="Timeout (seconds)">
+          <el-form-item :label="$t('Timeout (seconds)')">
             <el-input-number
               v-model="selectedStep.timeout"
               :min="1"
@@ -202,49 +202,49 @@
             />
           </el-form-item>
 
-          <el-form-item label="On Failure">
+          <el-form-item :label="$t('On Failure')">
             <el-select
               v-model="selectedStep.onFailureAction"
               @change="updateStep"
             >
               <el-option
-                label="Skip"
+                :label="$t('Skip')"
                 value="skip"
               />
               <el-option
-                label="Stop"
+                :label="$t('Stop')"
                 value="stop"
               />
               <el-option
-                label="Continue"
+                :label="$t('Continue')"
                 value="continue"
               />
             </el-select>
           </el-form-item>
 
-          <el-form-item label="Condition">
+          <el-form-item :label="$t('Condition')">
             <el-select
               v-model="selectedStep.condition"
               @change="updateStep"
             >
               <el-option
-                label="Always"
+                :label="$t('Always')"
                 value="always"
               />
               <el-option
-                label="On Success"
+                :label="$t('On Success')"
                 value="on_success"
               />
               <el-option
-                label="On Failure"
+                :label="$t('On Failure')"
                 value="on_failure"
               />
               <el-option
-                label="On Skip"
+                :label="$t('On Skip')"
                 value="on_skip"
               />
               <el-option
-                label="Custom"
+                :label="$t('Custom')"
                 value="custom"
               />
             </el-select>
@@ -252,7 +252,7 @@
 
           <el-form-item
             v-if="selectedStep.condition === 'custom'"
-            label="Condition Expression"
+            :label="$t('Condition Expression')"
           >
             <el-input
               v-model="selectedStep.conditionExpression"
@@ -295,6 +295,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Skill, WorkflowStep } from '@/types'
+import { translate } from '@/i18n'
 
 interface Props {
   modelValue?: WorkflowStep[]
@@ -351,7 +352,7 @@ function onDrop(event: DragEvent) {
     try {
       addNode(event, JSON.parse(skillData) as Skill)
     } catch {
-      ElMessage.error('Invalid skill data')
+      ElMessage.error(translate('Invalid skill data'))
     }
   }
 }

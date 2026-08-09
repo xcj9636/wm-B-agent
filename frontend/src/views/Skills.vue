@@ -6,20 +6,20 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          Automation catalog
+          {{ $t('Automation catalog') }}
         </p>
         <h1 id="skills-title">
-          Skills
+          {{ $t('Skills') }}
         </h1>
-        <p>Inspect every registered capability available to workflow authors.</p>
+        <p>{{ $t('Inspect every registered capability available to workflow authors.') }}</p>
       </div>
       <el-button
         :loading="loading"
-        aria-label="Refresh skills"
+        :aria-label="$t('Refresh skills')"
         @click="loadSkills"
       >
         <el-icon><Refresh /></el-icon>
-        Refresh
+        {{ $t('Refresh') }}
       </el-button>
     </header>
 
@@ -27,8 +27,8 @@
       <el-input
         v-model="query"
         clearable
-        placeholder="Search skills"
-        aria-label="Search skills"
+        :placeholder="$t('Search skills')"
+        :aria-label="$t('Search skills')"
       >
         <template #prefix>
           <el-icon><Search /></el-icon>
@@ -37,8 +37,8 @@
       <el-select
         v-model="category"
         clearable
-        placeholder="All categories"
-        aria-label="Filter skills"
+        :placeholder="$t('All categories')"
+        :aria-label="$t('Filter skills')"
       >
         <el-option
           v-for="item in categories"
@@ -47,7 +47,7 @@
           :value="item"
         />
       </el-select>
-      <span aria-live="polite">{{ filteredSkills.length }} capabilities</span>
+      <span aria-live="polite">{{ $t('{count} capabilities', { count: filteredSkills.length }) }}</span>
     </div>
 
     <div
@@ -69,12 +69,12 @@
     </div>
     <el-empty
       v-if="!loading && filteredSkills.length === 0"
-      description="No skills match the filter"
+      :description="$t('No skills match the filter')"
     />
 
     <el-drawer
       v-model="drawerOpen"
-      title="Skill contract"
+      :title="$t('Skill contract')"
       size="min(520px, 92vw)"
     >
       <template v-if="selectedSkill">
@@ -82,24 +82,24 @@
           :column="1"
           border
         >
-          <el-descriptions-item label="Display name">
+          <el-descriptions-item :label="$t('Display name')">
             {{ selectedSkill.displayName }}
           </el-descriptions-item>
-          <el-descriptions-item label="Registry name">
+          <el-descriptions-item :label="$t('Registry name')">
             <code>{{ selectedSkill.name }}</code>
           </el-descriptions-item>
-          <el-descriptions-item label="Category">
+          <el-descriptions-item :label="$t('Category')">
             {{ selectedSkill.category }}
           </el-descriptions-item>
-          <el-descriptions-item label="Version">
+          <el-descriptions-item :label="$t('Version')">
             {{ selectedSkill.version }}
           </el-descriptions-item>
         </el-descriptions>
-        <h3>Input schema</h3>
+        <h3>{{ $t('Input schema') }}</h3>
         <pre>{{ formatSchema(selectedSkill.inputSchema) }}</pre>
-        <h3>Output schema</h3>
+        <h3>{{ $t('Output schema') }}</h3>
         <pre>{{ formatSchema(selectedSkill.outputSchema) }}</pre>
-        <h3>Configuration</h3>
+        <h3>{{ $t('Configuration') }}</h3>
         <pre>{{ formatSchema(selectedSkill.configTemplate || {}) }}</pre>
       </template>
     </el-drawer>

@@ -3,17 +3,17 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          System configuration
+          {{ $t('System configuration') }}
         </p>
-        <h1>Settings</h1>
-        <p>Configure the browser-to-backend connection and inspect linked delivery accounts.</p>
+        <h1>{{ $t('Settings') }}</h1>
+        <p>{{ $t('Configure the browser-to-backend connection and inspect linked delivery accounts.') }}</p>
       </div>
       <el-button
         :loading="loadingAccounts"
         @click="loadAccounts"
       >
         <el-icon><Refresh /></el-icon>
-        Refresh accounts
+        {{ $t('Refresh accounts') }}
       </el-button>
     </header>
 
@@ -27,8 +27,8 @@
             <div class="card-title">
               <el-icon><Connection /></el-icon>
               <div>
-                <strong>Backend API</strong>
-                <span>Applied immediately in this browser</span>
+                <strong>{{ $t('Backend API') }}</strong>
+                <span>{{ $t('Applied immediately in this browser') }}</span>
               </div>
               <el-tag
                 :type="connectionTagType"
@@ -43,18 +43,18 @@
             label-position="top"
             @submit.prevent="saveBackendUrl"
           >
-            <el-form-item label="Base URL">
+            <el-form-item :label="$t('Base URL')">
               <el-input
                 v-model="backendUrl"
                 clearable
-                placeholder="Leave empty to use the Vite or reverse-proxy origin"
+                :placeholder="$t('Leave empty to use the Vite or reverse-proxy origin')"
               >
                 <template #prepend>
                   HTTP(S)
                 </template>
               </el-input>
               <p class="field-help">
-                Example: http://localhost:8000. Empty uses the current origin and development proxy.
+                {{ $t('Example: http://localhost:8000. Empty uses the current origin and development proxy.') }}
               </p>
             </el-form-item>
             <div class="form-actions">
@@ -62,16 +62,16 @@
                 type="primary"
                 native-type="submit"
               >
-                Save and apply
+                {{ $t('Save and apply') }}
               </el-button>
               <el-button
                 :loading="testingConnection"
                 @click="testBackendConnection"
               >
-                Test connection
+                {{ $t('Test connection') }}
               </el-button>
               <el-button @click="resetBackendUrl">
-                Use proxy default
+                {{ $t('Use proxy default') }}
               </el-button>
             </div>
           </el-form>
@@ -91,17 +91,17 @@
             :column="2"
             border
           >
-            <el-descriptions-item label="Service">
+            <el-descriptions-item :label="$t('Service')">
               {{ health.app || 'B-Agent API' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Version">
-              {{ health.version || 'Not reported' }}
+            <el-descriptions-item :label="$t('Version')">
+              {{ health.version || $t('Not reported') }}
             </el-descriptions-item>
-            <el-descriptions-item label="Status">
+            <el-descriptions-item :label="$t('Status')">
               {{ health.status }}
             </el-descriptions-item>
-            <el-descriptions-item label="Effective URL">
-              {{ effectiveUrl || 'Same origin' }}
+            <el-descriptions-item :label="$t('Effective URL')">
+              {{ effectiveUrl || $t('Same origin') }}
             </el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -111,8 +111,8 @@
             <div class="card-title">
               <el-icon><Link /></el-icon>
               <div>
-                <strong>Connected accounts</strong>
-                <span>Delivery identities exposed by the administration API</span>
+                <strong>{{ $t('Connected accounts') }}</strong>
+                <span>{{ $t('Delivery identities exposed by the administration API') }}</span>
               </div>
               <el-tag effect="plain">
                 {{ accounts.length }}
@@ -135,23 +135,23 @@
           >
             <el-table-column
               prop="name"
-              label="Account"
+              :label="$t('Account')"
               min-width="170"
             >
               <template #default="{ row }">
                 <div class="account-name">
                   <strong>{{ row.name }}</strong>
-                  <span>{{ row.email || row.phone_number || 'No address' }}</span>
+                  <span>{{ row.email || row.phone_number || $t('No address') }}</span>
                 </div>
               </template>
             </el-table-column>
             <el-table-column
               prop="account_type"
-              label="Type"
+              :label="$t('Type')"
               width="170"
             />
             <el-table-column
-              label="State"
+              :label="$t('State')"
               width="120"
             >
               <template #default="{ row }">
@@ -159,12 +159,12 @@
                   :type="row.is_active && row.is_verified ? 'success' : 'info'"
                   effect="plain"
                 >
-                  {{ row.is_active ? (row.is_verified ? 'Ready' : 'Unverified') : 'Disabled' }}
+                  {{ $t(row.is_active ? (row.is_verified ? 'Ready' : 'Unverified') : 'Disabled') }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column
-              label="Daily usage"
+              :label="$t('Daily usage')"
               min-width="180"
             >
               <template #default="{ row }">
@@ -177,7 +177,7 @@
           </el-table>
           <el-empty
             v-if="!loadingAccounts && !accountsError && accounts.length === 0"
-            description="No connected accounts"
+            :description="$t('No connected accounts')"
           />
         </el-card>
       </el-col>
@@ -190,7 +190,7 @@
           <template #header>
             <div class="card-title">
               <el-icon><UserFilled /></el-icon>
-              <div><strong>Signed-in account</strong><span>Identity and access context</span></div>
+              <div><strong>{{ $t('Signed-in account') }}</strong><span>{{ $t('Identity and access context') }}</span></div>
             </div>
           </template>
           <div class="profile">
@@ -198,22 +198,22 @@
               {{ userInitial }}
             </el-avatar>
             <div>
-              <strong>{{ authStore.user?.fullName || authStore.user?.username || 'Unknown user' }}</strong>
-              <span>{{ authStore.user?.email || 'No email' }}</span>
+              <strong>{{ authStore.user?.fullName || authStore.user?.username || $t('Unknown user') }}</strong>
+              <span>{{ authStore.user?.email || $t('No email') }}</span>
             </div>
           </div>
           <el-descriptions
             :column="1"
             border
           >
-            <el-descriptions-item label="Role">
+            <el-descriptions-item :label="$t('Role')">
               {{ authStore.user?.role || 'user' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Administrator">
-              {{ authStore.isAdmin ? 'Yes' : 'No' }}
+            <el-descriptions-item :label="$t('Administrator')">
+              {{ $t(authStore.isAdmin ? 'Yes' : 'No') }}
             </el-descriptions-item>
-            <el-descriptions-item label="User ID">
-              {{ authStore.user?.id || 'Unavailable' }}
+            <el-descriptions-item :label="$t('User ID')">
+              {{ authStore.user?.id || $t('Unavailable') }}
             </el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -222,13 +222,13 @@
           <template #header>
             <div class="card-title">
               <el-icon><InfoFilled /></el-icon>
-              <div><strong>Connection behavior</strong><span>How runtime configuration is resolved</span></div>
+              <div><strong>{{ $t('Connection behavior') }}</strong><span>{{ $t('How runtime configuration is resolved') }}</span></div>
             </div>
           </template>
           <ol class="behavior-list">
-            <li>A saved browser URL has highest priority.</li>
-            <li>Otherwise the Vite build-time API URL is used.</li>
-            <li>An empty value uses the same origin and Vite proxy during development.</li>
+            <li>{{ $t('A saved browser URL has highest priority.') }}</li>
+            <li>{{ $t('Otherwise the Vite build-time API URL is used.') }}</li>
+            <li>{{ $t('An empty value uses the same origin and Vite proxy during development.') }}</li>
           </ol>
         </el-card>
       </el-col>
@@ -242,6 +242,7 @@ import { ElMessage } from 'element-plus'
 import { api, updateBackendApiUrl } from '@/api'
 import { resolveBackendApiUrl } from '@/api/runtimeConfig'
 import { useAuthStore } from '@/stores/auth'
+import { translate } from '@/i18n'
 
 interface HealthResponse { status: string; app?: string; version?: string }
 interface AccountResponse {
@@ -268,7 +269,7 @@ const accountsError = ref('')
 const loadingAccounts = ref(false)
 
 const userInitial = computed(() => (authStore.user?.username || '?').charAt(0).toUpperCase())
-const connectionLabel = computed(() => ({ idle: 'Not tested', healthy: 'Connected', failed: 'Unavailable' })[connectionState.value])
+const connectionLabel = computed(() => translate(({ idle: 'Not tested', healthy: 'Connected', failed: 'Unavailable' })[connectionState.value]))
 const connectionTagType = computed(() => connectionState.value === 'healthy' ? 'success' : connectionState.value === 'failed' ? 'danger' : 'info')
 
 function saveBackendUrl() {
@@ -278,9 +279,9 @@ function saveBackendUrl() {
     connectionState.value = 'idle'
     connectionMessage.value = ''
     health.value = null
-    ElMessage.success('Backend API configuration applied')
+    ElMessage.success(translate('Backend API configuration applied'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : 'Invalid backend URL')
+    ElMessage.error(error instanceof Error ? error.message : translate('Invalid backend URL'))
   }
 }
 
@@ -297,12 +298,12 @@ async function testBackendConnection() {
     health.value = response.data
     connectionState.value = response.data.status === 'healthy' ? 'healthy' : 'failed'
     connectionMessage.value = connectionState.value === 'healthy'
-      ? 'Backend connection is healthy.'
-      : `Backend responded with status: ${response.data.status}`
+      ? translate('Backend connection is healthy.')
+      : translate('Backend responded with status: {status}', { status: response.data.status })
   } catch {
     health.value = null
     connectionState.value = 'failed'
-    connectionMessage.value = 'The backend could not be reached with this configuration.'
+    connectionMessage.value = translate('The backend could not be reached with this configuration.')
   } finally {
     testingConnection.value = false
   }
@@ -316,7 +317,7 @@ async function loadAccounts() {
     accounts.value = response.data
   } catch {
     accounts.value = []
-    accountsError.value = 'Accounts are unavailable. Verify the connection and your access permissions.'
+    accountsError.value = translate('Accounts are unavailable. Verify the connection and your access permissions.')
   } finally {
     loadingAccounts.value = false
   }

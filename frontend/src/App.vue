@@ -1,27 +1,38 @@
 <template>
-  <div
-    id="app"
-    :class="{ dark: isDark }"
-  >
-    <RouterView v-if="authStore.isAuthenticated" />
+  <el-config-provider :locale="elementLocale">
     <div
-      v-else
-      class="auth-wrapper"
+      id="app"
+      :class="{ dark: isDark }"
     >
-      <RouterView />
+      <RouterView v-if="authStore.isAuthenticated" />
+      <div
+        v-else
+        class="auth-wrapper"
+      >
+        <RouterView />
+      </div>
     </div>
-  </div>
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watchEffect } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
+import { elementLocale, locale, translate } from './i18n'
 
+const route = useRoute()
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
 
 const isDark = computed(() => themeStore.isDark)
+
+watchEffect(() => {
+  const title = String(route.meta.title || 'B-agent')
+  document.title = `${translate(title)} - B-agent`
+  document.documentElement.lang = locale.value
+})
 
 onMounted(() => {
   themeStore.initialize()

@@ -3,17 +3,17 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          Live workspace
+          {{ $t('Live workspace') }}
         </p>
-        <h1>Dashboard</h1>
-        <p>Today’s customer, outreach and automation signals from the backend.</p>
+        <h1>{{ $t('Dashboard') }}</h1>
+        <p>{{ $t('Today’s customer, outreach and automation signals from the backend.') }}</p>
       </div>
       <el-button
         :loading="loading"
         @click="loadDashboard"
       >
         <el-icon><Refresh /></el-icon>
-        Refresh
+        {{ $t('Refresh') }}
       </el-button>
     </header>
 
@@ -30,7 +30,7 @@
           type="primary"
           @click="loadDashboard"
         >
-          Try again
+          {{ $t('Try again') }}
         </el-button>
       </template>
     </el-alert>
@@ -67,7 +67,7 @@
         <el-card class="leads-card">
           <template #header>
             <div class="card-header">
-              <div><strong>High-intent leads</strong><span>Prioritized by latest customer state</span></div>
+              <div><strong>{{ $t('High-intent leads') }}</strong><span>{{ $t('Prioritized by latest customer state') }}</span></div>
               <el-tag
                 type="danger"
                 effect="plain"
@@ -83,16 +83,16 @@
           >
             <el-table-column
               prop="name"
-              label="Lead"
+              :label="$t('Lead')"
               min-width="120"
             />
             <el-table-column
               prop="platform"
-              label="Channel"
+              :label="$t('Channel')"
               width="100"
             />
             <el-table-column
-              label="Intent"
+              :label="$t('Intent')"
               width="100"
             >
               <template #default="{ row }">
@@ -101,7 +101,7 @@
                   effect="plain"
                   size="small"
                 >
-                  {{ row.intent.replace('_', ' ') }}
+                  {{ $t(row.intent.replace('_', ' ')) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -115,14 +115,14 @@
                   type="primary"
                   @click="router.push(`/customers/${row.id}`)"
                 >
-                  View
+                  {{ $t('View') }}
                 </el-button>
               </template>
             </el-table-column>
           </el-table>
           <el-empty
             v-if="!loading && highIntentLeads.length === 0"
-            description="No high-intent leads"
+            :description="$t('No high-intent leads')"
           />
         </el-card>
       </el-col>
@@ -133,7 +133,7 @@
       class="period-card"
     >
       <template #header>
-        <strong>Period comparison</strong>
+        <strong>{{ $t('Period comparison') }}</strong>
       </template>
       <el-table
         :data="periodRows"
@@ -141,28 +141,28 @@
       >
         <el-table-column
           prop="period"
-          label="Period"
+          :label="$t('Period')"
           width="100"
         />
         <el-table-column
           prop="customers"
-          label="Customers"
+          :label="$t('Customers')"
         />
         <el-table-column
           prop="messages"
-          label="Messages"
+          :label="$t('Messages')"
         />
         <el-table-column
           prop="replies"
-          label="Replies"
+          :label="$t('Replies')"
         />
         <el-table-column
           prop="workflows"
-          label="Workflows"
+          :label="$t('Workflows')"
         />
         <el-table-column
           prop="failures"
-          label="Failures"
+          :label="$t('Failures')"
         />
       </el-table>
     </el-card>
@@ -176,6 +176,7 @@ import { api } from '@/api'
 import type { ActivityItem, DashboardStats, MetricCard } from '@/types'
 import StatCard from '@/components/Dashboard/StatCard.vue'
 import RecentActivity from '@/components/Dashboard/RecentActivity.vue'
+import { translate } from '@/i18n'
 
 interface HighIntentLead { id: number; name: string; intent: string; platform: string }
 
@@ -187,16 +188,16 @@ const activities = ref<ActivityItem[]>([])
 const highIntentLeads = ref<HighIntentLead[]>([])
 
 const metrics = computed<MetricCard[]>(() => [
-  { label: 'New customers', value: stats.value?.today.new_customers || 0, color: 'primary', icon: 'User' },
-  { label: 'Messages sent', value: (stats.value?.today.emails_sent || 0) + (stats.value?.today.whatsapp_sent || 0), color: 'success', icon: 'Promotion' },
-  { label: 'Active conversations', value: stats.value?.today.active_conversations || 0, color: 'warning', icon: 'ChatDotRound' },
-  { label: 'Conversion rate', value: stats.value?.conversion_rate || 0, suffix: '%', color: 'danger', icon: 'TrendCharts' },
+  { label: translate('New customers'), value: stats.value?.today.new_customers || 0, color: 'primary', icon: 'User' },
+  { label: translate('Messages sent'), value: (stats.value?.today.emails_sent || 0) + (stats.value?.today.whatsapp_sent || 0), color: 'success', icon: 'Promotion' },
+  { label: translate('Active conversations'), value: stats.value?.today.active_conversations || 0, color: 'warning', icon: 'ChatDotRound' },
+  { label: translate('Conversion rate'), value: stats.value?.conversion_rate || 0, suffix: '%', color: 'danger', icon: 'TrendCharts' },
 ])
 
 const periodRows = computed(() => {
   if (!stats.value) return []
   return ([['Today', stats.value.today], ['7 days', stats.value.week], ['30 days', stats.value.month]] as const).map(([period, data]) => ({
-    period,
+    period: translate(period),
     customers: data.new_customers,
     messages: data.emails_sent + data.whatsapp_sent,
     replies: data.emails_replied,
@@ -217,7 +218,7 @@ async function loadDashboard() {
   if (activitiesResult.status === 'fulfilled') activities.value = activitiesResult.value.data
   if (leadsResult.status === 'fulfilled') highIntentLeads.value = leadsResult.value.data
   if ([statsResult, activitiesResult, leadsResult].some((result) => result.status === 'rejected')) {
-    errorMessage.value = 'Some dashboard data could not be loaded. Available results are still shown.'
+    errorMessage.value = translate('Some dashboard data could not be loaded. Available results are still shown.')
   }
   loading.value = false
 }

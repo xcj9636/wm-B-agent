@@ -35,7 +35,7 @@
           @click="takeover"
         >
           <el-icon><User /></el-icon>
-          Take Over
+          {{ $t('Takeover') }}
         </el-button>
         <el-button
           v-else
@@ -44,7 +44,7 @@
           @click="release"
         >
           <el-icon><ChatDotRound /></el-icon>
-          Release
+          {{ $t('Release') }}
         </el-button>
       </div>
     </div>
@@ -72,7 +72,7 @@
               class="ai-badge"
             >
               <el-icon><MagicStick /></el-icon>
-              AI Generated
+              {{ $t('AI Generated') }}
             </div>
             <div class="message-content">
               {{ message.content }}
@@ -103,7 +103,7 @@
 
       <el-empty
         v-if="messages.length === 0"
-        description="No messages yet"
+        :description="$t('No messages yet')"
       />
     </div>
 
@@ -113,7 +113,7 @@
         class="intent-indicator"
       >
         <el-icon><TrendCharts /></el-icon>
-        <span>Detected Intent: {{ customer.intent }}</span>
+        <span>{{ $t('Detected Intent: {intent}', { intent: customer.intent }) }}</span>
         <el-tag
           size="small"
           :type="getIntentType(customer.intentLevel)"
@@ -126,7 +126,7 @@
         v-model="newMessage"
         type="textarea"
         :rows="3"
-        placeholder="Type your message... (Ctrl+Enter to send)"
+        :placeholder="$t('Type your message... (Ctrl+Enter to send)')"
         :disabled="isSending"
         @keydown.ctrl.enter="sendMessage"
       />
@@ -137,7 +137,7 @@
             icon="Paperclip"
             circle
             disabled
-            title="File attachments are not enabled by the backend"
+            :title="$t('File attachments are not enabled by the backend')"
           />
           <el-button
             type="primary"
@@ -145,7 +145,7 @@
             :loading="isSending"
             @click="sendMessage"
           >
-            Send
+            {{ $t('Send') }}
           </el-button>
         </el-space>
       </div>
@@ -157,6 +157,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
+import { translate } from '@/i18n'
 
 interface Props {
   messages?: any[]
@@ -214,17 +215,17 @@ function sendMessage() {
 
 function takeover() {
   emit('takeover')
-  ElMessage.info('Conversation taken over')
+  ElMessage.info(translate('Conversation taken over'))
 }
 
 function release() {
   emit('release')
-  ElMessage.info('Conversation released to AI')
+  ElMessage.info(translate('Conversation released to AI'))
 }
 
 function executeAction(action: string) {
   emit('execute-action', action)
-  ElMessage.success(`Executing action: ${action}`)
+  ElMessage.success(translate('Executing action: {action}', { action }))
 }
 
 function formatAction(action: string) {
@@ -256,7 +257,7 @@ function formatDate(date: string) {
   const msgDate = dayjs(date).format('YYYY-MM-DD')
 
   if (today === msgDate) {
-    return 'Today'
+    return translate('Today')
   }
 
   return dayjs(date).format('MMM DD, YYYY')

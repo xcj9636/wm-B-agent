@@ -5,14 +5,14 @@
   >
     <template #header>
       <div class="card-header">
-        <div><strong>Recent activity</strong><span>Latest auditable workspace events</span></div>
+        <div><strong>{{ $t('Recent activity') }}</strong><span>{{ $t('Latest auditable workspace events') }}</span></div>
         <el-button
           text
           type="primary"
           :loading="loading"
           @click="refresh"
         >
-          Refresh
+          {{ $t('Refresh') }}
         </el-button>
       </div>
     </template>
@@ -61,7 +61,7 @@
       </el-timeline>
       <el-empty
         v-else-if="!loading"
-        description="No recent activity"
+        :description="$t('No recent activity')"
       />
     </div>
   </el-card>
@@ -71,8 +71,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import 'dayjs/locale/zh-cn'
 import { api } from '@/api'
 import type { ActivityItem } from '@/types'
+import { locale, translate } from '@/i18n'
 
 dayjs.extend(relativeTime)
 
@@ -103,7 +105,7 @@ async function refresh() {
     const response = await api.get<ActivityItem[]>('/api/v1/stats/activities')
     internalActivities.value = response.data
   } catch {
-    errorMessage.value = 'Activity events are temporarily unavailable.'
+    errorMessage.value = translate('Activity events are temporarily unavailable.')
   } finally {
     loading.value = false
   }
@@ -117,7 +119,9 @@ function safeMetadata(metadata?: Record<string, unknown>) {
     .map(([key, value]) => `${key}: ${String(value).slice(0, 80)}`)
 }
 
-function formatTimestamp(timestamp: string) { return dayjs(timestamp).fromNow() }
+function formatTimestamp(timestamp: string) {
+  return dayjs(timestamp).locale(locale.value === 'zh-CN' ? 'zh-cn' : 'en').fromNow()
+}
 
 watch(() => props.activities, (value) => { if (value.length) internalActivities.value = value }, { immediate: true })
 onMounted(() => { if (props.autoLoad && !props.activities.length) void refresh() })

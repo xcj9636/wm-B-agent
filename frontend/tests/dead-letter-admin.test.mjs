@@ -26,7 +26,7 @@ test('dead-letter view explains two-person approval and omits private payloads',
   assert.match(view, /Two different administrators/)
   assert.match(view, /Evidence reference/)
   assert.match(view, /Provider message ID/)
-  assert.match(view, /aria-label="Refresh dead letters"/)
+  assert.match(view, /:aria-label="\$t\('Refresh dead letters'\)"/)
   assert.doesNotMatch(view, /payload_json|business_key|message body/i)
 })
 

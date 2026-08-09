@@ -8,9 +8,9 @@
           @click="$router.back()"
         >
           <el-icon><ArrowLeft /></el-icon>
-          Conversations
+          {{ $t('Conversations') }}
         </el-button>
-        <h1>Conversation</h1>
+        <h1>{{ $t('Conversation') }}</h1>
         <p class="conversation-id">
           {{ conversationId }}
         </p>
@@ -46,7 +46,7 @@
           <el-input
             v-model="newMessage"
             type="textarea"
-            placeholder="Type your message..."
+            :placeholder="$t('Type your message...')"
             @keyup.ctrl.enter="sendMessage"
           />
           <el-button
@@ -54,7 +54,7 @@
             :loading="sending"
             @click="sendMessage"
           >
-            Send (Ctrl+Enter)
+            {{ $t('Send') }} (Ctrl+Enter)
           </el-button>
         </div>
       </el-card>
@@ -64,24 +64,24 @@
         shadow="never"
       >
         <template #header>
-          Conversation Info
+          {{ $t('Conversation Info') }}
         </template>
         <el-descriptions
           :column="1"
           border
         >
-          <el-descriptions-item label="Platform">
+          <el-descriptions-item :label="$t('Platform')">
             {{ conversation?.platform }}
           </el-descriptions-item>
-          <el-descriptions-item label="Status">
-            <el-tag>{{ conversation?.status }}</el-tag>
+          <el-descriptions-item :label="$t('Status')">
+            <el-tag>{{ $t(conversation?.status || '') }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="Intent">
+          <el-descriptions-item :label="$t('Intent')">
             {{ conversation?.current_intent }}
           </el-descriptions-item>
-          <el-descriptions-item label="AI Handled">
+          <el-descriptions-item :label="$t('AI Handled')">
             <el-tag :type="conversation?.ai_handled ? 'success' : 'info'">
-              {{ conversation?.ai_handled ? 'Yes' : 'No' }}
+              {{ $t(conversation?.ai_handled ? 'Yes' : 'No') }}
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>
@@ -93,13 +93,13 @@
           type="warning"
           @click="takeover"
         >
-          Take Over
+          {{ $t('Takeover') }}
         </el-button>
         <el-button
           v-if="conversation?.manual_takeover"
           @click="release"
         >
-          Release to AI
+          {{ $t('Release') }}
         </el-button>
       </el-card>
     </div>
@@ -111,6 +111,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
+import { translate } from '@/i18n'
 
 const route = useRoute()
 
@@ -126,7 +127,7 @@ async function fetchConversation() {
     conversation.value = response.data
     messages.value = response.data.messages
   } catch {
-    ElMessage.error('Failed to load conversation')
+    ElMessage.error(translate('Failed to load conversation'))
   }
 }
 
@@ -142,7 +143,7 @@ async function sendMessage() {
     newMessage.value = ''
     await fetchConversation()
   } catch {
-    ElMessage.error('Failed to send message')
+    ElMessage.error(translate('Failed to send message'))
   } finally {
     sending.value = false
   }
@@ -151,20 +152,20 @@ async function sendMessage() {
 async function takeover() {
   try {
     await api.post(`/api/v1/conversations/${conversationId}/takeover`)
-    ElMessage.success('Conversation taken over')
+    ElMessage.success(translate('Conversation taken over'))
     await fetchConversation()
   } catch {
-    ElMessage.error('Failed to take over')
+    ElMessage.error(translate('Failed to take over'))
   }
 }
 
 async function release() {
   try {
     await api.post(`/api/v1/conversations/${conversationId}/release`)
-    ElMessage.success('Conversation released')
+    ElMessage.success(translate('Conversation released'))
     await fetchConversation()
   } catch {
-    ElMessage.error('Failed to release')
+    ElMessage.error(translate('Failed to release'))
   }
 }
 

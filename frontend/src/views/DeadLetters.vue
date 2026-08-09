@@ -6,22 +6,22 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          Reliable execution
+          {{ $t('Reliable execution') }}
         </p>
         <h1 id="dead-letters-title">
-          Dead-letter operations
+          {{ $t('Dead-letter Operations') }}
         </h1>
         <p class="page-description">
-          Review delivery failures without exposing recipient or message content.
+          {{ $t('Review delivery failures without exposing recipient or message content.') }}
         </p>
       </div>
       <el-button
-        aria-label="Refresh dead letters"
+        :aria-label="$t('Refresh dead letters')"
         :loading="loading"
         @click="loadDeadLetters"
       >
         <el-icon><Refresh /></el-icon>
-        Refresh
+        {{ $t('Refresh') }}
       </el-button>
     </header>
 
@@ -30,27 +30,27 @@
       type="warning"
       :closable="false"
       show-icon
-      title="Two different administrators must approve the same evidence-backed resolution."
+      :title="$t('Two different administrators must approve the same evidence-backed resolution.')"
     />
 
     <el-card shadow="never">
       <div
         class="toolbar"
-        aria-label="Dead-letter filters"
+        :aria-label="$t('Dead-letter filters')"
       >
         <el-select
           v-model="channel"
-          aria-label="Filter by channel"
-          placeholder="All channels"
+          :aria-label="$t('Filter by channel')"
+          :placeholder="$t('All channels')"
           clearable
           @change="loadDeadLetters"
         >
           <el-option
-            label="Email"
+            :label="$t('Email')"
             value="email"
           />
           <el-option
-            label="WhatsApp"
+            :label="$t('WhatsApp')"
             value="whatsapp"
           />
         </el-select>
@@ -58,7 +58,7 @@
           class="result-count"
           aria-live="polite"
         >
-          {{ deadLetters.length }} unresolved event{{ deadLetters.length === 1 ? '' : 's' }}
+          {{ $t('{count} unresolved events', { count: deadLetters.length }) }}
         </span>
       </div>
 
@@ -67,10 +67,10 @@
         :data="deadLetters"
         row-key="id"
         stripe
-        empty-text="No dead-letter events"
+        :empty-text="$t('No dead-letter events')"
       >
         <el-table-column
-          label="Event"
+          :label="$t('Event')"
           min-width="220"
         >
           <template #default="{ row }">
@@ -82,7 +82,7 @@
         </el-table-column>
         <el-table-column
           prop="channel"
-          label="Channel"
+          :label="$t('Channel')"
           width="120"
         >
           <template #default="{ row }">
@@ -92,7 +92,7 @@
           </template>
         </el-table-column>
         <el-table-column
-          label="Attempts"
+          :label="$t('Attempts')"
           width="110"
         >
           <template #default="{ row }">
@@ -101,7 +101,7 @@
         </el-table-column>
         <el-table-column
           prop="error_code"
-          label="Error code"
+          :label="$t('Error code')"
           min-width="210"
         >
           <template #default="{ row }">
@@ -109,7 +109,7 @@
           </template>
         </el-table-column>
         <el-table-column
-          label="Last updated"
+          :label="$t('Last updated')"
           width="180"
         >
           <template #default="{ row }">
@@ -117,7 +117,7 @@
           </template>
         </el-table-column>
         <el-table-column
-          label="Action"
+          :label="$t('Action')"
           width="120"
           fixed="right"
         >
@@ -127,7 +127,7 @@
               link
               @click="openResolution(row)"
             >
-              Resolve
+              {{ $t('Resolve') }}
             </el-button>
           </template>
         </el-table-column>
@@ -136,7 +136,7 @@
 
     <el-dialog
       v-model="dialogOpen"
-      title="Approve dead-letter resolution"
+      :title="$t('Approve dead-letter resolution')"
       width="min(560px, 92vw)"
       :close-on-click-modal="false"
       @closed="resetResolution"
@@ -145,7 +145,7 @@
         v-if="selectedEvent"
         class="resolution-context"
       >
-        <span>Event</span>
+        <span>{{ $t('Event') }}</span>
         <code>{{ selectedEvent.id }}</code>
       </div>
 
@@ -157,21 +157,21 @@
         @submit.prevent="submitResolution"
       >
         <el-form-item
-          label="Resolution"
+          :label="$t('Resolution')"
           prop="action"
         >
           <el-radio-group v-model="form.action">
             <el-radio-button label="confirmed_not_sent">
-              Confirmed not sent
+              {{ $t('Confirmed not sent') }}
             </el-radio-button>
             <el-radio-button label="confirmed_sent">
-              Confirmed sent
+              {{ $t('Confirmed sent') }}
             </el-radio-button>
           </el-radio-group>
         </el-form-item>
 
         <el-form-item
-          label="Evidence reference"
+          :label="$t('Evidence reference')"
           prop="evidence_reference"
         >
           <el-input
@@ -181,13 +181,13 @@
             autocomplete="off"
           />
           <p class="field-help">
-            Enter a ticket or provider-audit reference only. Do not paste secrets or content.
+            {{ $t('Enter a ticket or provider-audit reference only. Do not paste secrets or content.') }}
           </p>
         </el-form-item>
 
         <el-form-item
           v-if="form.action === 'confirmed_sent'"
-          label="Provider message ID"
+          :label="$t('Provider message ID')"
           prop="external_message_id"
         >
           <el-input
@@ -202,13 +202,13 @@
           v-model="acknowledged"
           class="acknowledgement"
         >
-          I verified the provider evidence and understand this approval is audited.
+          {{ $t('I verified the provider evidence and understand this approval is audited.') }}
         </el-checkbox>
       </el-form>
 
       <template #footer>
         <el-button @click="dialogOpen = false">
-          Cancel
+          {{ $t('Cancel') }}
         </el-button>
         <el-button
           type="danger"
@@ -216,7 +216,7 @@
           :disabled="!acknowledged"
           @click="submitResolution"
         >
-          Submit approval
+          {{ $t('Submit approval') }}
         </el-button>
       </template>
     </el-dialog>
@@ -224,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
@@ -233,6 +233,7 @@ import {
   type DeadLetterResolutionCommand,
   type DeadLetterSummary,
 } from '@/api/reliableExecution'
+import { translate } from '@/i18n'
 
 const EVIDENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 
@@ -252,7 +253,7 @@ const form = reactive<DeadLetterResolutionCommand>({
 
 const referenceValidator = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (!EVIDENCE_PATTERN.test(value || '')) {
-    callback(new Error('Use an audit or ticket reference between 3 and 128 characters.'))
+    callback(new Error(translate('Use an audit or ticket reference between 3 and 128 characters.')))
     return
   }
   callback()
@@ -260,17 +261,17 @@ const referenceValidator = (_rule: unknown, value: string, callback: (error?: Er
 
 const providerIdValidator = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (form.action === 'confirmed_sent' && !EVIDENCE_PATTERN.test(value || '')) {
-    callback(new Error('A valid provider message ID is required.'))
+    callback(new Error(translate('A valid provider message ID is required.')))
     return
   }
   callback()
 }
 
-const rules: FormRules<DeadLetterResolutionCommand> = {
-  action: [{ required: true, message: 'Select a resolution.', trigger: 'change' }],
+const rules = computed<FormRules<DeadLetterResolutionCommand>>(() => ({
+  action: [{ required: true, message: translate('Select a resolution.'), trigger: 'change' }],
   evidence_reference: [{ validator: referenceValidator, trigger: 'blur' }],
   external_message_id: [{ validator: providerIdValidator, trigger: 'blur' }],
-}
+}))
 
 async function loadDeadLetters() {
   loading.value = true
@@ -305,9 +306,9 @@ async function submitResolution() {
     }
     const result = await reliableExecutionApi.approveResolution(selectedEvent.value.id, command)
     if (result.status === 'pending') {
-      ElMessage.warning('Approval recorded. Waiting for a different administrator.')
+      ElMessage.warning(translate('Approval recorded. Waiting for a different administrator.'))
     } else {
-      ElMessage.success('Resolution executed and the durable state was reconciled.')
+      ElMessage.success(translate('Resolution executed and the durable state was reconciled.'))
     }
     dialogOpen.value = false
     await loadDeadLetters()

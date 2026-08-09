@@ -4,32 +4,32 @@
       <el-button
         circle
         text
-        aria-label="Back to workflows"
+        :aria-label="$t('Back to workflows')"
         @click="emit('back')"
       >
         <el-icon><ArrowLeft /></el-icon>
       </el-button>
       <div>
-        <strong>{{ title || 'Workflow editor' }}</strong>
-        <span>Visual automation canvas</span>
+        <strong>{{ title || $t('Workflow editor') }}</strong>
+        <span>{{ $t('Visual automation canvas') }}</span>
       </div>
     </div>
 
     <div class="toolbar-actions">
       <el-button @click="emit('export')">
         <el-icon><Download /></el-icon>
-        Export
+        {{ $t('Export') }}
       </el-button>
       <el-button @click="emit('execute')">
         <el-icon><VideoPlay /></el-icon>
-        Execute
+        {{ $t('Execute') }}
       </el-button>
       <el-button
         type="primary"
         @click="emit('save')"
       >
         <el-icon><DocumentChecked /></el-icon>
-        Save
+        {{ $t('Save') }}
       </el-button>
     </div>
   </header>

@@ -6,8 +6,8 @@
     <template #header>
       <div class="monitor-header">
         <div>
-          <strong>Execution monitor</strong>
-          <span>{{ liveExecution ? `Execution ${liveExecution.id}` : 'Waiting for an execution' }}</span>
+          <strong>{{ $t('Execution monitor') }}</strong>
+          <span>{{ liveExecution ? $t('Execution {id}', { id: liveExecution.id }) : $t('Waiting for an execution') }}</span>
         </div>
         <div class="header-actions">
           <el-tag
@@ -15,7 +15,7 @@
             :type="statusType"
             effect="plain"
           >
-            {{ liveExecution.status }}
+            {{ $t(liveExecution.status) }}
           </el-tag>
           <el-button
             :disabled="!executionId"
@@ -41,7 +41,7 @@
     >
       <template v-if="liveExecution">
         <div class="progress-block">
-          <div><span>Progress</span><strong>{{ progress }}%</strong></div>
+          <div><span>{{ $t('Progress') }}</span><strong>{{ progress }}%</strong></div>
           <el-progress
             :percentage="progress"
             :status="progressStatus"
@@ -52,22 +52,22 @@
           :column="2"
           border
         >
-          <el-descriptions-item label="Workflow ID">
+          <el-descriptions-item :label="$t('Workflow ID')">
             {{ liveExecution.workflow_id }}
           </el-descriptions-item>
-          <el-descriptions-item label="Current step">
-            {{ liveExecution.current_step || 'None' }}
+          <el-descriptions-item :label="$t('Current step')">
+            {{ liveExecution.current_step || $t('None') }}
           </el-descriptions-item>
-          <el-descriptions-item label="Started">
+          <el-descriptions-item :label="$t('Started')">
             {{ formatTime(liveExecution.started_at) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Finished">
+          <el-descriptions-item :label="$t('Finished')">
             {{ formatTime(liveExecution.finished_at) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Completed steps">
+          <el-descriptions-item :label="$t('Completed steps')">
             {{ liveExecution.completed_steps.length }}
           </el-descriptions-item>
-          <el-descriptions-item label="Failed steps">
+          <el-descriptions-item :label="$t('Failed steps')">
             {{ liveExecution.failed_steps.length }}
           </el-descriptions-item>
         </el-descriptions>
@@ -83,30 +83,30 @@
 
         <div class="step-columns">
           <section>
-            <h4>Completed</h4><el-tag
+            <h4>{{ $t('Completed') }}</h4><el-tag
               v-for="step in liveExecution.completed_steps"
               :key="step"
               type="success"
               effect="plain"
             >
               {{ step }}
-            </el-tag><span v-if="!liveExecution.completed_steps.length">None</span>
+            </el-tag><span v-if="!liveExecution.completed_steps.length">{{ $t('None') }}</span>
           </section>
           <section>
-            <h4>Failed</h4><el-tag
+            <h4>{{ $t('Failed') }}</h4><el-tag
               v-for="step in liveExecution.failed_steps"
               :key="step"
               type="danger"
               effect="plain"
             >
               {{ step }}
-            </el-tag><span v-if="!liveExecution.failed_steps.length">None</span>
+            </el-tag><span v-if="!liveExecution.failed_steps.length">{{ $t('None') }}</span>
           </section>
         </div>
 
         <el-collapse v-if="metricEntries.length">
           <el-collapse-item
-            title="Execution metrics"
+            :title="$t('Execution metrics')"
             name="metrics"
           >
             <el-descriptions
@@ -131,7 +131,7 @@
             :loading="actionLoading"
             @click="pauseExecution"
           >
-            Pause
+            {{ $t('Pause') }}
           </el-button>
           <el-button
             v-if="liveExecution.status === 'paused'"
@@ -139,7 +139,7 @@
             :loading="actionLoading"
             @click="resumeExecution"
           >
-            Resume
+            {{ $t('Resume') }}
           </el-button>
           <el-button
             v-if="isActive"
@@ -148,16 +148,16 @@
             :loading="actionLoading"
             @click="cancelExecution"
           >
-            Cancel
+            {{ $t('Cancel') }}
           </el-button>
           <el-button @click="emit('view-details', liveExecution)">
-            View details
+            {{ $t('View details') }}
           </el-button>
         </div>
       </template>
       <el-empty
         v-else-if="!loading"
-        description="Start a workflow to monitor its execution"
+        :description="$t('Start a workflow to monitor its execution')"
       />
     </div>
   </el-card>
@@ -169,6 +169,7 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { workflowApi } from '@/api/workflow'
 import type { Execution } from '@/types'
+import { translate } from '@/i18n'
 
 const props = defineProps<{ execution?: Partial<Execution> | null }>()
 const emit = defineEmits<{
@@ -204,7 +205,7 @@ async function refresh(silent = false) {
     liveExecution.value = await workflowApi.getExecution(executionId.value)
     updatePolling()
   } catch {
-    errorMessage.value = 'Execution status could not be loaded.'
+    errorMessage.value = translate('Execution status could not be loaded.')
     stopPolling()
   } finally {
     loading.value = false
@@ -214,27 +215,27 @@ async function refresh(silent = false) {
 async function pauseExecution() {
   if (!liveExecution.value) return
   actionLoading.value = true
-  try { await workflowApi.pauseExecution(liveExecution.value.id); await refresh(true); emit('pause', liveExecution.value); ElMessage.success('Execution paused') }
+  try { await workflowApi.pauseExecution(liveExecution.value.id); await refresh(true); emit('pause', liveExecution.value); ElMessage.success(translate('Execution paused')) }
   finally { actionLoading.value = false }
 }
 async function resumeExecution() {
   if (!liveExecution.value) return
   actionLoading.value = true
-  try { await workflowApi.resumeExecution(liveExecution.value.id); await refresh(true); emit('resume', liveExecution.value); ElMessage.success('Execution resumed') }
+  try { await workflowApi.resumeExecution(liveExecution.value.id); await refresh(true); emit('resume', liveExecution.value); ElMessage.success(translate('Execution resumed')) }
   finally { actionLoading.value = false }
 }
 async function cancelExecution() {
   if (!liveExecution.value) return
-  try { await ElMessageBox.confirm('Cancel this workflow execution?', 'Confirm cancellation', { type: 'warning' }) }
+  try { await ElMessageBox.confirm(translate('Cancel this workflow execution?'), translate('Confirm cancellation'), { type: 'warning' }) }
   catch { return }
   actionLoading.value = true
-  try { await workflowApi.cancelExecution(liveExecution.value.id); await refresh(true); emit('cancel', liveExecution.value); ElMessage.success('Execution cancelled') }
+  try { await workflowApi.cancelExecution(liveExecution.value.id); await refresh(true); emit('cancel', liveExecution.value); ElMessage.success(translate('Execution cancelled')) }
   finally { actionLoading.value = false }
 }
 
 function updatePolling() { if (isActive.value && !pollTimer) pollTimer = setInterval(() => void refresh(true), 2500); else if (!isActive.value) stopPolling() }
 function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = undefined }
-function formatTime(value?: string) { return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : 'Not available' }
+function formatTime(value?: string) { return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : translate('Not available') }
 function formatMetric(value: unknown) { return typeof value === 'object' ? JSON.stringify(value) : String(value) }
 
 watch(() => props.execution?.id, (id) => { stopPolling(); liveExecution.value = null; if (id) void refresh() }, { immediate: true })

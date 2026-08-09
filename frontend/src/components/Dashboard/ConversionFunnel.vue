@@ -5,14 +5,14 @@
   >
     <template #header>
       <div class="card-header">
-        <div><strong>Conversion funnel</strong><span>{{ days }}-day customer journey</span></div>
+        <div><strong>{{ $t('Conversion funnel') }}</strong><span>{{ $t('{count}-day customer journey', { count: days }) }}</span></div>
         <el-button
           text
           type="primary"
           :loading="loading"
           @click="fetchFunnelData"
         >
-          Refresh
+          {{ $t('Refresh') }}
         </el-button>
       </div>
     </template>
@@ -51,7 +51,7 @@
       </div>
       <el-empty
         v-else-if="!loading"
-        description="No funnel data for this period"
+        :description="$t('No funnel data for this period')"
       />
     </div>
   </el-card>

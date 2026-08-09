@@ -3,17 +3,17 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          Customer engagement
+          {{ $t('Customer engagement') }}
         </p>
-        <h1>Conversations</h1>
-        <p>Monitor active exchanges, intent and AI handling state.</p>
+        <h1>{{ $t('Conversations') }}</h1>
+        <p>{{ $t('Monitor active exchanges, intent and AI handling state.') }}</p>
       </div>
       <el-button
         :loading="loading"
         @click="fetchConversations"
       >
         <el-icon><Refresh /></el-icon>
-        Refresh
+        {{ $t('Refresh') }}
       </el-button>
     </header>
 
@@ -24,42 +24,42 @@
       >
         <el-table-column
           prop="id"
-          label="ID"
+          :label="$t('ID')"
           width="200"
         />
         <el-table-column
           prop="customer_id"
-          label="Customer ID"
+          :label="$t('Customer ID')"
           width="100"
         />
         <el-table-column
           prop="platform"
-          label="Platform"
+          :label="$t('Platform')"
         />
         <el-table-column
           prop="status"
-          label="Status"
+          :label="$t('Status')"
         >
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status }}
+              {{ $t(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column
           prop="current_intent"
-          label="Intent"
+          :label="$t('Intent')"
         />
         <el-table-column
           prop="last_message_at"
-          label="Last Message"
+          :label="$t('Last Message')"
         >
           <template #default="{ row }">
             {{ formatDate(row.last_message_at) }}
           </template>
         </el-table-column>
         <el-table-column
-          label="Actions"
+          :label="$t('Actions')"
           width="150"
         >
           <template #default="{ row }">
@@ -67,7 +67,7 @@
               text
               @click="viewConversation(row.id)"
             >
-              View
+              {{ $t('View') }}
             </el-button>
           </template>
         </el-table-column>

@@ -3,17 +3,17 @@
     <header class="page-heading">
       <div>
         <p class="page-kicker">
-          Automation
+          {{ $t('Automation') }}
         </p>
-        <h1>Workflows</h1>
-        <p>Build, inspect and run reusable business automations.</p>
+        <h1>{{ $t('Workflows') }}</h1>
+        <p>{{ $t('Build, inspect and run reusable business automations.') }}</p>
       </div>
       <el-button
         type="primary"
         @click="showCreateDialog = true"
       >
         <el-icon><Plus /></el-icon>
-        Create Workflow
+        {{ $t('Create Workflow') }}
       </el-button>
     </header>
 
@@ -24,30 +24,30 @@
       >
         <el-table-column
           prop="name"
-          label="Name"
+          :label="$t('Name')"
         />
         <el-table-column
           prop="description"
-          label="Description"
+          :label="$t('Description')"
           show-overflow-tooltip
         />
         <el-table-column
           prop="status"
-          label="Status"
+          :label="$t('Status')"
         >
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status }}
+              {{ $t(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column
           prop="version"
-          label="Version"
+          :label="$t('Version')"
           width="100"
         />
         <el-table-column
-          label="Actions"
+          :label="$t('Actions')"
           width="200"
         >
           <template #default="{ row }">
@@ -55,20 +55,20 @@
               text
               @click="editWorkflow(row.id)"
             >
-              Edit
+              {{ $t('Edit') }}
             </el-button>
             <el-button
               text
               @click="executeWorkflow(row.id)"
             >
-              Execute
+              {{ $t('Execute') }}
             </el-button>
             <el-button
               text
               type="danger"
               @click="deleteWorkflow(row.id)"
             >
-              Delete
+              {{ $t('Delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -77,36 +77,36 @@
 
     <el-dialog
       v-model="showCreateDialog"
-      title="Create Workflow"
+      :title="$t('Create Workflow')"
       width="600px"
     >
       <el-form
         :model="form"
         label-position="top"
       >
-        <el-form-item label="Name">
+        <el-form-item :label="$t('Name')">
           <el-input
             v-model="form.name"
-            placeholder="Enter workflow name"
+            :placeholder="$t('Enter workflow name')"
           />
         </el-form-item>
-        <el-form-item label="Description">
+        <el-form-item :label="$t('Description')">
           <el-input
             v-model="form.description"
             type="textarea"
-            placeholder="Enter workflow description"
+            :placeholder="$t('Enter workflow description')"
           />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showCreateDialog = false">
-          Cancel
+          {{ $t('Cancel') }}
         </el-button>
         <el-button
           type="primary"
           @click="createWorkflow"
         >
-          Create
+          {{ $t('Create') }}
         </el-button>
       </template>
     </el-dialog>
@@ -118,6 +118,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useWorkflowStore } from '@/stores/workflow'
+import { translate } from '@/i18n'
 
 const router = useRouter()
 const workflowStore = useWorkflowStore()
@@ -149,12 +150,12 @@ async function createWorkflow() {
       steps: [],
       transitions: [],
     })
-    ElMessage.success('Workflow created')
+    ElMessage.success(translate('Workflow created'))
     showCreateDialog.value = false
     form.value = { name: '', description: '' }
     await fetchWorkflows()
   } catch {
-    ElMessage.error('Failed to create workflow')
+    ElMessage.error(translate('Failed to create workflow'))
   }
 }
 
@@ -164,9 +165,9 @@ function editWorkflow(id: string) {
 
 async function executeWorkflow(id: string) {
   try {
-    await ElMessageBox.confirm('Execute this workflow?', 'Confirm')
+    await ElMessageBox.confirm(translate('Execute this workflow?'), translate('Confirm'))
     await workflowStore.executeWorkflow(id, {})
-    ElMessage.success('Workflow execution started')
+    ElMessage.success(translate('Workflow execution started'))
   } catch {
     // Cancelled
   }
@@ -174,11 +175,11 @@ async function executeWorkflow(id: string) {
 
 async function deleteWorkflow(id: string) {
   try {
-    await ElMessageBox.confirm('Delete this workflow?', 'Confirm', {
+    await ElMessageBox.confirm(translate('Delete this workflow?'), translate('Confirm'), {
       type: 'warning',
     })
     await workflowStore.deleteWorkflow(id)
-    ElMessage.success('Workflow deleted')
+    ElMessage.success(translate('Workflow deleted'))
     await fetchWorkflows()
   } catch {
     // Cancelled
