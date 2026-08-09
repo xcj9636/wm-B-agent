@@ -289,6 +289,81 @@ def test_dead_letter_marks_outreach_failed_without_consuming_quota(
     finally:
         session.close()
 
+
+@pytest.mark.asyncio
+async def test_auto_sender_sanitizes_queue_failures(
+    session_factory,
+    monkeypatch,
+):
+    customer_id, account_id = create_customer_and_account(session_factory)
+    private_detail = "private message body and buyer@example.com"
+
+    class FailingQueue:
+        def __init__(self, session):
+            pass
+
+        def queue(self, command):
+            raise RuntimeError(private_detail)
+
+    monkeypatch.setattr(skill_auto_sender, "OutreachQueueService", FailingQueue)
+    context = ExecutionContext(
+        workflow_id="workflow-private",
+        execution_id="execution-private",
+        input_data={
+            "customers": [
+                {
+                    "id": customer_id,
+                    "username": "buyer-1",
+                    "email": "buyer@example.com",
+                }
+            ],
+            "messages": {
+                "subject": "Private",
+                "body": "private message body",
+            },
+            "channel": "email",
+            "accounts": [{"id": account_id, "account_type": "email"}],
+            "send_immediately": True,
+        },
+    )
+
+    result = await AutoSenderSkill(
+        {"dry_run": False, "enable_account_rotation": True}
+    ).execute(context)
+
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["error"] == "outreach_queue_failed"
+    assert private_detail not in str(result)
+
+
+def test_schedule_task_sanitizes_queue_failures(
+    session_factory,
+    monkeypatch,
+    caplog,
+):
+    customer_id, _ = create_customer_and_account(session_factory)
+    private_detail = "private message body and buyer@example.com"
+
+    class FailingQueue:
+        def __init__(self, session):
+            pass
+
+        def queue(self, command):
+            raise RuntimeError(private_detail)
+
+    monkeypatch.setattr(task_functions, "OutreachQueueService", FailingQueue)
+    result = task_functions.schedule_outreach_task.run(
+        customer_ids=[customer_id],
+        channel="email",
+        template_id="intro-v1",
+        schedule_config={"idempotency_key": "private-campaign"},
+    )
+
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["error"] == "outreach_queue_failed"
+    assert private_detail not in str(result)
+    assert private_detail not in caplog.text
+
     monkeypatch.setattr(
         task_functions,
         "get_outbox_delivery_router",
