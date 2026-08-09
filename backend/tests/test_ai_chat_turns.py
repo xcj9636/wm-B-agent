@@ -4,6 +4,7 @@ import pytest
 
 from app.models.database import AgentTurn, User
 from app.services.ai_chat import AIChatService
+from app.services.idempotency import IdempotencyConflict
 from app.services.llm.contracts import (
     GatewayError,
     GatewayErrorKind,
@@ -93,3 +94,56 @@ async def test_ai_chat_failure_leaves_a_durable_failed_turn(db_session):
     assert turn.status == "failed"
     assert turn.completed_at is not None
     assert backend.closed is True
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_idempotent_replay_returns_persisted_answer_without_new_llm_call(
+    db_session,
+):
+    backend = ChatBackend()
+    backend.call_count = 0
+    original_complete = backend.complete
+
+    async def counted_complete(request):
+        backend.call_count += 1
+        return await original_complete(request)
+
+    backend.complete = counted_complete
+    user, session, service = user_and_session(db_session, backend)
+
+    first = await service.complete(
+        session.id,
+        user.id,
+        "Hello",
+        idempotency_key="chat-idempotent-replay",
+    )
+    second = await service.complete(
+        session.id,
+        user.id,
+        "Hello",
+        idempotency_key="chat-idempotent-replay",
+    )
+
+    assert second.id == first.id
+    assert backend.call_count == 1
+    assert db_session.query(AgentTurn).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_idempotency_key_rejects_changed_input(db_session):
+    backend = ChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+    await service.complete(
+        session.id,
+        user.id,
+        "First message",
+        idempotency_key="chat-input-conflict",
+    )
+
+    with pytest.raises(IdempotencyConflict):
+        await service.complete(
+            session.id,
+            user.id,
+            "Changed message",
+            idempotency_key="chat-input-conflict",
+        )
