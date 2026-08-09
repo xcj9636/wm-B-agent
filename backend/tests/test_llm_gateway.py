@@ -30,8 +30,11 @@ def gateway_client(handler, aliases=None):
     return LLMGatewayClient(
         base_url="http://omniroute.test",
         api_key="gateway-secret",
-        model_aliases=aliases
-        or {LLMUseCase.LEAD_CLASSIFICATION: "b-agent-intent-cheap-v1"},
+        model_aliases=(
+            aliases
+            if aliases is not None
+            else {LLMUseCase.LEAD_CLASSIFICATION: "b-agent-intent-cheap-v1"}
+        ),
         http_client=http_client,
     )
 
@@ -150,3 +153,30 @@ async def test_missing_or_dynamic_route_fails_closed_before_network_call():
             await client.complete(llm_request())
         assert raised.value.kind == GatewayErrorKind.INVALID_RESPONSE
         assert raised.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_timeout_is_retryable_before_any_response():
+    def handler(request):
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    client = gateway_client(handler)
+
+    with pytest.raises(GatewayError) as raised:
+        await client.complete(llm_request())
+
+    assert raised.value.kind == GatewayErrorKind.TIMEOUT
+    assert raised.value.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_is_not_retryable():
+    client = gateway_client(
+        lambda request: httpx.Response(200, content=b"not-json")
+    )
+
+    with pytest.raises(GatewayError) as raised:
+        await client.complete(llm_request())
+
+    assert raised.value.kind == GatewayErrorKind.INVALID_RESPONSE
+    assert raised.value.retryable is False
