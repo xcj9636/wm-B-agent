@@ -1,4 +1,10 @@
+from datetime import datetime, timedelta
+from uuid import uuid4
+
 from app.core.workflow_engine import WorkflowDefinition, WorkflowExecution
+from app.models.database import User
+from app.services.agent_runs import AgentRunCommand, AgentRunService
+from app.services.agent_runtime.contracts import Sensitivity
 
 
 def test_agent_overview_exposes_real_business_pipelines(api_context):
@@ -31,6 +37,92 @@ def test_agent_runs_returns_live_execution_summaries(api_context):
     assert response.json() == []
 
 
+def test_agent_runs_returns_user_owned_durable_safe_metadata(api_context):
+    client, db, user = api_context
+    run, _ = AgentRunService(db).create(
+        AgentRunCommand(
+            idempotency_key="agent-api:durable-run:1",
+            org_id=uuid4(),
+            user_id=user.id,
+            session_id=uuid4(),
+            turn_id=uuid4(),
+            use_case="live_reply",
+            input={"message": "private buyer request"},
+            sensitivity=Sensitivity.CONFIDENTIAL,
+            generation_epoch=2,
+            deadline_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+    )
+
+    response = client.get("/api/v1/agent/runs")
+    detail = client.get(f"/api/v1/agent/runs/{run.id}")
+
+    assert response.status_code == 200, response.text
+    assert detail.status_code == 200, detail.text
+    body = response.json()
+    assert body == [detail.json()]
+    assert body[0]["id"] == str(run.id)
+    assert body[0]["use_case"] == "live_reply"
+    assert body[0]["status"] == "queued"
+    assert body[0]["effect_state"] == "none"
+    assert body[0]["generation_epoch"] == 2
+    serialized = response.text
+    assert "private buyer request" not in serialized
+    assert "input_hash" not in serialized
+    assert "idempotency_key" not in serialized
+    assert "leased_by" not in serialized
+    assert "state_json" not in serialized
+
+
+def test_agent_run_detail_does_not_cross_user_boundary(api_context):
+    client, db, _ = api_context
+    other = User(
+        username="other-agent-user",
+        email="other-agent-user@example.com",
+        hashed_password="unused",
+        is_active=True,
+    )
+    db.add(other)
+    db.commit()
+    run, _ = AgentRunService(db).create(
+        AgentRunCommand(
+            idempotency_key="agent-api:foreign-run:1",
+            org_id=uuid4(),
+            user_id=other.id,
+            use_case="research",
+            input={"objective": "sensitive research"},
+            sensitivity=Sensitivity.INTERNAL,
+            generation_epoch=1,
+            deadline_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+    )
+
+    response = client.get(f"/api/v1/agent/runs/{run.id}")
+
+    assert response.status_code == 404
+
+
+def test_agent_overview_counts_durable_active_runs(api_context):
+    client, db, user = api_context
+    AgentRunService(db).create(
+        AgentRunCommand(
+            idempotency_key="agent-api:active-count:1",
+            org_id=uuid4(),
+            user_id=user.id,
+            use_case="live_reply",
+            input={"message": "hello"},
+            sensitivity=Sensitivity.INTERNAL,
+            generation_epoch=1,
+            deadline_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+    )
+
+    response = client.get("/api/v1/agent/overview")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["runtime"]["active_run_count"] == 1
+
+
 def test_execution_status_uses_the_public_api_contract():
     definition = WorkflowDefinition(name="Contract run", description="")
     execution = WorkflowExecution("run-1", definition, {"input_data": {}})
@@ -57,4 +149,3 @@ def test_every_registered_skill_satisfies_the_metadata_contract():
         assert skill.display_name
         assert skill.description
         assert skill.category
-
