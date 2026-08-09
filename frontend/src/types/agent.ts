@@ -22,20 +22,18 @@ export interface AgentPipeline {
 
 export interface AgentRun {
   id: string
-  workflow_id: string
-  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
-  current_step?: string
-  started_at?: string
-  finished_at?: string
-  error_msg?: string
-  completed_steps: string[]
-  failed_steps: string[]
-  metrics: {
-    progress: number
-    total_steps: number
-    skipped_steps: number
-    duration_seconds?: number
-  }
+  session_id?: string
+  turn_id?: string
+  use_case: string
+  sensitivity: 'public' | 'internal' | 'confidential' | 'restricted'
+  generation_epoch: number
+  status: 'queued' | 'running' | 'completed' | 'cancelled' | 'unknown'
+  effect_state: 'none' | 'started' | 'confirmed'
+  deadline_at: string
+  error_code?: string
+  created_at: string
+  updated_at: string
+  completed_at?: string
 }
 
 export interface AgentOverview {

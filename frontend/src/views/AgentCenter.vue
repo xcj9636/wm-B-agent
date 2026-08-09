@@ -489,8 +489,8 @@
       <template #header>
         <div class="card-heading">
           <div>
-            <strong>{{ $t('Live agent runs') }}</strong>
-            <span>{{ $t('Current in-process orchestration executions') }}</span>
+            <strong>{{ $t('Durable agent runs') }}</strong>
+            <span>{{ $t('Database-backed execution, lease and recovery state') }}</span>
           </div>
           <el-tag effect="plain">
             {{ runs.length }}
@@ -503,10 +503,14 @@
         :empty-text="$t('No agent runs yet')"
       >
         <el-table-column
-          prop="workflow_id"
-          :label="$t('Workflow')"
+          prop="use_case"
+          :label="$t('Use case')"
           min-width="180"
-        />
+        >
+          <template #default="{ row }">
+            {{ $t(row.use_case) }}
+          </template>
+        </el-table-column>
         <el-table-column
           :label="$t('Status')"
           width="120"
@@ -521,31 +525,45 @@
           </template>
         </el-table-column>
         <el-table-column
-          :label="$t('Progress')"
-          min-width="170"
+          :label="$t('Effect state')"
+          min-width="135"
         >
           <template #default="{ row }">
-            <el-progress
-              :percentage="row.metrics.progress"
-              :stroke-width="7"
-            />
+            {{ $t(row.effect_state) }}
           </template>
         </el-table-column>
         <el-table-column
-          prop="current_step"
-          :label="$t('Current step')"
-          min-width="150"
+          prop="generation_epoch"
+          :label="$t('Generation fence')"
+          width="140"
         >
           <template #default="{ row }">
-            {{ row.current_step || $t('None') }}
+            #{{ row.generation_epoch }}
           </template>
         </el-table-column>
         <el-table-column
-          :label="$t('Started')"
+          :label="$t('Created')"
           min-width="170"
         >
           <template #default="{ row }">
-            {{ formatTime(row.started_at) }}
+            {{ formatTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Deadline')"
+          min-width="170"
+        >
+          <template #default="{ row }">
+            {{ formatTime(row.deadline_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Error code')"
+          min-width="190"
+        >
+          <template #default="{ row }">
+            <code v-if="row.error_code">{{ row.error_code }}</code>
+            <span v-else>—</span>
           </template>
         </el-table-column>
       </el-table>
@@ -1288,7 +1306,13 @@ function capabilityReady(name: string) {
 }
 
 function statusType(status: AgentRun['status']) {
-  return ({ completed: 'success', failed: 'danger', running: 'primary', paused: 'warning', cancelled: 'info', pending: 'info' } as const)[status]
+  return ({
+    queued: 'info',
+    running: 'primary',
+    completed: 'success',
+    cancelled: 'info',
+    unknown: 'danger',
+  } as const)[status]
 }
 
 function researchStatusType(status: AgentResearchJob['status']) {

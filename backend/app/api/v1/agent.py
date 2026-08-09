@@ -20,6 +20,11 @@ from app.services.agent_delivery import (
     DeliveryResponse,
     DeliveryReview,
 )
+from app.services.agent_runs import (
+    AgentRunService,
+    AgentRunSummary,
+    RunNotFound,
+)
 from app.services.agent_research import (
     AgentResearchService,
     DraftCreate,
@@ -119,14 +124,13 @@ def _delivery_http_error(exc: Exception) -> HTTPException:
 @router.get("/overview")
 async def get_agent_overview(
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ):
     """Describe the active agent runtime without exposing prompts or credentials."""
     capabilities = _capabilities()
     agent = get_agent()
-    runs = agent.list_execution_statuses()
-    active_runs = sum(
-        run["status"] in {"pending", "running", "paused"}
-        for run in runs
+    active_runs = AgentRunService(db).count_active_for_user(
+        user_id=current_user.id
     )
 
     return {
@@ -157,11 +161,12 @@ async def get_agent_overview(
     }
 
 
-@router.get("/runs")
-async def list_agent_runs(
+@router.get("/runs", response_model=List[AgentRunSummary])
+def list_agent_runs(
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ):
-    return get_agent().list_execution_statuses()
+    return AgentRunService(db).list_for_user(user_id=current_user.id)
 
 
 @router.get(
@@ -356,12 +361,16 @@ def review_agent_delivery(
         raise _delivery_http_error(exc) from exc
 
 
-@router.get("/runs/{execution_id}")
-async def get_agent_run(
-    execution_id: str,
+@router.get("/runs/{run_id}", response_model=AgentRunSummary)
+def get_agent_run(
+    run_id: UUID,
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ):
-    execution = get_agent().get_execution_status(execution_id)
-    if not execution:
-        raise HTTPException(status_code=404, detail="Agent run not found")
-    return execution
+    try:
+        return AgentRunService(db).get_for_user(
+            run_id,
+            user_id=current_user.id,
+        )
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

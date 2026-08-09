@@ -17,6 +17,30 @@ class RunLeaseConflict(RuntimeError):
     """A worker tried to mutate a run without its current live lease."""
 
 
+class RunNotFound(LookupError):
+    """A durable run is absent or outside the requesting user's boundary."""
+
+
+class AgentRunSummary(BaseModel):
+    """User-visible run metadata with all execution inputs intentionally absent."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    session_id: Optional[UUID] = None
+    turn_id: Optional[UUID] = None
+    use_case: str
+    sensitivity: str
+    generation_epoch: int
+    status: str
+    effect_state: str
+    deadline_at: datetime
+    error_code: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime] = None
+
+
 class AgentRunCommand(BaseModel):
     """Immutable scheduling input; raw input is hashed and never persisted here."""
 
@@ -85,6 +109,43 @@ class AgentRunService:
             self._db.rollback()
             raise
         return row, True
+
+    def list_for_user(
+        self,
+        *,
+        user_id: int,
+        limit: int = 100,
+    ) -> List[AgentRunSummary]:
+        if limit <= 0 or limit > 100:
+            raise ValueError("limit must contain 1 to 100 runs")
+        rows = (
+            self._db.query(AgentRun)
+            .filter(AgentRun.user_id == user_id)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [AgentRunSummary.model_validate(row) for row in rows]
+
+    def get_for_user(self, run_id: UUID, *, user_id: int) -> AgentRunSummary:
+        row = (
+            self._db.query(AgentRun)
+            .filter(AgentRun.id == run_id, AgentRun.user_id == user_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise RunNotFound("Agent run not found")
+        return AgentRunSummary.model_validate(row)
+
+    def count_active_for_user(self, *, user_id: int) -> int:
+        return (
+            self._db.query(AgentRun)
+            .filter(
+                AgentRun.user_id == user_id,
+                AgentRun.status.in_(("queued", "running")),
+            )
+            .count()
+        )
 
     def claim_batch(
         self,
