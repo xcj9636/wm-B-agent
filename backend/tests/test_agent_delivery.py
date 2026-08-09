@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import uuid
 
+import httpx
 import pytest
 
 from app.models.database import (
@@ -244,6 +245,8 @@ class FakeVerifiedEmailService:
 
     async def verify_sent(self, *, message_id, access_token):
         self.verified_ids.append((message_id, access_token))
+        if isinstance(self.verified, Exception):
+            raise self.verified
         return self.verified
 
 
@@ -283,3 +286,13 @@ async def test_email_delivery_uses_selected_account_and_requires_sent_verificati
     assert not_verified.success is False
     assert not_verified.failure_kind.value == "unknown_after_send"
     assert not_verified.error_code == "sent_copy_not_verified"
+
+    request = httpx.Request(
+        "GET",
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/gmail-message-7",
+    )
+    service.verified = httpx.ConnectError("verification offline", request=request)
+    verification_failed = await router.deliver(event)
+    assert verification_failed.success is False
+    assert verification_failed.failure_kind.value == "unknown_after_send"
+    assert verification_failed.error_code == "sent_copy_verification_failed"
