@@ -1602,6 +1602,46 @@ class AgentToolExecution(Base):
     )
 
 
+class AgentRun(Base):
+    """Durable lease and recovery state for one agent execution."""
+
+    __tablename__ = "agent_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    idempotency_key = Column(String(255), nullable=False, unique=True)
+    input_hash = Column(String(64), nullable=False)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(Integer, nullable=False)
+    session_id = Column(UUID(as_uuid=True))
+    turn_id = Column(UUID(as_uuid=True))
+    use_case = Column(String(50), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    generation_epoch = Column(Integer, nullable=False)
+    status = Column(String(30), nullable=False, default="queued")
+    fencing_token = Column(Integer, nullable=False, default=0)
+    leased_by = Column(String(100))
+    lease_until = Column(DateTime)
+    heartbeat_at = Column(DateTime)
+    effect_state = Column(String(20), nullable=False, default="none")
+    state_json = Column(JSON, nullable=False, default=dict)
+    deadline_at = Column(DateTime, nullable=False)
+    error_code = Column(String(100))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_agent_run_status_deadline", "status", "deadline_at"),
+        Index("idx_agent_run_status_lease", "status", "lease_until"),
+        Index("idx_agent_run_org_created", "org_id", "created_at"),
+    )
+
+
 class StatsDaily(Base):
     """Daily statistics model"""
     __tablename__ = "stats_daily"
