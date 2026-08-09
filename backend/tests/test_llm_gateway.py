@@ -49,10 +49,14 @@ async def test_completion_translates_the_openai_compatible_contract():
         captured["json"] = json.loads(request.content)
         return httpx.Response(
             200,
+            headers={
+                "X-OmniRoute-Provider": "approved-provider",
+                "X-OmniRoute-Request-Id": "gw-route-123",
+                "X-OmniRoute-Model": "resolved-route-model",
+            },
             json={
-                "id": "gw-123",
-                "model": "resolved-model",
-                "provider": "approved-provider",
+                "id": "chat-completion-123",
+                "model": "openai-compatible-model",
                 "choices": [
                     {
                         "message": {"content": '{"intent":"price_inquiry"}'},
@@ -82,8 +86,8 @@ async def test_completion_translates_the_openai_compatible_contract():
     assert captured["headers"]["x-request-id"] == str(request.request_id)
     assert captured["json"]["model"] == "b-agent-intent-cheap-v1"
     assert captured["json"]["response_format"]["type"] == "json_schema"
-    assert response.gateway_request_id == "gw-123"
-    assert response.resolved_model == "resolved-model"
+    assert response.gateway_request_id == "gw-route-123"
+    assert response.resolved_model == "resolved-route-model"
     assert response.resolved_provider == "approved-provider"
     assert response.usage.total_tokens == 15
 
@@ -235,9 +239,8 @@ async def test_completion_rejects_unapproved_or_missing_resolved_provider():
             "model": "resolved-model",
             "choices": [{"message": {"content": "reply"}}],
         }
-        if provider is not None:
-            body["provider"] = provider
-        return httpx.Response(200, json=body)
+        headers = {"X-OmniRoute-Provider": provider} if provider else {}
+        return httpx.Response(200, json=body, headers=headers)
 
     for provider in ("unapproved-provider", None):
         client = gateway_client(
@@ -255,10 +258,10 @@ async def test_completion_accepts_an_approved_resolved_provider():
     client = gateway_client(
         lambda request: httpx.Response(
             200,
+            headers={"X-OmniRoute-Provider": "approved-provider"},
             json={
                 "id": "gw-approved",
                 "model": "resolved-model",
-                "provider": "approved-provider",
                 "choices": [{"message": {"content": "reply"}}],
             },
         ),
