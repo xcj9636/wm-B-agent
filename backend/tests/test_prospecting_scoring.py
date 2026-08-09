@@ -191,6 +191,18 @@ def test_ranking_is_marked_stale_after_icp_policy_changes(api_context):
     assert ranking.json()["scores"][0]["profile_version"] == (
         scored["profile_version"]
     )
+    assert ranking.json()["scores"][0]["stale"] is True
+    assert ranking.json()["scores"][0]["recommended"] is False
+
+    imported = client.post(
+        "/api/v1/prospecting/contacts/import",
+        json={"contact_ids": [ranking.json()["scores"][0]["contact_id"]]},
+    )
+
+    assert imported.status_code == 200, imported.text
+    customer = db.query(Customer).one()
+    assert customer.custom_fields["icp_recommended"] is False
+    assert customer.source_data_json["icp"]["stale"] is True
 
 
 def test_other_user_cannot_score_or_read_search_ranking(api_context):
