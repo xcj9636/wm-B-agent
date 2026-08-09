@@ -219,6 +219,136 @@
       </el-table>
     </el-card>
 
+    <div class="section-heading research-heading delivery-heading">
+      <div>
+        <p class="page-kicker">
+          {{ $t('Human-approved outbound') }}
+        </p>
+        <h2>{{ $t('Delivery control') }}</h2>
+        <p>{{ $t('Bind an approved draft to an exact mailbox, approve the send separately and verify the provider Sent copy.') }}</p>
+      </div>
+      <div class="heading-actions">
+        <el-button @click="router.push('/settings')">
+          {{ $t('Configure mailboxes') }}
+        </el-button>
+        <el-button
+          :loading="deliveryLoading"
+          @click="loadDeliveryData"
+        >
+          {{ $t('Refresh delivery') }}
+        </el-button>
+      </div>
+    </div>
+
+    <div class="research-metrics delivery-metrics">
+      <div>
+        <span>{{ $t('Approval pending') }}</span>
+        <strong>{{ deliveryCounts.approval }}</strong>
+      </div>
+      <div>
+        <span>{{ $t('Scheduled deliveries') }}</span>
+        <strong>{{ deliveryCounts.scheduled }}</strong>
+      </div>
+      <div>
+        <span>{{ $t('Sent verified') }}</span>
+        <strong>{{ deliveryCounts.sent }}</strong>
+      </div>
+      <div>
+        <span>{{ $t('Needs attention') }}</span>
+        <strong>{{ deliveryCounts.attention }}</strong>
+      </div>
+    </div>
+
+    <el-card
+      shadow="never"
+      class="research-card delivery-card"
+    >
+      <el-table
+        v-loading="deliveryLoading"
+        :data="deliveries"
+        row-key="id"
+        :empty-text="$t('No deliveries prepared yet')"
+      >
+        <el-table-column
+          :label="$t('Sender account')"
+          min-width="190"
+        >
+          <template #default="{ row }">
+            <div class="research-company">
+              <strong>{{ row.account_name }}</strong>
+              <span>{{ row.sender }} · {{ row.provider }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="recipient"
+          :label="$t('Recipient')"
+          min-width="190"
+        />
+        <el-table-column
+          prop="subject"
+          :label="$t('Subject')"
+          min-width="210"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          :label="$t('Status')"
+          width="170"
+        >
+          <template #default="{ row }">
+            <el-tag
+              :type="deliveryStatusType(row.status)"
+              effect="plain"
+            >
+              {{ $t(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Scheduled for')"
+          min-width="170"
+        >
+          <template #default="{ row }">
+            {{ formatTime(row.scheduled_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Actions')"
+          width="220"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <template v-if="row.status === 'approval_pending'">
+              <el-button
+                link
+                type="primary"
+                @click="reviewDelivery(row, 'approve')"
+              >
+                {{ $t('Approve and schedule') }}
+              </el-button>
+              <el-button
+                link
+                type="danger"
+                @click="reviewDelivery(row, 'reject')"
+              >
+                {{ $t('Reject') }}
+              </el-button>
+            </template>
+            <span
+              v-else-if="row.external_message_id"
+              class="delivery-proof"
+            >
+              {{ $t('Provider proof') }} · {{ row.external_message_id }}
+            </span>
+            <span
+              v-else
+              class="delivery-proof"
+            >{{ row.error_code ? $t(row.error_code) : '—' }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <div class="section-heading">
       <div>
         <p class="page-kicker">
@@ -735,6 +865,78 @@
         >
           {{ $t('Approve draft') }}
         </el-button>
+        <el-button
+          type="success"
+          :disabled="!latestDraft || latestDraft.status !== 'approved' || latestDraft.stale || latestDraft.channel !== 'email'"
+          @click="latestDraft && openDelivery(latestDraft)"
+        >
+          {{ $t('Prepare delivery') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="deliveryVisible"
+      append-to-body
+      :title="$t('Prepare delivery')"
+      width="min(620px, 94vw)"
+    >
+      <div class="delivery-dialog-body">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          :title="$t('Preparing a delivery does not send it. A separate approval is required before Outbox scheduling.')"
+        />
+        <el-form label-position="top">
+          <el-form-item :label="$t('Sender account')">
+            <el-select
+              v-model="deliveryCreate.account_id"
+              filterable
+              :placeholder="$t('Choose a verified mailbox')"
+            >
+              <el-option
+                v-for="account in availableMailboxes"
+                :key="account.id"
+                :label="`${account.name} · ${account.email || account.account_type}`"
+                :value="account.id"
+              >
+                <span>{{ account.name }}</span>
+                <span class="mailbox-option-meta">{{ account.email }} · {{ account.today_sent }}/{{ account.daily_limit }}</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="$t('Scheduled for')">
+            <el-date-picker
+              v-model="deliveryCreate.scheduled_at"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ssZ"
+              :placeholder="$t('Choose send time')"
+            />
+          </el-form-item>
+        </el-form>
+        <el-empty
+          v-if="!availableMailboxes.length"
+          :image-size="60"
+          :description="$t('No active verified mailbox. Configure one in Settings.')"
+        >
+          <el-button @click="router.push('/settings')">
+            {{ $t('Configure mailboxes') }}
+          </el-button>
+        </el-empty>
+      </div>
+      <template #footer>
+        <el-button @click="deliveryVisible = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="preparingDelivery"
+          :disabled="!deliveryCreate.account_id || !deliveryCreate.scheduled_at"
+          @click="prepareDelivery"
+        >
+          {{ $t('Create approval request') }}
+        </el-button>
       </template>
     </el-dialog>
   </section>
@@ -749,11 +951,13 @@ import { agentApi } from '@/api/agent'
 import { customerApi } from '@/api/customer'
 import type { Customer } from '@/types'
 import type {
+  AgentDelivery,
   AgentOverview,
   AgentResearchJob,
   AgentRun,
   ResearchEvidenceUpdate,
   ResearchOutreachDraft,
+  MailboxAccount,
 } from '@/types/agent'
 import { translate } from '@/i18n'
 
@@ -773,6 +977,12 @@ const evidenceVisible = ref(false)
 const savingEvidence = ref(false)
 const draftVisible = ref(false)
 const generatingDraft = ref(false)
+const deliveryLoading = ref(false)
+const deliveryVisible = ref(false)
+const preparingDelivery = ref(false)
+const deliveries = ref<AgentDelivery[]>([])
+const mailboxAccounts = ref<MailboxAccount[]>([])
+const activeDeliveryDraft = ref<ResearchOutreachDraft | null>(null)
 const activeResearch = ref<AgentResearchJob | null>(null)
 const researchCreate = ref({ customer_id: undefined as number | undefined, objective: '' })
 const evidenceDraft = ref<ResearchEvidenceUpdate>({ profile_evidence: [], market_signals: [] })
@@ -780,6 +990,11 @@ const draftCreate = ref({
   channel: 'email' as 'email' | 'whatsapp',
   language: 'en',
   goal: '',
+  idempotency_key: '',
+})
+const deliveryCreate = ref({
+  account_id: undefined as number | undefined,
+  scheduled_at: '',
   idempotency_key: '',
 })
 
@@ -797,27 +1012,59 @@ const researchCounts = computed(() => ({
   drafts: researchJobs.value.reduce((count, item) => count + item.drafts.length, 0),
 }))
 const latestDraft = computed(() => activeResearch.value?.drafts[0] ?? null)
+const availableMailboxes = computed(() => mailboxAccounts.value.filter((account) => (
+  account.is_active
+  && account.is_verified
+  && ['gmail', 'outlook'].includes(account.account_type)
+  && account.today_sent < account.daily_limit
+)))
+const deliveryCounts = computed(() => ({
+  approval: deliveries.value.filter((item) => item.status === 'approval_pending').length,
+  scheduled: deliveries.value.filter((item) => ['scheduled', 'dispatching'].includes(item.status)).length,
+  sent: deliveries.value.filter((item) => item.status === 'sent').length,
+  attention: deliveries.value.filter((item) => ['awaiting_verification', 'blocked', 'rejected'].includes(item.status)).length,
+}))
 
 async function loadAgent() {
   loading.value = true
   researchLoading.value = true
   errorMessage.value = ''
   try {
-    const [overviewResult, runResult, researchResult, customerResult] = await Promise.all([
+    const [overviewResult, runResult, researchResult, customerResult, deliveryResult, mailboxResult] = await Promise.all([
       agentApi.overview(),
       agentApi.runs(),
       agentApi.researchJobs(),
       customerApi.list({ page: 1, page_size: 100 }),
+      agentApi.deliveries(),
+      agentApi.mailboxAccounts(),
     ])
     overview.value = overviewResult
     runs.value = runResult
     researchJobs.value = researchResult
     customers.value = customerResult.items as ResearchCustomerOption[]
+    deliveries.value = deliveryResult
+    mailboxAccounts.value = mailboxResult
   } catch {
     errorMessage.value = translate('Agent runtime could not be loaded.')
   } finally {
     loading.value = false
     researchLoading.value = false
+  }
+}
+
+async function loadDeliveryData() {
+  deliveryLoading.value = true
+  try {
+    const [deliveryResult, mailboxResult] = await Promise.all([
+      agentApi.deliveries(),
+      agentApi.mailboxAccounts(),
+    ])
+    deliveries.value = deliveryResult
+    mailboxAccounts.value = mailboxResult
+  } catch {
+    ElMessage.error(translate('Delivery data could not be loaded.'))
+  } finally {
+    deliveryLoading.value = false
   }
 }
 
@@ -985,6 +1232,57 @@ async function reviewDraft(decision: 'approve' | 'reject') {
   }
 }
 
+function openDelivery(draft: ResearchOutreachDraft) {
+  activeDeliveryDraft.value = draft
+  deliveryCreate.value = {
+    account_id: availableMailboxes.value[0]?.id,
+    scheduled_at: dayjs().add(30, 'minute').format('YYYY-MM-DDTHH:mm:ssZ'),
+    idempotency_key: `delivery-${draft.id}-${window.crypto.randomUUID()}`,
+  }
+  deliveryVisible.value = true
+}
+
+async function prepareDelivery() {
+  const draft = activeDeliveryDraft.value
+  const accountId = deliveryCreate.value.account_id
+  if (!draft || !accountId) return
+  preparingDelivery.value = true
+  try {
+    const delivery = await agentApi.createDelivery(draft.id, {
+      account_id: accountId,
+      scheduled_at: deliveryCreate.value.scheduled_at,
+      idempotency_key: deliveryCreate.value.idempotency_key,
+    })
+    deliveries.value = [delivery, ...deliveries.value.filter((item) => item.id !== delivery.id)]
+    deliveryVisible.value = false
+    draftVisible.value = false
+    ElMessage.success(translate('Delivery approval request created. Nothing has been sent.'))
+  } catch {
+    ElMessage.error(translate('Delivery could not be prepared. Recheck the draft, recipient and mailbox status.'))
+  } finally {
+    preparingDelivery.value = false
+  }
+}
+
+async function reviewDelivery(delivery: AgentDelivery, decision: 'approve' | 'reject') {
+  try {
+    const prompt = await ElMessageBox.prompt(
+      translate(decision === 'approve' ? 'Record why this exact sender, recipient and schedule are approved.' : 'Describe why this delivery is rejected.'),
+      translate(decision === 'approve' ? 'Approve and schedule' : 'Reject delivery'),
+      { inputValidator: (value: string) => value.trim().length >= 3 || translate('A review reason is required.') },
+    )
+    const reviewed = await agentApi.reviewDelivery(delivery.id, {
+      decision,
+      reason: (prompt as { value: string }).value.trim(),
+    })
+    deliveries.value = deliveries.value.map((item) => item.id === reviewed.id ? reviewed : item)
+    ElMessage.success(translate(decision === 'approve' ? 'Delivery approved and scheduled.' : 'Delivery rejected.'))
+  } catch (error) {
+    if (isDialogCancel(error)) return
+    ElMessage.error(translate('Delivery review could not be saved. The context may have changed.'))
+  }
+}
+
 function capabilityReady(name: string) {
   return overview.value?.capabilities.some((capability) => capability.name === name && capability.ready) ?? false
 }
@@ -999,6 +1297,18 @@ function researchStatusType(status: AgentResearchJob['status']) {
 
 function draftStatusType(status: ResearchOutreachDraft['status']) {
   return ({ draft: 'info', approved: 'success', rejected: 'danger' } as const)[status]
+}
+
+function deliveryStatusType(status: AgentDelivery['status']) {
+  return ({
+    approval_pending: 'warning',
+    scheduled: 'info',
+    dispatching: 'primary',
+    awaiting_verification: 'warning',
+    sent: 'success',
+    blocked: 'danger',
+    rejected: 'danger',
+  } as const)[status]
 }
 
 function formatMissingFields(values: string[]) {
@@ -1038,6 +1348,7 @@ onMounted(loadAgent)
 .research-heading { align-items: end; gap: 20px; }
 .research-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }.research-metrics > div { display: grid; gap: 7px; padding: 16px 18px; border: 1px solid var(--border-hairline); border-radius: 16px; background: var(--surface-elevated); box-shadow: var(--shadow-card); }.research-metrics span { color: var(--el-text-color-secondary); font-size: 12px; }.research-metrics strong { font-size: 24px; letter-spacing: -0.04em; }
 .research-card :deep(.el-card__body) { padding-top: 8px; }.research-company { display: grid; gap: 4px; }.research-company strong { font-size: 13px; }.research-company a { overflow: hidden; color: var(--apple-blue); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.research-company span, .delivery-proof { overflow: hidden; color: var(--el-text-color-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.delivery-heading { margin-top: 20px; }.delivery-card { border-color: color-mix(in srgb, var(--el-color-success) 18%, var(--border-hairline)); }.delivery-proof { display: block; max-width: 195px; }.delivery-dialog-body { display: grid; gap: 18px; }.delivery-dialog-body :deep(.el-select), .delivery-dialog-body :deep(.el-date-editor) { width: 100%; }.mailbox-option-meta { float: right; color: var(--el-text-color-secondary); font-size: 11px; }
 .evidence-workbench, .draft-workbench { display: grid; gap: 18px; }.dialog-context { display: grid; grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1.2fr) auto; align-items: center; gap: 16px; padding: 15px; border-radius: 14px; background: var(--el-fill-color-light); }.dialog-context > div { display: grid; gap: 4px; }.dialog-context span { color: var(--el-text-color-secondary); font-size: 11px; }.dialog-context strong { font-size: 13px; }
 .evidence-section { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border-hairline); border-radius: 16px; }.evidence-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.evidence-heading > div { display: grid; gap: 4px; }.evidence-heading span { color: var(--el-text-color-secondary); font-size: 12px; }.evidence-row { display: grid; grid-template-columns: 145px minmax(160px, 1fr) minmax(190px, 1.2fr) 150px 104px 34px; align-items: center; gap: 8px; }.evidence-row :deep(.el-input-number), .evidence-row :deep(.el-date-editor) { width: 100%; }
 .draft-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.draft-preview { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--border-hairline); border-radius: 16px; background: var(--el-fill-color-extra-light); }.draft-preview > div:not(.draft-meta) { display: grid; gap: 6px; }.draft-preview span { color: var(--el-text-color-secondary); font-size: 11px; }.draft-preview pre { margin: 0; font: inherit; line-height: 1.7; white-space: pre-wrap; }.draft-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.draft-evidence code { overflow: hidden; font-size: 10px; text-overflow: ellipsis; }

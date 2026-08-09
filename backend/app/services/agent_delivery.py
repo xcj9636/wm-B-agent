@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.models.database import (
     Account,
     AgentOutreachDelivery,
-    OutboxEvent,
     ResearchOutreachDraft,
 )
 from app.services.idempotency import canonical_hash
@@ -98,7 +97,19 @@ class AgentDeliveryService:
     ) -> Tuple[DeliveryResponse, bool]:
         draft = self._owned_draft(draft_id, user_id=user_id)
         account = self._owned_account(command.account_id, user_id=user_id)
-        self._validate_current_context(draft, account)
+        existing = (
+            self._db.query(AgentOutreachDelivery)
+            .filter(
+                AgentOutreachDelivery.user_id == user_id,
+                AgentOutreachDelivery.idempotency_key == command.idempotency_key,
+            )
+            .one_or_none()
+        )
+        self._validate_current_context(
+            draft,
+            account,
+            exclude_delivery_id=existing.id if existing is not None else None,
+        )
         customer = draft.research_job.customer
         snapshot = {
             "draft_id": str(draft.id),
@@ -113,14 +124,6 @@ class AgentDeliveryService:
             "scheduled_at": command.scheduled_at.isoformat(),
         }
         input_hash = canonical_hash(snapshot)
-        existing = (
-            self._db.query(AgentOutreachDelivery)
-            .filter(
-                AgentOutreachDelivery.user_id == user_id,
-                AgentOutreachDelivery.idempotency_key == command.idempotency_key,
-            )
-            .one_or_none()
-        )
         if existing is not None:
             if existing.input_hash != input_hash:
                 raise DeliveryConflict(
@@ -172,7 +175,11 @@ class AgentDeliveryService:
 
         draft = self._owned_draft(delivery.draft_id, user_id=user_id)
         account = self._owned_account(delivery.account_id, user_id=user_id)
-        self._validate_current_context(draft, account)
+        self._validate_current_context(
+            draft,
+            account,
+            exclude_delivery_id=delivery.id,
+        )
         self._validate_snapshot(delivery, draft, account)
         event, _ = self._outbox.enqueue(
             OutboxCommand(
@@ -203,6 +210,8 @@ class AgentDeliveryService:
         self,
         draft: ResearchOutreachDraft,
         account: Account,
+        *,
+        exclude_delivery_id: Optional[UUID] = None,
     ) -> None:
         job = draft.research_job
         customer = job.customer
@@ -230,16 +239,17 @@ class AgentDeliveryService:
             raise DeliveryConflict("Selected sender account has no email address")
         if not (account.credentials_json or {}).get("access_token"):
             raise DeliveryConflict("Selected sender account is not connected")
-        reserved = (
-            self._db.query(AgentOutreachDelivery)
-            .filter(
-                AgentOutreachDelivery.account_id == account.id,
-                AgentOutreachDelivery.status.in_(
-                    ["approval_pending", "scheduled", "dispatching"]
-                ),
-            )
-            .count()
+        reserved_query = self._db.query(AgentOutreachDelivery).filter(
+            AgentOutreachDelivery.account_id == account.id,
+            AgentOutreachDelivery.status.in_(
+                ["approval_pending", "scheduled", "dispatching"]
+            ),
         )
+        if exclude_delivery_id is not None:
+            reserved_query = reserved_query.filter(
+                AgentOutreachDelivery.id != exclude_delivery_id
+            )
+        reserved = reserved_query.count()
         if (account.today_sent or 0) + reserved >= (account.daily_limit or 0):
             raise DeliveryConflict("Selected sender account has no daily capacity")
 

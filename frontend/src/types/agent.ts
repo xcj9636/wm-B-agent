@@ -100,6 +100,44 @@ export interface ResearchOutreachDraft {
   updated_at: string
 }
 
+export interface AgentDelivery {
+  id: string
+  draft_id: string
+  customer_id: number
+  account_id: number
+  channel: 'email'
+  provider: 'gmail' | 'outlook'
+  account_name: string
+  sender: string
+  recipient: string
+  subject?: string
+  body: string
+  status: 'approval_pending' | 'scheduled' | 'dispatching' | 'awaiting_verification' | 'sent' | 'blocked' | 'rejected'
+  scheduled_at: string
+  outbox_event_id?: string
+  external_message_id?: string
+  error_code?: string
+  review_reason?: string
+  reviewed_at?: string
+  verified_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MailboxAccount {
+  id: number
+  account_type: 'gmail' | 'outlook' | 'whatsapp_business'
+  name: string
+  email?: string
+  phone_number?: string
+  is_active: boolean
+  is_verified: boolean
+  daily_limit: number
+  today_sent: number
+  created_at: string
+  updated_at: string
+}
+
 export interface AgentResearchJob {
   id: string
   customer_id: number

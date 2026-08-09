@@ -1,10 +1,12 @@
 import api from './index'
 import type {
+  AgentDelivery,
   AgentOverview,
   AgentResearchJob,
   AgentRun,
   ResearchEvidenceUpdate,
   ResearchOutreachDraft,
+  MailboxAccount,
 } from '@/types/agent'
 
 export const agentApi = {
@@ -76,6 +78,38 @@ export const agentApi = {
   ) {
     const response = await api.patch<ResearchOutreachDraft>(
       `/api/v1/agent/outreach-drafts/${draftId}/review`,
+      data,
+    )
+    return response.data
+  },
+
+  async deliveries() {
+    const response = await api.get<AgentDelivery[]>('/api/v1/agent/deliveries')
+    return response.data
+  },
+
+  async mailboxAccounts() {
+    const response = await api.get<MailboxAccount[]>('/api/v1/admin/accounts')
+    return response.data.filter((account) => ['gmail', 'outlook'].includes(account.account_type))
+  },
+
+  async createDelivery(
+    draftId: string,
+    data: { account_id: number; scheduled_at: string; idempotency_key: string },
+  ) {
+    const response = await api.post<AgentDelivery>(
+      `/api/v1/agent/outreach-drafts/${draftId}/deliveries`,
+      data,
+    )
+    return response.data
+  },
+
+  async reviewDelivery(
+    deliveryId: string,
+    data: { decision: 'approve' | 'reject'; reason: string },
+  ) {
+    const response = await api.patch<AgentDelivery>(
+      `/api/v1/agent/deliveries/${deliveryId}/review`,
       data,
     )
     return response.data

@@ -154,10 +154,15 @@ class OutboxDeliveryRouter:
         verify_sent = getattr(email_service, "verify_sent", None)
         if not message_id or verify_sent is None:
             return DeliveryResult.unknown_after_send("sent_copy_not_verified")
-        verified = await verify_sent(
-            message_id=message_id,
-            access_token=access_token,
-        )
+        try:
+            verified = await verify_sent(
+                message_id=message_id,
+                access_token=access_token,
+            )
+        except Exception:
+            return DeliveryResult.unknown_after_send(
+                "sent_copy_verification_failed"
+            )
         if not verified:
             return DeliveryResult.unknown_after_send("sent_copy_not_verified")
         return DeliveryResult.sent(external_message_id=message_id)
