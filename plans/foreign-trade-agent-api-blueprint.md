@@ -1,7 +1,7 @@
 # B-agent 外贸业务链路与 API 实施蓝图
 
 > 日期：2026-08-09  
-> 状态：Phase 1 AI control plane、Sprint B1 Hunter connector 与 B2 交互式获客链路已实现
+> 状态：Phase 1 AI control plane、Sprint B1/B2 Hunter 获客链路与 B3 可恢复批量补全已实现
 > 范围：单组织部署。浏览器只调用 B-agent API，所有第三方凭据、OAuth token、Webhook secret 和 OmniRoute key 都由后端保管。
 
 ## 1. 产品目标
@@ -290,8 +290,15 @@ AI 只负责理解、生成和辅助决策。抓取、发送、报价、承诺�
 | GET | `/api/v1/prospecting/searches` | 按当前用户列出最近搜索 |
 | GET | `/api/v1/prospecting/searches/{id}` | 按所有者读取搜索和联系人，跨账号访问返回 404 |
 | POST | `/api/v1/prospecting/contacts/import` | 批量导入所选联系人，按标准化邮箱去重并写入来源证据和触达抑制状态 |
+| POST | `/api/v1/prospecting/jobs` | 创建多域名批量任务，冻结 connector version、分页上限和请求预算 |
+| GET | `/api/v1/prospecting/jobs` | 按当前用户列出任务、进度、额度快照和域名级状态 |
+| GET | `/api/v1/prospecting/jobs/{id}` | 获取任务、分页游标和关联搜索结果 |
+| POST | `/api/v1/prospecting/jobs/{id}/pause` | 停止后续任务切片，不丢弃已提交页面 |
+| POST | `/api/v1/prospecting/jobs/{id}/resume` | 继续暂停/重试/额度阻断任务，可显式追加请求预算 |
 
 Email Finder 的人名只用于本次供应商请求，不写入搜索查询记录；Hunter 451 响应只保留错误码，不持久化候选联系人。浏览器不提供 LinkedIn identifier 输入。`accept_all`、`unknown`、`invalid` 等非 `valid` 结果即使人工导入，也会写入 `contact_suppressed=true`，不能绕过外发门禁。
+
+批量任务只接受公司域名，不持久化人名。B-agent 按 Hunter Domain Search 的 `limit/offset` 分页，每页成功后才提交下一 offset；任务切片调用免费的 Usage 接口做额度预检，并同时执行本地请求预算。Usage 值作为供应商快照展示，不用本地请求数伪造扣减；真实额度阻断以预检和供应商 429 为准。读取任务的过期 lease 可以恢复，但每次 claim 都递增 fencing version，迟到 Worker 不能覆盖新 Worker 的游标；周期性扫描会重新入队 `queued`、到期重试和过期租约，覆盖 Broker 短暂故障与 Worker 崩溃。Worker 仅使用创建任务时冻结的 connector version；如果运行前配置已轮换，任务 fail-closed 并显示 `connector_version_changed`，不会静默切换密钥。429、451、可重试错误和永久错误分别进入额度阻断、法律限制、指数退避和失败状态。
 
 ## 5. 交付顺序
 
@@ -306,7 +313,7 @@ Email Finder 的人名只用于本次供应商请求，不写入搜索查询记�
 
 - Hunter connector 控制面、邮箱核验、451 法务抑制和外发阻断，已完成 B1。
 - Hunter Domain Search / Email Finder、证据持久化、选择性导入、邮箱去重和用户级访问隔离，已完成 B2 核心链路。
-- 大批量异步 enrichment job、配额预算和断点续跑，待 B3。
+- 大批量异步 enrichment job、Usage 配额门禁、请求预算、分页断点续跑和 lease fencing，已完成 B3。
 - Gmail + Microsoft 发送/回复 Webhook。
 - 外发审批、outbox、退订和邮箱核验。
 - 客户时间线、回复意图、AI 草稿。

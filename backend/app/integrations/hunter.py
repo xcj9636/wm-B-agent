@@ -20,6 +20,20 @@ class EmailVerificationResult(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict)
 
 
+class HunterDomainSearchPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: Dict[str, Any]
+    total_results: int = Field(ge=0)
+
+
+class HunterUsage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    remaining: float = Field(ge=0)
+    unit: str
+
+
 class HunterConnectorError(RuntimeError):
     """Normalized failure without provider body or credential material."""
 
@@ -88,9 +102,35 @@ class HunterClient:
         decision_maker: Optional[bool] = None,
         verification_statuses: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        page = await self.domain_search_page(
+            domain=domain,
+            company=company,
+            limit=limit,
+            offset=offset,
+            contact_type=contact_type,
+            seniorities=seniorities,
+            departments=departments,
+            decision_maker=decision_maker,
+            verification_statuses=verification_statuses,
+        )
+        return page.data
+
+    async def domain_search_page(
+        self,
+        *,
+        domain: Optional[str] = None,
+        company: Optional[str] = None,
+        limit: int = 10,
+        offset: int = 0,
+        contact_type: Optional[str] = None,
+        seniorities: Optional[List[str]] = None,
+        departments: Optional[List[str]] = None,
+        decision_maker: Optional[bool] = None,
+        verification_statuses: Optional[List[str]] = None,
+    ) -> HunterDomainSearchPage:
         if not domain and not company:
             raise ValueError("domain or company is required")
-        return await self._get_data(
+        payload = await self._get_payload(
             "/domain-search",
             params={
                 "domain": domain,
@@ -107,6 +147,50 @@ class HunterClient:
                 ),
                 "verification_status": ",".join(verification_statuses or []) or None,
             },
+        )
+        meta = payload.get("meta") or {}
+        raw_total = meta.get("results", len(payload["data"].get("emails") or []))
+        try:
+            total_results = max(int(raw_total), 0)
+        except (TypeError, ValueError):
+            total_results = len(payload["data"].get("emails") or [])
+        return HunterDomainSearchPage(
+            data=payload["data"],
+            total_results=total_results,
+        )
+
+    async def usage(self) -> HunterUsage:
+        data = await self._get_data("/usage")
+        requests = data.get("requests")
+        if not isinstance(requests, dict):
+            raise HunterConnectorError(
+                error_code="invalid_provider_response",
+                retryable=False,
+            )
+        for unit in ("credits", "searches"):
+            bucket = requests.get(unit)
+            if not isinstance(bucket, dict):
+                continue
+            raw_remaining = bucket.get("remaining")
+            if raw_remaining is None:
+                try:
+                    raw_remaining = float(bucket["available"]) - float(bucket["used"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise HunterConnectorError(
+                        error_code="invalid_provider_response",
+                        retryable=False,
+                    ) from exc
+            try:
+                remaining = max(float(raw_remaining), 0)
+            except (TypeError, ValueError) as exc:
+                raise HunterConnectorError(
+                    error_code="invalid_provider_response",
+                    retryable=False,
+                ) from exc
+            return HunterUsage(remaining=remaining, unit=unit)
+        raise HunterConnectorError(
+            error_code="invalid_provider_response",
+            retryable=False,
         )
 
     async def email_finder(
@@ -168,6 +252,14 @@ class HunterClient:
         *,
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        return (await self._get_payload(path, params=params))["data"]
+
+    async def _get_payload(
+        self,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         response = await self._request(path, params=params)
         if response.status_code not in {200, 201}:
             self._raise_for_status(response.status_code)
@@ -178,13 +270,18 @@ class HunterClient:
                 error_code="invalid_provider_response",
                 retryable=False,
             ) from exc
+        if not isinstance(payload, dict):
+            raise HunterConnectorError(
+                error_code="invalid_provider_response",
+                retryable=False,
+            )
         data = payload.get("data")
         if not isinstance(data, dict):
             raise HunterConnectorError(
                 error_code="invalid_provider_response",
                 retryable=False,
             )
-        return data
+        return payload
 
     async def _request(
         self,
@@ -240,8 +337,12 @@ class HunterClient:
         )
 
 
-def get_hunter_client(db: Session = Depends(get_db)) -> HunterClient:
-    """Resolve the currently enabled Hunter configuration per request."""
+def build_hunter_client(
+    db: Session,
+    *,
+    expected_version: Optional[int] = None,
+) -> HunterClient:
+    """Resolve the enabled Hunter configuration for API or worker use."""
     connector = (
         db.query(ConnectorConfiguration)
         .filter(
@@ -253,6 +354,11 @@ def get_hunter_client(db: Session = Depends(get_db)) -> HunterClient:
     )
     if connector is None:
         raise HTTPException(status_code=503, detail="Hunter connector is not enabled")
+    if expected_version is not None and connector.version != expected_version:
+        raise HunterConnectorError(
+            error_code="connector_version_changed",
+            retryable=False,
+        )
     secret_path = Path(connector.secret_ref)
     if not secret_path.is_file():
         raise HTTPException(status_code=503, detail="Hunter connector secret is unavailable")
@@ -261,3 +367,8 @@ def get_hunter_client(db: Session = Depends(get_db)) -> HunterClient:
         raise HTTPException(status_code=503, detail="Hunter connector secret is unavailable")
     timeout = float((connector.config_json or {}).get("timeout_seconds", 15))
     return HunterClient(api_key, timeout_seconds=timeout)
+
+
+def get_hunter_client(db: Session = Depends(get_db)) -> HunterClient:
+    """FastAPI dependency for the currently enabled Hunter configuration."""
+    return build_hunter_client(db)

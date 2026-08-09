@@ -31,6 +31,10 @@ celery.conf.update(
             "task": "app.tasks.task_functions.dispatch_outbox_task",
             "schedule": 10.0,
         },
+        "recover-prospecting-jobs": {
+            "task": "app.tasks.task_functions.sweep_prospecting_jobs_task",
+            "schedule": 15.0,
+        },
     },
 )
 

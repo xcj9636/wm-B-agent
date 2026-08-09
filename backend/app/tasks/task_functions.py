@@ -7,6 +7,8 @@ from typing import List, Dict, Any
 import logging
 import uuid
 
+from fastapi import HTTPException
+
 from app.tasks.celery_worker import celery
 from app.config import settings
 from app.db import SessionLocal
@@ -17,6 +19,7 @@ from app.models.database import (
     OutreachLog,
     OutreachStatus,
     OutboxStatus,
+    ProspectingJob,
 )
 from app.core.agent import get_agent
 from app.services.outbox import OutboxService
@@ -30,8 +33,98 @@ from app.services.outreach_queue import (
     QueueOutreachCommand,
     delivery_spacing_seconds,
 )
+from app.integrations.hunter import HunterConnectorError, build_hunter_client
+from app.services.prospecting_jobs import (
+    ProspectingJobRunner,
+    ProspectingJobService,
+    ProspectingJobStatus,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def enqueue_prospecting_job(job_id: str, *, countdown: int = 0) -> None:
+    """Queue one bounded job slice; the slice schedules its successor."""
+    run_prospecting_job_task.apply_async(
+        args=[str(job_id)],
+        countdown=max(countdown, 0),
+    )
+
+
+@celery.task(
+    name="app.tasks.task_functions.sweep_prospecting_jobs_task",
+    acks_late=True,
+)
+def sweep_prospecting_jobs_task(limit: int = 100):
+    """Recover durable jobs after broker, worker, or successor enqueue failure."""
+    db = SessionLocal()
+    try:
+        job_ids = ProspectingJobService(db).list_due_job_ids(limit=limit)
+        for due_job_id in job_ids:
+            enqueue_prospecting_job(str(due_job_id))
+        return {"enqueued": len(job_ids)}
+    finally:
+        db.close()
+
+
+@celery.task(
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+    soft_time_limit=110,
+    time_limit=120,
+)
+def run_prospecting_job_task(self, job_id: str):
+    """Execute a small, committed slice of a resumable read-only search job."""
+    db = SessionLocal()
+    try:
+        parsed_job_id = uuid.UUID(job_id)
+        job = db.get(ProspectingJob, parsed_job_id)
+        expected_version = job.connector_version if job is not None else None
+        try:
+            hunter = build_hunter_client(
+                db,
+                expected_version=expected_version,
+            )
+        except HunterConnectorError as exc:
+            result = ProspectingJobService(db).record_dispatch_failure(
+                parsed_job_id,
+                exc,
+            )
+            return result.model_dump(mode="json")
+        except HTTPException:
+            result = ProspectingJobService(db).record_dispatch_failure(
+                parsed_job_id,
+                HunterConnectorError(
+                    error_code="connector_unavailable",
+                    retryable=False,
+                ),
+            )
+            return result.model_dump(mode="json")
+        result = asyncio.run(
+            ProspectingJobRunner(db).run_slice(
+                parsed_job_id,
+                hunter=hunter,
+                worker_id=getattr(self.request, "hostname", "prospecting-worker"),
+                max_requests=5,
+            )
+        )
+        if result.status == ProspectingJobStatus.QUEUED:
+            enqueue_prospecting_job(job_id, countdown=1)
+        elif result.status == ProspectingJobStatus.RETRY_WAIT:
+            delay = 30
+            if result.next_attempt_at is not None:
+                delay = max(
+                    int((result.next_attempt_at - datetime.utcnow()).total_seconds()),
+                    1,
+                )
+            enqueue_prospecting_job(job_id, countdown=delay)
+        return result.model_dump(mode="json")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @celery.task(

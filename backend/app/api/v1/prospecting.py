@@ -18,9 +18,107 @@ from app.services.prospecting import (
     ProspectingSearchResponse,
     ProspectingService,
 )
+from app.services.prospecting_jobs import (
+    ProspectingConnectorUnavailable,
+    ProspectingJobConflict,
+    ProspectingJobCreate,
+    ProspectingJobNotFound,
+    ProspectingJobResponse,
+    ProspectingJobResume,
+    ProspectingJobService,
+)
+from app.tasks.task_functions import enqueue_prospecting_job
 
 
 router = APIRouter()
+
+
+@router.post(
+    "/jobs",
+    response_model=ProspectingJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_job(
+    command: ProspectingJobCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = ProspectingJobService(db).create_job(
+            command,
+            user_id=current_user.id,
+        )
+    except ProspectingConnectorUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    enqueue_prospecting_job(str(result.id))
+    return result
+
+
+@router.get("/jobs", response_model=List[ProspectingJobResponse])
+async def list_jobs(
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return ProspectingJobService(db).list_jobs(
+        user_id=current_user.id,
+        limit=limit,
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=ProspectingJobResponse)
+async def get_job(
+    job_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ProspectingJobService(db).get_job(
+            job_id,
+            user_id=current_user.id,
+        )
+    except ProspectingJobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/pause", response_model=ProspectingJobResponse)
+async def pause_job(
+    job_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return ProspectingJobService(db).pause_job(
+            job_id,
+            user_id=current_user.id,
+        )
+    except ProspectingJobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProspectingJobConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/resume", response_model=ProspectingJobResponse)
+async def resume_job(
+    job_id: UUID,
+    command: ProspectingJobResume,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = ProspectingJobService(db).resume_job(
+            job_id,
+            user_id=current_user.id,
+            additional_requests=command.additional_requests,
+        )
+    except ProspectingJobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProspectingJobConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    enqueue_prospecting_job(str(result.id))
+    return result
 
 
 @router.post(

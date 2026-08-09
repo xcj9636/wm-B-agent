@@ -330,7 +330,14 @@ class ProspectingService:
         *,
         defaults: Dict[str, Any],
     ) -> None:
-        seen = set()
+        seen = {
+            email
+            for (email,) in (
+                self._db.query(ProspectingContact.email)
+                .filter(ProspectingContact.search_id == search.id)
+                .all()
+            )
+        }
         for candidate in candidates:
             raw_email = candidate.get("email") or candidate.get("value")
             email = self._normalize_email(raw_email)

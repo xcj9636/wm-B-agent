@@ -369,6 +369,103 @@ class ProspectingContact(Base):
     )
 
 
+class ProspectingJob(Base):
+    """Durable, leased orchestration state for a multi-domain search."""
+
+    __tablename__ = "prospecting_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    provider = Column(String(50), nullable=False, default="hunter")
+    status = Column(String(30), nullable=False, default="queued")
+    config_json = Column(JSON, nullable=False, default=dict)
+    connector_version = Column(Integer, nullable=False)
+    page_size = Column(Integer, nullable=False)
+    max_pages_per_domain = Column(Integer, nullable=False)
+    request_budget = Column(Integer, nullable=False)
+    requests_used = Column(Integer, nullable=False, default=0)
+    provider_remaining = Column(Float)
+    provider_usage_unit = Column(String(30))
+    error_code = Column(String(100))
+    next_attempt_at = Column(DateTime)
+    leased_by = Column(String(100))
+    lease_until = Column(DateTime)
+    lease_version = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    items = relationship(
+        "ProspectingJobItem",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="ProspectingJobItem.created_at",
+    )
+
+    __table_args__ = (
+        Index("idx_prospecting_job_user_created", "user_id", "created_at"),
+        Index("idx_prospecting_job_status_due", "status", "next_attempt_at"),
+        Index("idx_prospecting_job_lease", "status", "lease_until"),
+    )
+
+
+class ProspectingJobItem(Base):
+    """One resumable domain and its committed pagination cursor."""
+
+    __tablename__ = "prospecting_job_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prospecting_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    search_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("prospecting_searches.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    domain = Column(String(255), nullable=False)
+    status = Column(String(30), nullable=False, default="pending")
+    next_offset = Column(Integer, nullable=False, default=0)
+    pages_completed = Column(Integer, nullable=False, default=0)
+    requests_used = Column(Integer, nullable=False, default=0)
+    contacts_found = Column(Integer, nullable=False, default=0)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    truncated = Column(Boolean, nullable=False, default=False)
+    error_code = Column(String(100))
+    next_attempt_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    job = relationship("ProspectingJob", back_populates="items")
+    search = relationship("ProspectingSearch")
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "domain", name="uq_prospecting_job_domain"),
+        Index(
+            "idx_prospecting_job_item_status_due",
+            "job_id",
+            "status",
+            "next_attempt_at",
+        ),
+    )
+
+
 class Conversation(Base):
     """Conversation model"""
     __tablename__ = "conversations"

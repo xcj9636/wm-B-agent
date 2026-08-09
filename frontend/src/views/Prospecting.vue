@@ -23,7 +23,7 @@
           <div class="panel-heading">
             <div>
               <span class="eyebrow">{{ $t('Search mode') }}</span>
-              <strong>{{ $t(form.mode === 'domain_search' ? 'Domain search' : 'Named person') }}</strong>
+              <strong>{{ $t(modeLabel) }}</strong>
             </div>
             <el-segmented
               v-model="form.mode"
@@ -36,7 +36,10 @@
           label-position="top"
           @submit.prevent="runSearch"
         >
-          <div class="form-grid">
+          <div
+            v-if="form.mode !== 'batch_domain_search'"
+            class="form-grid"
+          >
             <el-form-item :label="$t('Company domain')">
               <el-input
                 v-model="form.domain"
@@ -52,6 +55,43 @@
               />
             </el-form-item>
           </div>
+
+          <template v-if="form.mode === 'batch_domain_search'">
+            <el-form-item :label="$t('Company domains')">
+              <el-input
+                v-model="form.batch_domains"
+                type="textarea"
+                :rows="5"
+                :placeholder="$t('One domain per line')"
+              />
+              <p class="field-hint">
+                {{ $t('Duplicate domains are normalized before the job is queued.') }}
+              </p>
+            </el-form-item>
+            <div class="form-grid batch-settings">
+              <el-form-item :label="$t('Page size')">
+                <el-input-number
+                  v-model="form.page_size"
+                  :min="1"
+                  :max="100"
+                />
+              </el-form-item>
+              <el-form-item :label="$t('Maximum pages per domain')">
+                <el-input-number
+                  v-model="form.max_pages_per_domain"
+                  :min="1"
+                  :max="10"
+                />
+              </el-form-item>
+              <el-form-item :label="$t('Request budget')">
+                <el-input-number
+                  v-model="form.request_budget"
+                  :min="1"
+                  :max="500"
+                />
+              </el-form-item>
+            </div>
+          </template>
 
           <template v-if="form.mode === 'email_finder'">
             <div class="form-grid named-grid">
@@ -105,7 +145,10 @@
                   />
                 </el-select>
               </el-form-item>
-              <el-form-item :label="$t('Result limit')">
+              <el-form-item
+                v-if="form.mode === 'domain_search'"
+                :label="$t('Result limit')"
+              >
                 <el-input-number
                   v-model="form.limit"
                   :min="1"
@@ -174,7 +217,9 @@
             :loading="searching"
           >
             <el-icon><Search /></el-icon>
-            {{ searching ? $t('Searching Hunter through the secure backend') : $t('Search prospects') }}
+            {{ searching
+              ? $t('Searching Hunter through the secure backend')
+              : $t(form.mode === 'batch_domain_search' ? 'Start batch job' : 'Search prospects') }}
           </el-button>
         </el-form>
       </el-card>
@@ -232,6 +277,112 @@
         />
       </el-card>
     </section>
+
+    <el-card
+      v-if="jobs.length || jobsLoading"
+      class="jobs-panel"
+      shadow="never"
+    >
+      <template #header>
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">{{ $t('Durable execution') }}</span>
+            <strong>{{ $t('Batch enrichment jobs') }}</strong>
+          </div>
+          <el-button
+            circle
+            text
+            :aria-label="$t('Refresh')"
+            :loading="jobsLoading"
+            @click="loadJobs()"
+          >
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+        </div>
+      </template>
+
+      <div class="job-list">
+        <article
+          v-for="job in jobs"
+          :key="job.id"
+          class="job-card"
+        >
+          <div class="job-summary">
+            <span class="history-icon"><el-icon><Files /></el-icon></span>
+            <div class="job-title">
+              <strong>{{ $t('Batch enrichment') }} · {{ job.total_items }} {{ $t('Domains') }}</strong>
+              <span>{{ formatDate(job.created_at) }} · v{{ job.connector_version }}</span>
+            </div>
+            <el-tag :type="statusType(job.status)">
+              {{ $t(job.status) }}
+            </el-tag>
+          </div>
+
+          <el-progress
+            :percentage="jobProgress(job)"
+            :status="job.status === 'completed' ? 'success' : undefined"
+          />
+
+          <dl class="job-metrics">
+            <div><dt>{{ $t('Domains completed') }}</dt><dd>{{ job.completed_items + job.failed_items }}/{{ job.total_items }}</dd></div>
+            <div><dt>{{ $t('Contacts found') }}</dt><dd>{{ job.contacts_found }}</dd></div>
+            <div><dt>{{ $t('Request budget') }}</dt><dd>{{ job.requests_used }}/{{ job.request_budget }}</dd></div>
+            <div><dt>{{ $t('Provider quota snapshot') }}</dt><dd>{{ job.provider_remaining ?? '—' }} {{ job.provider_usage_unit || '' }}</dd></div>
+          </dl>
+
+          <p
+            v-if="job.error_code"
+            class="job-error"
+          >
+            {{ $t('Action required') }}: {{ $t(job.error_code) }}
+          </p>
+
+          <div class="job-items">
+            <button
+              v-for="item in job.items"
+              :key="item.id"
+              type="button"
+              class="job-item"
+              @click="openSearch(item.search_id)"
+            >
+              <span><strong>{{ item.domain }}</strong><small>{{ item.contacts_found }} {{ $t('Contacts') }} · {{ item.pages_completed }}/{{ job.max_pages_per_domain }} {{ $t('Pages') }}</small></span>
+              <el-tag
+                size="small"
+                :type="statusType(item.status)"
+              >
+                {{ $t(item.status) }}
+              </el-tag>
+            </button>
+          </div>
+
+          <div class="job-actions">
+            <el-button
+              v-if="canPauseJob(job.status)"
+              size="small"
+              @click="pauseJob(job.id)"
+            >
+              {{ $t('Pause job') }}
+            </el-button>
+            <template v-if="canResumeJob(job.status)">
+              <el-input-number
+                v-model="resumeBudgets[job.id]"
+                size="small"
+                :min="0"
+                :max="500"
+                :aria-label="$t('Additional requests')"
+              />
+              <el-button
+                size="small"
+                type="primary"
+                @click="resumeJob(job.id)"
+              >
+                {{ $t('Resume job') }}
+              </el-button>
+            </template>
+          </div>
+        </article>
+      </div>
+    </el-card>
 
     <el-card
       class="results-panel"
@@ -369,12 +520,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { translate } from '@/i18n'
 import {
   prospectingApi,
   type ProspectingContact,
+  type ProspectingJob,
+  type ProspectingJobCreate,
   type ProspectingMode,
   type ProspectingSearch,
   type ProspectingSearchCreate,
@@ -383,7 +536,13 @@ import {
 const modeOptions = computed(() => [
   { label: translate('Domain search'), value: 'domain_search' },
   { label: translate('Named person'), value: 'email_finder' },
+  { label: translate('Batch enrichment'), value: 'batch_domain_search' },
 ])
+const modeLabel = computed(() => ({
+  domain_search: 'Domain search',
+  email_finder: 'Named person',
+  batch_domain_search: 'Batch enrichment',
+}[form.mode]))
 const departments = ['executive', 'sales', 'marketing', 'management', 'operations', 'finance', 'it']
 const departmentLabel: Record<string, string> = {
   executive: 'Executive', sales: 'Sales', marketing: 'Marketing', management: 'Management',
@@ -406,14 +565,22 @@ const form = reactive({
   decision_maker: false,
   verification_statuses: ['valid'] as string[],
   max_duration: 10,
+  batch_domains: '',
+  page_size: 10,
+  max_pages_per_domain: 2,
+  request_budget: 20,
 })
 const searches = ref<ProspectingSearch[]>([])
+const jobs = ref<ProspectingJob[]>([])
 const activeSearch = ref<ProspectingSearch | null>(null)
+const resumeBudgets = reactive<Record<string, number>>({})
 const selectedIds = ref<string[]>([])
 const searching = ref(false)
 const importing = ref(false)
 const historyLoading = ref(false)
 const resultLoading = ref(false)
+const jobsLoading = ref(false)
+let jobsTimer: number | undefined
 
 function compact(value: string) {
   const result = value.trim()
@@ -421,6 +588,7 @@ function compact(value: string) {
 }
 
 function searchPayload(): ProspectingSearchCreate | null {
+  if (form.mode === 'batch_domain_search') return null
   if (!compact(form.domain) && !compact(form.company)) {
     ElMessage.warning(translate('At least one company domain or company name is required.'))
     return null
@@ -451,6 +619,10 @@ function searchPayload(): ProspectingSearchCreate | null {
 }
 
 async function runSearch() {
+  if (form.mode === 'batch_domain_search') {
+    await startBatchJob()
+    return
+  }
   const payload = searchPayload()
   if (!payload) return
   searching.value = true
@@ -468,6 +640,44 @@ async function runSearch() {
   }
 }
 
+function batchPayload(): ProspectingJobCreate | null {
+  const domains = form.batch_domains
+    .split(/[\n,;]/)
+    .map((domain) => domain.trim())
+    .filter(Boolean)
+  if (!domains.length) {
+    ElMessage.warning(translate('Enter at least one company domain.'))
+    return null
+  }
+  return {
+    domains,
+    page_size: form.page_size,
+    max_pages_per_domain: form.max_pages_per_domain,
+    request_budget: form.request_budget,
+    contact_type: form.contact_type || undefined,
+    seniorities: form.seniorities,
+    departments: form.departments,
+    decision_maker: form.decision_maker || undefined,
+    verification_statuses: form.verification_statuses,
+  }
+}
+
+async function startBatchJob() {
+  const payload = batchPayload()
+  if (!payload) return
+  searching.value = true
+  try {
+    const job = await prospectingApi.createJob(payload)
+    jobs.value = [job, ...jobs.value.filter((item) => item.id !== job.id)]
+    resumeBudgets[job.id] = 0
+    ElMessage.success(translate('Batch enrichment job queued.'))
+  } catch {
+    ElMessage.error(translate('Batch enrichment job could not be queued.'))
+  } finally {
+    searching.value = false
+  }
+}
+
 async function loadSearches() {
   historyLoading.value = true
   try {
@@ -477,6 +687,58 @@ async function loadSearches() {
   } finally {
     historyLoading.value = false
   }
+}
+
+async function loadJobs(silent = false) {
+  if (!silent) jobsLoading.value = true
+  try {
+    jobs.value = await prospectingApi.listJobs()
+    jobs.value.forEach((job) => {
+      if (resumeBudgets[job.id] == null) resumeBudgets[job.id] = 0
+    })
+  } catch {
+    if (!silent) ElMessage.error(translate('Batch jobs could not be loaded.'))
+  } finally {
+    jobsLoading.value = false
+  }
+}
+
+function canPauseJob(status: string) {
+  return ['queued', 'running', 'retry_wait'].includes(status)
+}
+
+function canResumeJob(status: string) {
+  return ['paused', 'retry_wait', 'quota_blocked', 'budget_exhausted'].includes(status)
+}
+
+async function pauseJob(id: string) {
+  try {
+    const updated = await prospectingApi.pauseJob(id)
+    replaceJob(updated)
+    ElMessage.success(translate('Batch job paused.'))
+  } catch {
+    ElMessage.error(translate('Batch job could not be paused.'))
+  }
+}
+
+async function resumeJob(id: string) {
+  try {
+    const updated = await prospectingApi.resumeJob(id, resumeBudgets[id] || 0)
+    replaceJob(updated)
+    resumeBudgets[id] = 0
+    ElMessage.success(translate('Batch job resumed.'))
+  } catch {
+    ElMessage.error(translate('Batch job could not be resumed.'))
+  }
+}
+
+function replaceJob(updated: ProspectingJob) {
+  jobs.value = jobs.value.map((job) => job.id === updated.id ? updated : job)
+}
+
+function jobProgress(job: ProspectingJob) {
+  if (!job.total_items) return 0
+  return Math.round(((job.completed_items + job.failed_items) / job.total_items) * 100)
 }
 
 async function openSearch(id: string) {
@@ -532,14 +794,28 @@ function formatDate(value: string) {
 }
 
 function statusType(status: string) {
-  return status === 'completed' ? 'success' : status === 'failed' ? 'danger' : 'warning'
+  if (status === 'completed') return 'success'
+  if (['failed', 'legal_restricted', 'completed_with_errors'].includes(status)) return 'danger'
+  if (['queued', 'running'].includes(status)) return 'primary'
+  return 'warning'
 }
 
 function verificationType(status: string) {
   return status === 'valid' ? 'success' : status === 'invalid' || status === 'disposable' ? 'danger' : 'warning'
 }
 
-onMounted(loadSearches)
+onMounted(() => {
+  void Promise.all([loadSearches(), loadJobs()])
+  jobsTimer = window.setInterval(() => {
+    if (jobs.value.some((job) => ['queued', 'running', 'retry_wait'].includes(job.status))) {
+      void loadJobs(true)
+    }
+  }, 5000)
+})
+
+onUnmounted(() => {
+  if (jobsTimer != null) window.clearInterval(jobsTimer)
+})
 </script>
 
 <style scoped>
@@ -548,14 +824,16 @@ onMounted(loadSearches)
 .safety-note { display: flex; align-items: flex-start; gap: 10px; width: min(440px, 100%); padding: 13px 15px; border: 1px solid var(--border-hairline); border-radius: 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .safety-note .el-icon { flex: 0 0 auto; margin-top: 2px; color: var(--el-color-success); }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 18px; }
-.search-panel, .history-panel, .results-panel { border-radius: 20px; }
+.search-panel, .history-panel, .jobs-panel, .results-panel { border-radius: 20px; }
 .panel-heading, .results-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .panel-heading > div:first-child, .results-heading > div:first-child { display: grid; gap: 4px; }
 .panel-heading strong, .results-heading strong { font-size: 17px; }
 .eyebrow { color: var(--text-secondary); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .named-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.batch-settings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .compact-grid { align-items: end; }
+.field-hint { margin: 7px 0 0; color: var(--text-secondary); font-size: 12px; }
 .switch-field :deep(.el-form-item__content) { min-height: 32px; }
 .search-panel :deep(.el-select), .search-panel :deep(.el-input-number) { width: 100%; }
 .slider-row { display: flex; align-items: center; gap: 18px; width: 100%; }
@@ -570,6 +848,26 @@ onMounted(loadSearches)
 .history-copy strong, .history-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-copy strong { font-size: 13px; }
 .history-copy small { color: var(--text-secondary); font-size: 11px; }
+.job-list { display: grid; gap: 14px; }
+.job-card { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--border-hairline); border-radius: 16px; background: var(--surface-sunken); }
+.job-summary { display: flex; align-items: center; gap: 11px; }
+.job-title { display: grid; flex: 1; gap: 3px; }
+.job-title strong { font-size: 14px; }
+.job-title span { color: var(--text-secondary); font-size: 11px; }
+.job-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.job-metrics > div { display: grid; gap: 4px; padding: 10px; border-radius: 12px; background: var(--surface-elevated); }
+.job-metrics dt { color: var(--text-secondary); font-size: 11px; }
+.job-metrics dd { margin: 0; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.job-error { margin: 0; padding: 10px 12px; border-radius: 11px; background: var(--el-color-danger-light-9); color: var(--el-color-danger); font-size: 12px; }
+.job-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 7px; }
+.job-item { appearance: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 1px solid var(--border-hairline); border-radius: 11px; color: inherit; background: var(--surface-elevated); text-align: left; cursor: pointer; }
+.job-item:hover { border-color: color-mix(in srgb, var(--apple-blue) 45%, var(--border-hairline)); }
+.job-item > span { display: grid; min-width: 0; gap: 3px; }
+.job-item strong, .job-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-item strong { font-size: 12px; }
+.job-item small { color: var(--text-secondary); font-size: 10px; }
+.job-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.job-actions :deep(.el-input-number) { width: 118px; }
 .results-panel { min-height: 330px; }
 .result-actions { display: flex; align-items: center; gap: 12px; }
 .selection-count { color: var(--text-secondary); font-size: 13px; }
@@ -584,13 +882,17 @@ onMounted(loadSearches)
 @media (max-width: 1050px) {
   .workspace-grid { grid-template-columns: 1fr; }
   .history-list { max-height: 270px; }
+  .job-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .page-heading { display: grid; }
-  .form-grid, .named-grid { grid-template-columns: 1fr; gap: 0; }
+  .form-grid, .named-grid, .batch-settings { grid-template-columns: 1fr; gap: 0; }
   .panel-heading, .results-heading { align-items: stretch; flex-direction: column; }
   .panel-heading :deep(.el-segmented) { width: 100%; }
   .search-button { width: 100%; }
   .result-actions { justify-content: space-between; }
+  .job-metrics { grid-template-columns: 1fr 1fr; }
+  .job-actions { align-items: stretch; flex-direction: column; }
+  .job-actions :deep(.el-input-number), .job-actions .el-button { width: 100%; }
 }
 </style>
