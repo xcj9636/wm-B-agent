@@ -6,7 +6,7 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.models.database import OutreachLog, OutreachStatus
+from app.models.database import Account, OutreachLog, OutreachStatus
 from app.services.outbox import OutboxCommand, OutboxService
 
 
@@ -28,6 +28,15 @@ class QueueOutreachCommand(BaseModel):
         if self.channel == "email" and not self.subject:
             raise ValueError("email outreach requires a subject")
         return self
+
+
+class OutreachQuotaExceeded(RuntimeError):
+    """The selected account has no unreserved daily capacity."""
+
+    error_code = "account_daily_limit_reached"
+
+    def __init__(self) -> None:
+        super().__init__(self.error_code)
 
 
 class OutreachQueueService:
@@ -64,6 +73,30 @@ class OutreachQueueService:
                 raise RuntimeError("Outbox event has no outreach business record")
             return existing, False
 
+        if command.account_id is not None:
+            account = (
+                self._session.query(Account)
+                .filter(Account.id == command.account_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if account is None:
+                self._discard_new_event(event)
+                raise ValueError("outreach account does not exist")
+            reserved = (
+                self._session.query(OutreachLog)
+                .filter(
+                    OutreachLog.account_id == account.id,
+                    OutreachLog.status.in_(
+                        [OutreachStatus.PENDING, OutreachStatus.SCHEDULED]
+                    ),
+                )
+                .count()
+            )
+            if (account.today_sent or 0) + reserved >= account.daily_limit:
+                self._discard_new_event(event)
+                raise OutreachQuotaExceeded()
+
         status = (
             OutreachStatus.SCHEDULED
             if available_at > datetime.utcnow()
@@ -84,6 +117,10 @@ class OutreachQueueService:
         self._session.flush()
         return outreach, True
 
+    def _discard_new_event(self, event) -> None:
+        self._session.delete(event)
+        self._session.flush()
+
     @staticmethod
     def _delivery_payload(command: QueueOutreachCommand):
         if command.channel == "email":
@@ -93,4 +130,3 @@ class OutreachQueueService:
                 "body": command.body,
             }
         return {"to": command.recipient, "text": command.body}
-

@@ -25,6 +25,7 @@ from app.services.outbox_delivery import (
     get_outbox_delivery_router,
 )
 from app.services.outreach_queue import (
+    OutreachQuotaExceeded,
     OutreachQueueService,
     QueueOutreachCommand,
 )
@@ -212,6 +213,14 @@ def schedule_outreach_task(
                     }
                 )
 
+            except OutreachQuotaExceeded as exc:
+                results.append(
+                    {
+                        "customer_id": customer_id,
+                        "status": "failed",
+                        "error": exc.error_code,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Failed to send to customer {customer_id}: {str(e)}")
                 results.append({"customer_id": customer_id, "status": "failed", "error": str(e)})
