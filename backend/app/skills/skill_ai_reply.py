@@ -12,10 +12,15 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import re
 import json
+import logging
+import uuid
 
 from app.core.skill_base import BaseSkill, register_skill
 from app.core.context import ExecutionContext, MessageContext
 from app.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_skill
@@ -365,7 +370,11 @@ class AIReplySkill(BaseSkill):
             
             # Use query (message) for search
             result = await rag_skill.execute(
-                ExecutionContext(input_data={}), 
+                ExecutionContext(
+                    workflow_id="ai_reply_knowledge_search",
+                    execution_id=str(uuid.uuid4()),
+                    input_data={},
+                ),
                 action="query", 
                 text=query, 
                 top_k=3
@@ -390,49 +399,11 @@ class AIReplySkill(BaseSkill):
                 context_text = "\n\n".join(context_parts)
                 return context_text, sources
                 
-        except Exception as e:
-            # Log error but continue to fallback
-            print(f"RAG search failed: {e}")
-        
-        # Fallback to mock data based on intent
-        kb_entries = {
-            "price_inquiry": {
-                "context": "Our standard pricing starts at $X for small quantities, with volume discounts available for orders over 100 units.",
-                "sources": ["pricing_policy_v1", "price_list_2024"]
-            },
-            "product_inquiry": {
-                "context": "We offer a wide range of products including standard catalog items and custom solutions.",
-                "sources": ["product_catalog_2024", "custom_solutions_guide"]
-            },
-            "sample_request": {
-                "context": "Samples are available for qualified customers. Standard processing time is 3-5 business days.",
-                "sources": ["sample_policy_v2"]
-            },
-            "moq_inquiry": {
-                "context": "Our standard MOQ is 100 units for first orders, with flexibility for repeat customers.",
-                "sources": ["moq_policy_v1"]
-            },
-            "collaboration_inquiry": {
-                "context": "We offer various partnership models including dropshipping, wholesale, and affiliate programs.",
-                "sources": ["partnership_guide_2024"]
-            },
-            "shipping_inquiry": {
-                "context": "We ship worldwide via DHL, FedEx, and UPS. Shipping costs depend on destination and order size.",
-                "sources": ["shipping_policy_v3"]
-            },
-            "payment_inquiry": {
-                "context": "We accept wire transfer, PayPal, and credit card payments. Standard terms are 30% deposit, 70% before shipping.",
-                "sources": ["payment_policy_v2"]
-            },
-            "lead_time_inquiry": {
-                "context": "Standard lead time is 10-15 business days for stock items, 20-30 days for custom orders.",
-                "sources": ["production_schedule_2024"]
-            }
-        }
-
-        entry = kb_entries.get(intent)
-        if entry:
-            return entry["context"], entry["sources"]
+        except Exception as exc:
+            logger.warning(
+                "RAG search failed without exposing provider details",
+                extra={"error_type": type(exc).__name__},
+            )
 
         return "", []
 
@@ -476,7 +447,7 @@ Current customer intent: {intent}
 Intent level: {level} (low=general inquiry, medium=showing interest, high=serious buyer, very_high=ready to purchase)
 
 Relevant knowledge base information:
-{kb_context if kb_context else "Use general knowledge for the company's products and services."}
+{kb_context if kb_context else "No verified company knowledge was retrieved. Do not invent company-specific products, prices, MOQ, payment terms, shipping methods, lead times, certifications, inventory, or contract terms. State that verified information is unavailable and request human confirmation."}
 
 Guidelines:
 - For low intent: Be helpful but brief, don't over-promise

@@ -1,4 +1,6 @@
 import os
+import logging
+import re
 from typing import Dict, Any, List, Optional
 from pydantic import Field
 
@@ -19,6 +21,9 @@ except ImportError:
     pass
 
 
+logger = logging.getLogger(__name__)
+
+
 @register_skill
 class RagSkill(BaseSkill):
     """
@@ -36,6 +41,21 @@ class RagSkill(BaseSkill):
     category: str = "ai"
     icon: str = "Document"
     version: str = "1.0.0"
+
+    default_config: Dict[str, Any] = {
+        "collection_name": "b-agent-approved",
+    }
+
+    config_schema: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "collection_name": {
+                "type": "string",
+                "description": "Server-managed knowledge scope",
+            }
+        },
+        "additionalProperties": False,
+    }
     
     # Configuration
     input_schema: Dict[str, Any] = {
@@ -43,21 +63,12 @@ class RagSkill(BaseSkill):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "query", "clear"],
-                "description": "操作类型：添加知识(add)、查询(query)或清空(clear)"
+                "enum": ["query"],
+                "description": "只读知识查询"
             },
             "text": {
                 "type": "string",
                 "description": "要添加的文本内容或查询语句"
-            },
-            "collection_name": {
-                "type": "string",
-                "default": "default",
-                "description": "知识库集合名称"
-            },
-            "metadata": {
-                "type": "object",
-                "description": "元数据（仅用于添加操作）"
             },
             "top_k": {
                 "type": "integer",
@@ -86,6 +97,13 @@ class RagSkill(BaseSkill):
             }
         }
     }
+
+    def _validate_config(self):
+        collection_name = self.config.get("collection_name", "")
+        if not isinstance(collection_name, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}", collection_name
+        ):
+            raise ValueError("Invalid server-managed RAG collection name")
 
     def _get_embeddings(self):
         """Get embedding model based on configuration"""
@@ -128,36 +146,44 @@ class RagSkill(BaseSkill):
         """Execute the skill"""
         action = kwargs.get("action")
         text = kwargs.get("text", "")
-        collection_name = kwargs.get("collection_name", "default")
+        collection_name = self.config["collection_name"]
         
+        if action in {"add", "clear"}:
+            return {
+                "success": False,
+                "code": "RAG_READ_ONLY",
+                "message": "Knowledge mutation is not available to agent tools",
+            }
+
         try:
-            if action == "add":
+            if action == "query":
                 if not text:
-                    return {"success": False, "message": "Text is required for 'add' action"}
-                
-                metadata = kwargs.get("metadata", {})
-                return await self._add_document(text, collection_name, metadata)
-                
-            elif action == "query":
-                if not text:
-                    return {"success": False, "message": "Text is required for 'query' action"}
+                    return {
+                        "success": False,
+                        "code": "RAG_QUERY_REQUIRED",
+                        "message": "A knowledge query is required",
+                    }
                 
                 top_k = kwargs.get("top_k", 3)
+                if not isinstance(top_k, int):
+                    top_k = 3
+                top_k = min(max(top_k, 1), 10)
                 return await self._query_documents(text, collection_name, top_k)
-                
-            elif action == "clear":
-                return await self._clear_collection(collection_name)
-                
-            else:
-                return {"success": False, "message": f"Unknown action: {action}"}
-                
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
             return {
-                "success": False, 
-                "message": str(e),
-                "error_type": type(e).__name__
+                "success": False,
+                "code": "RAG_ACTION_NOT_ALLOWED",
+                "message": "Only knowledge queries are allowed",
+            }
+                
+        except Exception as exc:
+            logger.warning(
+                "RAG query failed without exposing provider details",
+                extra={"error_type": type(exc).__name__},
+            )
+            return {
+                "success": False,
+                "code": "RAG_QUERY_FAILED",
+                "message": "Knowledge retrieval is temporarily unavailable",
             }
 
     async def _add_document(self, text: str, collection_name: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
