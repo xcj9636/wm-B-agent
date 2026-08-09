@@ -258,3 +258,26 @@ async def test_stream_redacts_provider_input_and_rehydrates_done_snapshot(db_ses
     )
     assert events[-1]["event"] == "done"
     assert events[-1]["data"]["content"] == "Contact buyer@example.com"
+
+
+@pytest.mark.asyncio
+async def test_chat_never_rehydrates_historical_pii_placeholders(db_session):
+    backend = ChatBackend(content="Acknowledged.")
+    user, session, service = user_and_session(db_session, backend)
+    await service.complete(
+        session.id,
+        user.id,
+        "Previous buyer was old@example.com",
+        idempotency_key="chat-historical-pii-first",
+    )
+    backend.content = "Current [[EMAIL_2]], historical [[EMAIL_1]]."
+
+    response = await service.complete(
+        session.id,
+        user.id,
+        "Current buyer is new@example.com",
+        idempotency_key="chat-historical-pii-second",
+    )
+
+    assert response.content == "Current new@example.com, historical [[EMAIL_1]]."
+    assert "old@example.com" not in response.content
