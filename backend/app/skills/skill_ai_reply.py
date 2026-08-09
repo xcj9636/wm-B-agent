@@ -446,10 +446,10 @@ class AIReplySkill(BaseSkill):
         history: List[Dict[str, Any]],
     ) -> str:
         """Generate AI reply"""
-        # Import AI provider
-        from app.integrations.ai_provider import get_ai_provider
+        from app.services.llm import LLMUseCase
+        from app.services.llm.factory import get_llm_service
 
-        ai_provider = get_ai_provider()
+        llm_service = get_llm_service()
 
         # Build conversation history for context
         context_messages = []
@@ -501,9 +501,9 @@ Generate a helpful response."""
         ]
 
         # Generate reply
-        response = await ai_provider.chat_completion(messages)
+        response = await llm_service.complete(LLMUseCase.LIVE_REPLY, messages)
 
-        return response
+        return response.content
 
     def _generate_takeover_message(self, intent: str, customer: Dict[str, Any]) -> str:
         """Generate message when human takeover is needed"""

@@ -10,6 +10,7 @@ from app.services.llm.contracts import (
     LLMUsage,
     LLMUseCase,
 )
+from app.services.llm.service import DirectProviderAdapter, LLMService
 
 __all__ = [
     "GatewayError",
@@ -20,4 +21,6 @@ __all__ = [
     "LLMStreamChunk",
     "LLMUsage",
     "LLMUseCase",
+    "DirectProviderAdapter",
+    "LLMService",
 ]

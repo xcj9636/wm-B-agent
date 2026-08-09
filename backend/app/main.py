@@ -35,6 +35,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    from app.services.llm.factory import close_llm_service
+    await close_llm_service()
     print("Shutting down...")
 
 

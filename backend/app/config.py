@@ -116,7 +116,8 @@ class Settings(BaseSettings):
     )
     @classmethod
     def reject_dynamic_gateway_routes(cls, value: str) -> str:
-        if value.startswith("auto/"):
+        value = value.strip()
+        if value.lower().startswith("auto/"):
             raise ValueError("dynamic auto/* routes are not approved")
         return value
 

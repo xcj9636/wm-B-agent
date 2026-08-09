@@ -190,7 +190,8 @@ class LLMGatewayClient:
 
     def _resolve_model(self, request: LLMRequest) -> str:
         model = self._model_aliases.get(request.use_case)
-        if not model or model.startswith("auto/"):
+        model = model.strip() if model else ""
+        if not model or model.lower().startswith("auto/"):
             raise GatewayError(
                 GatewayErrorKind.INVALID_RESPONSE,
                 f"No approved fixed route for use case '{request.use_case.value}'",

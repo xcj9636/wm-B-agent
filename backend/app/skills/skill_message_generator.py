@@ -355,10 +355,10 @@ Best regards,
         language: str,
     ) -> Dict[str, Any]:
         """Generate message using AI"""
-        # Import AI provider
-        from app.integrations.ai_provider import get_ai_provider
+        from app.services.llm import LLMUseCase
+        from app.services.llm.factory import get_llm_service
 
-        ai_provider = get_ai_provider()
+        llm_service = get_llm_service()
 
         # Build system prompt
         system_prompt = f"""You are a professional business development specialist. Your task is to write a {channel} message in {language}.
@@ -382,7 +382,8 @@ Use the following variables to personalize the message:
             {"role": "user", "content": user_prompt}
         ]
 
-        response = await ai_provider.chat_completion(messages)
+        completion = await llm_service.complete(LLMUseCase.MESSAGE_DRAFT, messages)
+        response = completion.content
 
         # Parse response
         if channel == "email":

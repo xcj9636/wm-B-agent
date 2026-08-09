@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 
 
@@ -20,3 +23,12 @@ def test_only_explicit_business_aliases_are_exposed():
         "lead_classification": "b-agent-intent-cheap-v1",
         "live_reply": "b-agent-reply-reliable-v1",
     }
+
+
+@pytest.mark.parametrize("route", ["auto/cheapest", " AUTO/fastest "])
+def test_dynamic_routes_are_rejected_at_configuration_time(route):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            OMNIROUTE_MODEL_LIVE_REPLY=route,
+        )
