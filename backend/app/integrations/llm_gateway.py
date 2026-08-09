@@ -131,6 +131,14 @@ class LLMGatewayClient:
             ) from exc
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
+        if self._allowed_providers:
+            raise GatewayError(
+                GatewayErrorKind.INVALID_RESPONSE,
+                "Streaming is disabled when provider verification is required",
+                request_id=request.request_id,
+                retryable=False,
+            )
+
         payload = self._payload(request, stream=True)
         emitted = False
         saw_done = False

@@ -16,6 +16,12 @@ class LLMUseCase(str, Enum):
     SUMMARIZATION = "summarization"
 
 
+REQUIRED_GATEWAY_USE_CASES = (
+    LLMUseCase.MESSAGE_DRAFT,
+    LLMUseCase.LIVE_REPLY,
+)
+
+
 class LLMMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

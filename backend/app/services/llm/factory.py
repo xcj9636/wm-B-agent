@@ -5,7 +5,7 @@ from typing import Optional
 from app.config import Settings, settings
 from app.integrations.ai_provider import get_ai_provider
 from app.integrations.llm_gateway import LLMGatewayClient
-from app.services.llm.contracts import LLMUseCase
+from app.services.llm.contracts import LLMUseCase, REQUIRED_GATEWAY_USE_CASES
 from app.services.llm.service import DirectProviderAdapter, LLMService
 
 
@@ -30,6 +30,7 @@ def get_llm_service() -> LLMService:
 
 def build_gateway_client(config: Settings = settings) -> LLMGatewayClient:
     """Build a new gateway client from validated runtime configuration."""
+    _validate_gateway_policy(config)
     api_key = _read_gateway_api_key(config)
     aliases = {
         LLMUseCase(use_case): alias
@@ -42,6 +43,22 @@ def build_gateway_client(config: Settings = settings) -> LLMGatewayClient:
         allowed_providers=config.OMNIROUTE_ALLOWED_PROVIDERS,
         timeout_seconds=config.OMNIROUTE_TIMEOUT_SECONDS,
     )
+
+
+def _validate_gateway_policy(config: Settings) -> None:
+    if not config.OMNIROUTE_ALLOWED_PROVIDERS:
+        raise RuntimeError("OmniRoute provider allowlist is empty")
+
+    aliases = config.omniroute_model_aliases()
+    missing = [
+        use_case.value
+        for use_case in REQUIRED_GATEWAY_USE_CASES
+        if use_case.value not in aliases
+    ]
+    if missing:
+        raise RuntimeError(
+            "OmniRoute required model aliases are missing: " + ", ".join(missing)
+        )
 
 
 async def close_llm_service() -> None:

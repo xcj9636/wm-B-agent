@@ -6,14 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import Settings, settings
 from app.integrations.llm_gateway import LLMGatewayClient
-from app.services.llm.contracts import LLMUseCase
+from app.services.llm.contracts import REQUIRED_GATEWAY_USE_CASES
 from app.services.llm.factory import build_gateway_client
-
-
-REQUIRED_GATEWAY_USE_CASES = (
-    LLMUseCase.MESSAGE_DRAFT,
-    LLMUseCase.LIVE_REPLY,
-)
 
 
 class GatewayReadiness(BaseModel):
