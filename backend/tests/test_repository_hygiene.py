@@ -108,8 +108,13 @@ def test_omniroute_compose_service_is_pinned_and_internal_only():
     assert "profiles: [gateway]" in service_config
     assert "ports:" not in service_config
     assert "ai_gateway_network" in service_config
+    assert "ai_provider_egress_network" in service_config
     assert re.search(
         r"(?ms)^  ai_gateway_network:\n(?:    .*\n)*?    internal: true$",
+        compose,
+    )
+    assert re.search(
+        r"(?ms)^  ai_provider_egress_network:\n(?:    .*(?:\n|$))*",
         compose,
     )
 
