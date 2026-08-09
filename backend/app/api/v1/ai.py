@@ -40,6 +40,7 @@ class AIChatSessionCreate(BaseModel):
 class AIChatMessageCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1, max_length=30000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=255)
 
 
 def _require_admin(user: User) -> None:
@@ -154,7 +155,14 @@ async def create_chat_message(
     chat: AIChatService = Depends(get_ai_chat_service),
 ):
     try:
-        return await chat.complete(session_id, current_user.id, request.content)
+        if request.idempotency_key is None:
+            return await chat.complete(session_id, current_user.id, request.content)
+        return await chat.complete(
+            session_id,
+            current_user.id,
+            request.content,
+            idempotency_key=request.idempotency_key,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -170,11 +178,17 @@ async def stream_chat_message(
 ):
     async def events():
         try:
-            async for item in chat.stream(
-                session_id,
-                current_user.id,
-                request.content,
-            ):
+            stream = (
+                chat.stream(session_id, current_user.id, request.content)
+                if request.idempotency_key is None
+                else chat.stream(
+                    session_id,
+                    current_user.id,
+                    request.content,
+                    idempotency_key=request.idempotency_key,
+                )
+            )
+            async for item in stream:
                 data = json.dumps(item["data"], ensure_ascii=False, default=str)
                 yield f"event: {item['event']}\ndata: {data}\n\n"
         except KeyError as exc:

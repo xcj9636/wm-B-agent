@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum,
-    JSON, Float, Index, UniqueConstraint
+    JSON, Float, Index, UniqueConstraint, text
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.dialects.postgresql import UUID
@@ -1273,6 +1273,7 @@ class AIChatSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     title = Column(String(160), nullable=False, default="New conversation")
     use_case = Column(String(50), nullable=False, default="live_reply")
+    generation_epoch = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
@@ -1287,9 +1288,57 @@ class AIChatSession(Base):
         cascade="all, delete-orphan",
         order_by="AIChatMessage.created_at",
     )
+    turns = relationship(
+        "AgentTurn",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="AgentTurn.sequence",
+    )
 
     __table_args__ = (
         Index("idx_ai_chat_session_user_updated", "user_id", "updated_at"),
+    )
+
+
+class AgentTurn(Base):
+    """Durable, fenced generation within an operator chat session."""
+
+    __tablename__ = "agent_turns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence = Column(Integer, nullable=False)
+    generation_epoch = Column(Integer, nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    status = Column(String(30), nullable=False, default="running")
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    session = relationship("AIChatSession", back_populates="turns")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "sequence",
+            name="uq_agent_turn_session_sequence",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "idempotency_key",
+            name="uq_agent_turn_session_idempotency",
+        ),
+        Index(
+            "uq_agent_turn_active_session",
+            "session_id",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+            sqlite_where=text("status = 'running'"),
+        ),
+        Index("idx_agent_turn_session_status", "session_id", "status"),
     )
 
 

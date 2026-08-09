@@ -1,7 +1,8 @@
 """Durable, user-owned AI chat powered by the current runtime route snapshot."""
 from datetime import datetime, timezone
+import logging
 from typing import AsyncIterator, Dict, List, Literal, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,9 +20,13 @@ from app.services.agent_runtime.context import (
     TiktokenCounter,
 )
 from app.services.agent_runtime.prompts import get_default_prompt_registry
+from app.services.agent_runtime.turns import AgentTurnCoordinator
 from app.services.llm.contracts import LLMUseCase
 from app.services.llm.instrumented import SessionInvocationAuditSink
 from app.services.llm.service import LLMService
+
+
+logger = logging.getLogger(__name__)
 
 
 class AIChatMessageResponse(BaseModel):
@@ -89,9 +94,22 @@ class AIChatService:
         self._db.commit()
 
     async def complete(
-        self, session_id: UUID, user_id: int, content: str
+        self,
+        session_id: UUID,
+        user_id: int,
+        content: str,
+        *,
+        idempotency_key: Optional[str] = None,
     ) -> AIChatMessageResponse:
         session = self._owned_session(session_id, user_id)
+        coordinator = AgentTurnCoordinator(self._db)
+        turn, _ = coordinator.start(
+            session_id=session.id,
+            user_id=user_id,
+            idempotency_key=(
+                idempotency_key or f"ai-chat:{session.id}:{uuid4()}"
+            ),
+        )
         user_message = self._append_user_message(session, content)
         runtime_config = self._runtime.get_config()
         service = LLMService(
@@ -101,17 +119,19 @@ class AIChatService:
         )
         backend = service._backend
         try:
-            response = await service.complete(
-                LLMUseCase.LIVE_REPLY,
-                self._messages_for_model(session, user_message),
-                temperature=0.3,
-                max_output_tokens=1600,
-                idempotency_key=f"ai-chat:{session.id}:{user_message.id}",
-            )
-        finally:
-            close = getattr(backend, "aclose", None)
-            if close is not None:
-                await close()
+            try:
+                response = await service.complete(
+                    LLMUseCase.LIVE_REPLY,
+                    self._messages_for_model(session, user_message),
+                    temperature=0.3,
+                    max_output_tokens=1600,
+                    idempotency_key=f"ai-chat:{turn.id}:llm",
+                )
+            finally:
+                await self._close_backend(backend)
+        except Exception:
+            coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
+            raise
 
         assistant = AIChatMessage(
             session_id=session.id,
@@ -122,13 +142,31 @@ class AIChatService:
             gateway_request_id=response.gateway_request_id,
             usage_json=response.usage.model_dump(),
         )
+        coordinator.complete(
+            turn.id,
+            generation_epoch=turn.generation_epoch,
+            commit=False,
+        )
         self._finish_turn(session, assistant)
         return self._message_response(assistant)
 
     async def stream(
-        self, session_id: UUID, user_id: int, content: str
+        self,
+        session_id: UUID,
+        user_id: int,
+        content: str,
+        *,
+        idempotency_key: Optional[str] = None,
     ) -> AsyncIterator[Dict[str, object]]:
         session = self._owned_session(session_id, user_id)
+        coordinator = AgentTurnCoordinator(self._db)
+        turn, _ = coordinator.start(
+            session_id=session.id,
+            user_id=user_id,
+            idempotency_key=(
+                idempotency_key or f"ai-chat:{session.id}:{uuid4()}"
+            ),
+        )
         user_message = self._append_user_message(session, content)
         runtime_config = self._runtime.get_config()
         service = LLMService(
@@ -140,28 +178,30 @@ class AIChatService:
         fragments: List[str] = []
         metadata: Dict[str, object] = {}
         try:
-            async for chunk in service.stream(
-                LLMUseCase.LIVE_REPLY,
-                self._messages_for_model(session, user_message),
-                temperature=0.3,
-                max_output_tokens=1600,
-                idempotency_key=f"ai-chat:{session.id}:{user_message.id}",
-            ):
-                if chunk.delta:
-                    fragments.append(chunk.delta)
-                    yield {"event": "delta", "data": {"delta": chunk.delta}}
-                if chunk.resolved_model:
-                    metadata["resolved_model"] = chunk.resolved_model
-                if chunk.resolved_provider:
-                    metadata["resolved_provider"] = chunk.resolved_provider
-                if chunk.gateway_request_id:
-                    metadata["gateway_request_id"] = chunk.gateway_request_id
-                if chunk.usage:
-                    metadata["usage"] = chunk.usage.model_dump()
-        finally:
-            close = getattr(backend, "aclose", None)
-            if close is not None:
-                await close()
+            try:
+                async for chunk in service.stream(
+                    LLMUseCase.LIVE_REPLY,
+                    self._messages_for_model(session, user_message),
+                    temperature=0.3,
+                    max_output_tokens=1600,
+                    idempotency_key=f"ai-chat:{turn.id}:llm",
+                ):
+                    if chunk.delta:
+                        fragments.append(chunk.delta)
+                        yield {"event": "delta", "data": {"delta": chunk.delta}}
+                    if chunk.resolved_model:
+                        metadata["resolved_model"] = chunk.resolved_model
+                    if chunk.resolved_provider:
+                        metadata["resolved_provider"] = chunk.resolved_provider
+                    if chunk.gateway_request_id:
+                        metadata["gateway_request_id"] = chunk.gateway_request_id
+                    if chunk.usage:
+                        metadata["usage"] = chunk.usage.model_dump()
+            finally:
+                await self._close_backend(backend)
+        except BaseException:
+            coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
+            raise
 
         assistant = AIChatMessage(
             session_id=session.id,
@@ -171,6 +211,11 @@ class AIChatService:
             resolved_provider=metadata.get("resolved_provider"),
             gateway_request_id=metadata.get("gateway_request_id"),
             usage_json=metadata.get("usage", {}),
+        )
+        coordinator.complete(
+            turn.id,
+            generation_epoch=turn.generation_epoch,
+            commit=False,
         )
         self._finish_turn(session, assistant)
         yield {
@@ -273,6 +318,19 @@ class AIChatService:
         self._db.add(assistant)
         self._db.commit()
         self._db.refresh(assistant)
+
+    @staticmethod
+    async def _close_backend(backend) -> None:
+        close = getattr(backend, "aclose", None)
+        if close is None:
+            return
+        try:
+            await close()
+        except Exception as exc:
+            logger.warning(
+                "LLM backend close failed",
+                extra={"error_type": type(exc).__name__},
+            )
 
     def _session_response(
         self, row: AIChatSession, *, include_messages: bool = True
