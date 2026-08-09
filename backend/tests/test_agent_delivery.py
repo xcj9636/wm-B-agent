@@ -206,6 +206,32 @@ def test_delivery_rejects_unverified_or_foreign_sender_account(api_context):
     assert db.query(AgentOutreachDelivery).count() == 0
 
 
+def test_single_daily_slot_does_not_count_the_same_delivery_twice(api_context):
+    client, db, user = api_context
+    _, _, draft, account = seed_approved_email_draft(db, user, suffix="quota")
+    account.daily_limit = 1
+    db.commit()
+    payload = delivery_payload(account.id, key="delivery-only-slot")
+
+    prepared = client.post(
+        f"/api/v1/agent/outreach-drafts/{draft.id}/deliveries",
+        json=payload,
+    )
+    repeated = client.post(
+        f"/api/v1/agent/outreach-drafts/{draft.id}/deliveries",
+        json=payload,
+    )
+    approved = client.patch(
+        f"/api/v1/agent/deliveries/{prepared.json()['id']}/review",
+        json={"decision": "approve", "reason": "Use the only daily slot"},
+    )
+
+    assert prepared.status_code == 201, prepared.text
+    assert repeated.status_code == 200, repeated.text
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "scheduled"
+
+
 class FakeVerifiedEmailService:
     def __init__(self, *, verified):
         self.verified = verified
