@@ -11,6 +11,7 @@ from app.db import get_db
 from app.models.database import AIChatMessage, AIChatSession
 from app.services.ai_runtime import AIRuntimeService
 from app.services.llm.contracts import LLMUseCase
+from app.services.llm.instrumented import SessionInvocationAuditSink
 from app.services.llm.service import LLMService
 
 
@@ -88,7 +89,12 @@ class AIChatService:
     ) -> AIChatMessageResponse:
         session = self._owned_session(session_id, user_id)
         user_message = self._append_user_message(session, content)
-        service = LLMService(self._runtime.build_backend())
+        runtime_config = self._runtime.get_config()
+        service = LLMService(
+            self._runtime.build_backend(),
+            audit_sink=SessionInvocationAuditSink(self._db),
+            backend_name=runtime_config.backend,
+        )
         backend = service._backend
         try:
             response = await service.complete(
@@ -96,6 +102,7 @@ class AIChatService:
                 self._messages_for_model(session, user_message),
                 temperature=0.3,
                 max_output_tokens=1600,
+                idempotency_key=f"ai-chat:{session.id}:{user_message.id}",
             )
         finally:
             close = getattr(backend, "aclose", None)
@@ -119,7 +126,12 @@ class AIChatService:
     ) -> AsyncIterator[Dict[str, object]]:
         session = self._owned_session(session_id, user_id)
         user_message = self._append_user_message(session, content)
-        service = LLMService(self._runtime.build_backend())
+        runtime_config = self._runtime.get_config()
+        service = LLMService(
+            self._runtime.build_backend(),
+            audit_sink=SessionInvocationAuditSink(self._db),
+            backend_name=runtime_config.backend,
+        )
         backend = service._backend
         fragments: List[str] = []
         metadata: Dict[str, object] = {}
@@ -129,6 +141,7 @@ class AIChatService:
                 self._messages_for_model(session, user_message),
                 temperature=0.3,
                 max_output_tokens=1600,
+                idempotency_key=f"ai-chat:{session.id}:{user_message.id}",
             ):
                 if chunk.delta:
                     fragments.append(chunk.delta)

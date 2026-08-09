@@ -23,6 +23,7 @@ from app.models.database import (
 from app.services.ai_runtime import AIRuntimeService
 from app.services.idempotency import canonical_hash
 from app.services.llm.contracts import LLMUseCase
+from app.services.llm.instrumented import SessionInvocationAuditSink
 from app.services.llm.service import LLMService
 
 
@@ -380,7 +381,16 @@ class AgentResearchService:
             return self._draft_response(existing), False
 
         backend = runtime.build_backend()
-        service = LLMService(backend)
+        runtime_config = (
+            runtime.get_config() if hasattr(runtime, "get_config") else None
+        )
+        service = LLMService(
+            backend,
+            audit_sink=SessionInvocationAuditSink(self._db),
+            backend_name=(
+                runtime_config.backend if runtime_config is not None else "runtime"
+            ),
+        )
         try:
             response = await service.complete(
                 LLMUseCase.MESSAGE_DRAFT,
@@ -398,6 +408,7 @@ class AgentResearchService:
                 temperature=0.2,
                 max_output_tokens=1200,
                 response_schema=self._draft_schema(),
+                idempotency_key=f"research-draft:{command.idempotency_key}",
             )
         finally:
             close = getattr(backend, "aclose", None)

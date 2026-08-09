@@ -92,3 +92,34 @@ class InvocationAuditService:
         self._session.add(attempt)
         self._session.flush()
         return attempt
+
+    def fail(
+        self,
+        invocation: LLMInvocation,
+        *,
+        error_kind: str,
+        retryable: bool,
+    ) -> LLMAttempt:
+        """Record a normalized failure without persisting exception text."""
+        existing = self._session.query(LLMAttempt).filter(
+            LLMAttempt.invocation_id == invocation.id,
+            LLMAttempt.attempt_number == 1,
+        ).one_or_none()
+        if existing is not None:
+            return existing
+
+        invocation.status = LLMInvocationStatus.FAILED
+        invocation.error_kind = error_kind
+        invocation.retryable = retryable
+        invocation.completed_at = datetime.utcnow()
+        attempt = LLMAttempt(
+            invocation=invocation,
+            attempt_number=1,
+            status=LLMAttemptStatus.FAILED,
+            error_kind=error_kind,
+            retryable=retryable,
+            completed_at=datetime.utcnow(),
+        )
+        self._session.add(attempt)
+        self._session.flush()
+        return attempt

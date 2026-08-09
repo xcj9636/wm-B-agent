@@ -3,9 +3,11 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import Settings, settings
+from app.db import SessionLocal
 from app.integrations.ai_provider import get_ai_provider
 from app.integrations.llm_gateway import LLMGatewayClient
 from app.services.llm.contracts import LLMUseCase, REQUIRED_GATEWAY_USE_CASES
+from app.services.llm.instrumented import SessionFactoryInvocationAuditSink
 from app.services.llm.service import DirectProviderAdapter, LLMService
 
 
@@ -20,11 +22,19 @@ def get_llm_service() -> LLMService:
         return _service
 
     if settings.LLM_BACKEND == "direct":
-        _service = LLMService(DirectProviderAdapter(get_ai_provider()))
+        _service = LLMService(
+            DirectProviderAdapter(get_ai_provider()),
+            audit_sink=SessionFactoryInvocationAuditSink(SessionLocal),
+            backend_name="direct",
+        )
         return _service
 
     _gateway_client = build_gateway_client(settings)
-    _service = LLMService(_gateway_client)
+    _service = LLMService(
+        _gateway_client,
+        audit_sink=SessionFactoryInvocationAuditSink(SessionLocal),
+        backend_name="omniroute",
+    )
     return _service
 
 
