@@ -180,3 +180,24 @@ async def test_invalid_json_is_not_retryable():
 
     assert raised.value.kind == GatewayErrorKind.INVALID_RESPONSE
     assert raised.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_stream_http_errors_are_normalized_before_reading_events():
+    class ErrorStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"error":{"code":"content_policy_violation"}}'
+
+    client = gateway_client(
+        lambda request: httpx.Response(
+            400,
+            headers={"content-type": "application/json"},
+            stream=ErrorStream(),
+        )
+    )
+
+    with pytest.raises(GatewayError) as raised:
+        _ = [chunk async for chunk in client.stream(llm_request())]
+
+    assert raised.value.kind == GatewayErrorKind.CONTENT_POLICY
+    assert raised.value.retryable is False

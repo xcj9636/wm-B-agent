@@ -99,6 +99,8 @@ class LLMGatewayClient:
                 json=payload,
                 headers=self._request_headers(request),
             ) as response:
+                if not response.is_success:
+                    await response.aread()
                 self._raise_for_status(response, request)
                 async for line in response.aiter_lines():
                     if line.startswith(":"):
