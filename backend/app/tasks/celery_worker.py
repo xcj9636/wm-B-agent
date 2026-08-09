@@ -35,6 +35,10 @@ celery.conf.update(
             "task": "app.tasks.task_functions.sweep_prospecting_jobs_task",
             "schedule": 15.0,
         },
+        "recover-agent-runs": {
+            "task": "app.tasks.task_functions.sweep_agent_runs_task",
+            "schedule": 15.0,
+        },
     },
 )
 

@@ -24,6 +24,7 @@ from app.models.database import (
 )
 from app.core.agent import get_agent
 from app.services.outbox import OutboxService
+from app.services.agent_runs import AgentRunService
 from app.services.outbox_delivery import (
     DeliveryResult,
     get_outbox_delivery_router,
@@ -42,6 +43,28 @@ from app.services.prospecting_jobs import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@celery.task(
+    name="app.tasks.task_functions.sweep_agent_runs_task",
+    acks_late=True,
+)
+def sweep_agent_runs_task():
+    """Recover expired run leases and deadlines without claiming new work."""
+    db = SessionLocal()
+    try:
+        recovered = AgentRunService(db).recover_expired(now=datetime.utcnow())
+        counters = {"requeued": 0, "cancelled": 0, "unknown": 0}
+        for run in recovered:
+            metric = "requeued" if run.status == "queued" else run.status
+            if metric in counters:
+                counters[metric] += 1
+        return counters
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def enqueue_prospecting_job(job_id: str, *, countdown: int = 0) -> None:
