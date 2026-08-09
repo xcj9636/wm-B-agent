@@ -133,6 +133,72 @@ async def test_hunter_domain_search_maps_business_filters_and_pagination():
 
 
 @pytest.mark.asyncio
+async def test_hunter_domain_search_page_preserves_provider_total_for_resumption():
+    def handler(_: httpx.Request):
+        return hunter_response(
+            200,
+            {
+                "data": {
+                    "domain": "acme.com",
+                    "organization": "Acme",
+                    "emails": [{"value": "buyer@acme.com"}],
+                },
+                "meta": {"results": 37},
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        page = await HunterClient(
+            "hunter-secret",
+            http_client=http_client,
+        ).domain_search_page(domain="acme.com", limit=10, offset=20)
+
+    assert page.total_results == 37
+    assert page.data["emails"][0]["value"] == "buyer@acme.com"
+
+
+@pytest.mark.asyncio
+async def test_hunter_usage_normalizes_search_or_unified_credit_remaining():
+    responses = iter(
+        [
+            {
+                "data": {
+                    "requests": {
+                        "searches": {"used": 25, "available": 100},
+                    }
+                }
+            },
+            {
+                "data": {
+                    "requests": {
+                        "credits": {
+                            "used": 40.5,
+                            "available": 100.0,
+                            "remaining": 59.5,
+                        },
+                    }
+                }
+            },
+        ]
+    )
+
+    def handler(_: httpx.Request):
+        return hunter_response(200, next(responses))
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        client = HunterClient("hunter-secret", http_client=http_client)
+        searches = await client.usage()
+        credits = await client.usage()
+
+    assert searches.remaining == 75
+    assert searches.unit == "searches"
+    assert credits.remaining == 59.5
+    assert credits.unit == "credits"
+
+
+@pytest.mark.asyncio
 async def test_hunter_email_finder_supports_named_person_without_linkedin_input():
     requests = []
 

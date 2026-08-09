@@ -39,3 +39,21 @@ test('prospecting workspace is bilingual', () => {
   assert.match(messages, /'Domain search': '域名搜索'/)
   assert.match(messages, /'Import selected': '导入所选联系人'/)
 })
+
+test('prospecting workspace exposes resumable batch enrichment jobs', () => {
+  const api = source('src/api/prospecting.ts')
+  const view = source('src/views/Prospecting.vue')
+  const messages = source('src/i18n/index.ts')
+
+  assert.match(api, /\/api\/v1\/prospecting\/jobs/)
+  assert.match(api, /createJob/)
+  assert.match(api, /resumeJob/)
+  assert.match(view, /batch_domain_search/)
+  assert.match(view, /prospectingApi\.createJob/)
+  assert.match(view, /prospectingApi\.resumeJob/)
+  assert.match(view, /request_budget/)
+  assert.match(view, /pages_completed/)
+  assert.match(messages, /'Batch enrichment': '批量补全'/)
+  assert.match(messages, /'Request budget': '请求预算'/)
+  assert.doesNotMatch(`${api}\n${view}`, /linkedin_handle/)
+})
