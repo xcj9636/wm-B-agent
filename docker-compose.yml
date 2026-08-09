@@ -149,6 +149,7 @@ services:
     cpus: 2.0
     networks:
       - ai_gateway_network
+      - ai_provider_egress_network
 
   # Celery Beat (Scheduler)
   celery_beat:
@@ -238,3 +239,5 @@ networks:
   ai_gateway_network:
     driver: bridge
     internal: true
+  ai_provider_egress_network:
+    driver: bridge

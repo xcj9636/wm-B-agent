@@ -25,7 +25,7 @@ export OMNIROUTE_IMAGE='registry.example.com/b-agent/omniroute@sha256:0123456789
 
 ## 2. 先配置隔离策略，再接业务流量
 
-1. 在专用 OmniRoute 实例中只配置经过审批的 provider 凭证；网络出口也只允许这些 provider 域名。
+1. 在专用 OmniRoute 实例中只配置经过审批的 provider 凭证；`ai_provider_egress_network` 只给 OmniRoute 使用，生产防火墙或 egress proxy 还必须把出口限制到这些 provider 域名。普通 Docker bridge 本身不提供域名级 ACL。
 2. 创建 B-agent 专用、最小权限、可轮换的 API key，不与管理员或其他应用共享。
 3. 创建固定 combo/model 别名 `b-agent-draft-v1` 和 `b-agent-reply-v1`，其候选只能来自审批 provider。
 4. 禁止 `auto/*`、免费/无密钥 provider 和未固定的模型名。应用配置本身也会拒绝 `auto/*`。
