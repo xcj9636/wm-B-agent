@@ -11,6 +11,7 @@ from pydantic import (
     Field,
     HttpUrl,
     ValidationError,
+    field_validator,
 )
 from sqlalchemy.orm import Session
 
@@ -64,6 +65,13 @@ class ProfileEvidenceInput(BaseModel):
     observed_at: datetime
     confidence: float = Field(ge=0, le=1)
 
+    @field_validator("source_url")
+    @classmethod
+    def reject_url_credentials(cls, value: HttpUrl) -> HttpUrl:
+        if value.username or value.password:
+            raise ValueError("source URL must not contain credentials")
+        return value
+
 
 class MarketSignalInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -83,6 +91,13 @@ class MarketSignalInput(BaseModel):
     source_url: HttpUrl
     observed_at: datetime
     confidence: float = Field(ge=0, le=1)
+
+    @field_validator("source_url")
+    @classmethod
+    def reject_url_credentials(cls, value: HttpUrl) -> HttpUrl:
+        if value.username or value.password:
+            raise ValueError("source URL must not contain credentials")
+        return value
 
 
 class ResearchEvidenceUpdate(BaseModel):
@@ -341,7 +356,14 @@ class AgentResearchService:
             "evidence": evidence,
             "icp": dict((row.customer.source_data_json or {}).get("icp") or {}),
         }
-        input_hash = canonical_hash(input_data)
+        prompt_payload = self._prompt_payload(row, input_data)
+        input_hash = canonical_hash(
+            {
+                "job_id": str(row.id),
+                "research_version": row.version,
+                "prompt": prompt_payload,
+            }
+        )
         existing = (
             self._db.query(ResearchOutreachDraft)
             .filter(
@@ -367,7 +389,7 @@ class AgentResearchService:
                     {
                         "role": "user",
                         "content": json.dumps(
-                            self._prompt_payload(row, input_data),
+                            prompt_payload,
                             ensure_ascii=False,
                             default=str,
                         ),
