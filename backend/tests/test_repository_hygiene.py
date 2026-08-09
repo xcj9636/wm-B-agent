@@ -112,3 +112,35 @@ def test_omniroute_compose_service_is_pinned_and_internal_only():
         r"(?ms)^  ai_gateway_network:\n(?:    .*\n)*?    internal: true$",
         compose,
     )
+
+
+def test_gateway_production_overlay_requires_digest_and_secret():
+    overlay = (
+        REPOSITORY_ROOT / "docker-compose.gateway-production.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "OMNIROUTE_IMAGE" in overlay
+    assert "@sha256" in overlay
+    assert "build: null" in overlay
+    assert "OMNIROUTE_API_KEY_FILE" in overlay
+    assert "/run/secrets/b_agent_omniroute_api_key" in overlay
+
+
+def test_gateway_runtime_policy_is_wired_and_documented():
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    env_example = (REPOSITORY_ROOT / ".env.example").read_text(encoding="utf-8")
+    runbook = (
+        REPOSITORY_ROOT / "docs" / "runbooks" / "omniroute-deployment.md"
+    ).read_text(encoding="utf-8")
+
+    assert compose.count("OMNIROUTE_ALLOWED_PROVIDERS") >= 2
+    assert "OMNIROUTE_ALLOWED_PROVIDERS=[]" in env_example
+    for required_text in (
+        "docker compose config",
+        "/v1/models",
+        "/api/v1/admin/ai-gateway/status",
+        "auto/*",
+        "rollback",
+        "backup",
+    ):
+        assert required_text in runbook
