@@ -25,6 +25,15 @@ def test_only_explicit_business_aliases_are_exposed():
     }
 
 
+def test_gateway_provider_allowlist_is_normalized():
+    settings = Settings(
+        _env_file=None,
+        OMNIROUTE_ALLOWED_PROVIDERS=[" OpenAI ", "AZURE-OPENAI", "openai"],
+    )
+
+    assert settings.OMNIROUTE_ALLOWED_PROVIDERS == ["openai", "azure-openai"]
+
+
 @pytest.mark.parametrize("route", ["auto/cheapest", " AUTO/fastest "])
 def test_dynamic_routes_are_rejected_at_configuration_time(route):
     with pytest.raises(ValidationError):
