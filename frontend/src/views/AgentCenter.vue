@@ -210,7 +210,7 @@
               :class="{ 'is-ready': capability.ready }"
             />
             <div>
-              <strong>{{ capability.display_name }}</strong>
+              <strong>{{ $t(capability.display_name) }}</strong>
               <span>{{ $t(capability.category) }} · v{{ capability.version }}</span>
             </div>
             <code>{{ capability.name }}</code>
@@ -355,7 +355,7 @@ onMounted(loadAgent)
 .agent-orb img { width: 58px; height: 58px; }.orb-pulse { position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border: 3px solid var(--surface-elevated); border-radius: 50%; background: var(--el-color-success); }
 .identity-line { display: flex; align-items: center; gap: 12px; }.identity-line h2 { margin: 0; font-size: clamp(26px, 3vw, 38px); letter-spacing: -0.04em; }.agent-identity p { max-width: 480px; margin: 8px 0 0; color: var(--el-text-color-secondary); }
 .runtime-grid { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.runtime-metric { display: grid; min-height: 92px; align-content: center; gap: 8px; padding: 16px; border: 1px solid var(--border-hairline); border-radius: 16px; background: color-mix(in srgb, var(--surface-elevated) 78%, transparent); }.runtime-metric span { color: var(--el-text-color-secondary); font-size: 12px; }.runtime-metric strong { font-size: 24px; letter-spacing: -0.03em; }
+.runtime-metric { display: grid; min-height: 92px; align-content: center; gap: 8px; padding: 16px; border: 1px solid var(--border-hairline); border-radius: 16px; background: color-mix(in srgb, var(--surface-elevated) 78%, transparent); }.runtime-metric span { color: var(--el-text-color-secondary); font-size: 12px; }.runtime-metric strong { font-size: 22px; letter-spacing: -0.03em; white-space: nowrap; }.runtime-metric:first-child strong { font-size: 18px; }
 .section-heading { display: flex; justify-content: space-between; margin-top: 4px; }.section-heading h2 { margin: 3px 0 7px; font-size: 24px; letter-spacing: -0.025em; }.section-heading p:last-child { margin: 0; color: var(--el-text-color-secondary); }
 .pipeline-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .pipeline-card { --pipeline-accent: var(--apple-blue); overflow: hidden; padding: 20px; border: 1px solid var(--border-hairline); border-radius: 20px; background: var(--surface-elevated); box-shadow: var(--shadow-card); }.pipeline-card--green { --pipeline-accent: var(--el-color-success); }.pipeline-card--orange { --pipeline-accent: var(--el-color-warning); }
