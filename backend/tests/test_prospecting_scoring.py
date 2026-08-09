@@ -169,6 +169,30 @@ def test_manual_review_adjustment_survives_rescoring(api_context):
     )
 
 
+def test_ranking_is_marked_stale_after_icp_policy_changes(api_context):
+    client, db, user = api_context
+    search = seed_rankable_search(db, user)
+    client.put("/api/v1/prospecting/icp-profile", json=profile_payload())
+    scored = client.post(
+        f"/api/v1/prospecting/searches/{search.id}/score"
+    ).json()
+
+    client.put(
+        "/api/v1/prospecting/icp-profile",
+        json=profile_payload(name="Updated buying committee ICP"),
+    )
+    ranking = client.get(
+        f"/api/v1/prospecting/searches/{search.id}/ranking"
+    )
+
+    assert ranking.status_code == 200, ranking.text
+    assert ranking.json()["stale"] is True
+    assert ranking.json()["profile_version"] == 3
+    assert ranking.json()["scores"][0]["profile_version"] == (
+        scored["profile_version"]
+    )
+
+
 def test_other_user_cannot_score_or_read_search_ranking(api_context):
     client, db, user = api_context
     search = seed_rankable_search(db, user)
