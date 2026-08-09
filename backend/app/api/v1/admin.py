@@ -16,6 +16,11 @@ from app.services.llm.status import (
     GatewayStatusService,
     get_gateway_status_service,
 )
+from app.services.reliable_execution_status import (
+    ReliableExecutionStatus,
+    ReliableExecutionStatusService,
+    get_reliable_execution_status_service,
+)
 
 router = APIRouter()
 
@@ -30,6 +35,23 @@ async def get_ai_gateway_status(
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return await status_service.check()
+
+
+@router.get(
+    "/reliable-execution/status",
+    response_model=ReliableExecutionStatus,
+)
+async def get_reliable_execution_status(
+    current_user: User = Depends(get_current_active_user),
+    status_service: ReliableExecutionStatusService = Depends(
+        get_reliable_execution_status_service
+    ),
+):
+    """Return aggregate execution health without prompts or delivery payloads."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return status_service.get_status()
 
 
 @router.get("/users", response_model=List[UserResponse])
