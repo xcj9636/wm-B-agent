@@ -1,402 +1,160 @@
 <template>
-  <el-card class="alert-panel">
+  <el-card
+    class="alert-panel"
+    shadow="never"
+  >
     <template #header>
       <div class="panel-header">
         <div class="panel-title">
           <el-icon><Bell /></el-icon>
-          <span>Alerts</span>
+          <div><strong>Operational alerts</strong><span>Derived from current backend health</span></div>
         </div>
-        <el-badge
-          :value="unreadCount"
-          :hidden="unreadCount === 0"
-          type="danger"
+        <el-button
+          :loading="loading"
+          @click="fetchAlerts"
         >
-          <el-button @click="markAllRead">
-            <el-icon><Check /></el-icon>
-          </el-button>
-        </el-badge>
+          <el-icon><Refresh /></el-icon>Refresh
+        </el-button>
       </div>
     </template>
 
+    <el-alert
+      v-if="errorMessage"
+      :title="errorMessage"
+      type="error"
+      :closable="false"
+      show-icon
+    />
     <div
       v-loading="loading"
-      class="panel-content"
+      class="alerts-list"
     >
-      <el-tabs v-model="activeTab">
-        <el-tab-pane
-          label="All"
-          name="all"
-        >
-          <div class="alerts-list">
-            <div
-              v-for="alert in allAlerts"
-              :key="alert.id"
-              class="alert-item"
-              :class="[{ unread: !alert.read }, `alert-${alert.severity}`]"
-            >
-              <div class="alert-icon">
-                <el-icon><component :is="getAlertIcon(alert.severity)" /></el-icon>
-              </div>
-              <div class="alert-content">
-                <div class="alert-message">
-                  {{ alert.message }}
-                </div>
-                <div class="alert-meta">
-                  <el-tag
-                    size="small"
-                    :type="getAlertType(alert.severity)"
-                  >
-                    {{ alert.severity }}
-                  </el-tag>
-                  <span class="alert-time">{{ formatTime(alert.createdAt) }}</span>
-                </div>
-              </div>
-              <div class="alert-actions">
-                <el-button
-                  text
-                  size="small"
-                  @click="dismissAlert(alert.id)"
-                >
-                  <el-icon><Close /></el-icon>
-                </el-button>
-              </div>
-            </div>
-
-            <el-empty
-              v-if="allAlerts.length === 0"
-              description="No alerts"
-            />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane
-          label="Critical"
-          name="critical"
-        >
-          <div class="alerts-list">
-            <div
-              v-for="alert in criticalAlerts"
-              :key="alert.id"
-              class="alert-item"
-              :class="[{ unread: !alert.read }, `alert-${alert.severity}`]"
-            >
-              <div class="alert-icon">
-                <el-icon><Warning /></el-icon>
-              </div>
-              <div class="alert-content">
-                <div class="alert-message">
-                  {{ alert.message }}
-                </div>
-                <div class="alert-meta">
-                  <el-tag
-                    size="small"
-                    type="danger"
-                  >
-                    Critical
-                  </el-tag>
-                  <span class="alert-time">{{ formatTime(alert.createdAt) }}</span>
-                </div>
-                <div class="alert-actions">
-                  <el-button
-                    type="danger"
-                    size="small"
-                    @click="handleAlert(alert)"
-                  >
-                    Take Action
-                  </el-button>
-                </div>
-              </div>
-            </div>
-
-            <el-empty
-              v-if="criticalAlerts.length === 0"
-              description="No critical alerts"
-            />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane
-          label="Warnings"
-          name="warning"
-        >
-          <div class="alerts-list">
-            <div
-              v-for="alert in warningAlerts"
-              :key="alert.id"
-              class="alert-item"
-              :class="[{ unread: !alert.read }, `alert-${alert.severity}`]"
-            >
-              <div class="alert-icon">
-                <el-icon><Warning /></el-icon>
-              </div>
-              <div class="alert-content">
-                <div class="alert-message">
-                  {{ alert.message }}
-                </div>
-                <div class="alert-meta">
-                  <el-tag
-                    size="small"
-                    type="warning"
-                  >
-                    Warning
-                  </el-tag>
-                  <span class="alert-time">{{ formatTime(alert.createdAt) }}</span>
-                </div>
-              </div>
-            </div>
-
-            <el-empty
-              v-if="warningAlerts.length === 0"
-              description="No warnings"
-            />
-          </div>
-        </el-tab-pane>
-      </el-tabs>
+      <article
+        v-for="alert in alerts"
+        :key="alert.id"
+        class="alert-item"
+        :class="`alert-${alert.severity}`"
+      >
+        <el-icon class="alert-icon">
+          <component :is="alert.severity === 'critical' ? 'CircleCloseFilled' : 'WarningFilled'" />
+        </el-icon>
+        <div class="alert-copy">
+          <strong>{{ alert.title }}</strong>
+          <p>{{ alert.message }}</p>
+          <span>{{ formatTime(alert.createdAt) }}</span>
+        </div>
+        <div class="alert-action">
+          <el-tag
+            :type="alert.severity === 'critical' ? 'danger' : 'warning'"
+            effect="plain"
+          >
+            {{ alert.severity }}
+          </el-tag>
+          <el-button
+            v-if="alert.action === 'dead-letters'"
+            text
+            type="primary"
+            @click="router.push('/operations/dead-letters')"
+          >
+            Review
+          </el-button>
+        </div>
+      </article>
+      <el-empty
+        v-if="!loading && !errorMessage && alerts.length === 0"
+        description="No operational alerts"
+      />
     </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import api from '@/api'
 
 dayjs.extend(relativeTime)
 
-interface Alert {
+interface GatewayStatus {
+  enabled: boolean
+  ready: boolean
+  reachable: boolean | null
+  issues: string[]
+}
+interface ReliableStatus {
+  outbox_counts: Record<string, number>
+  llm_invocation_counts: Record<string, number>
+  expired_outbox_leases: number
+  checked_at: string
+}
+interface OperationalAlert {
   id: string
-  type: string
-  severity: 'critical' | 'high' | 'medium' | 'low'
+  title: string
   message: string
+  severity: 'critical' | 'warning'
   createdAt: string
-  read: boolean
-  actionable?: boolean
-  actionType?: string
-  actionData?: any
+  action?: 'dead-letters'
 }
 
+const router = useRouter()
 const loading = ref(false)
-const activeTab = ref('all')
-const alerts = ref<Alert[]>([])
-
-const allAlerts = computed(() => alerts.value)
-const criticalAlerts = computed(() => alerts.value.filter((a) => a.severity === 'critical'))
-const warningAlerts = computed(() => alerts.value.filter((a) => a.severity === 'high' || a.severity === 'medium'))
-const unreadCount = computed(() => alerts.value.filter((a) => !a.read).length)
-
-const alertIcons: Record<string, any> = {
-  critical: 'CircleCloseFilled',
-  high: 'WarningFilled',
-  medium: 'InfoFilled',
-  low: 'Notification',
-}
+const errorMessage = ref('')
+const alerts = ref<OperationalAlert[]>([])
 
 async function fetchAlerts() {
   loading.value = true
-
+  errorMessage.value = ''
   try {
-    // Mock data - replace with API call
-    alerts.value = [
-      {
-        id: '1',
-        type: 'workflow_failed',
-        severity: 'critical',
-        message: 'Workflow "Daily Outreach" failed: Rate limit exceeded',
-        createdAt: dayjs().subtract(5, 'minutes').toISOString(),
-        read: false,
-        actionable: true,
-        actionType: 'takeover',
-      },
-      {
-        id: '2',
-        type: 'takeover_needed',
-        severity: 'high',
-        message: 'High intent conversation requires attention: @retailer456',
-        createdAt: dayjs().subtract(15, 'minutes').toISOString(),
-        read: false,
-        actionable: true,
-        actionType: 'takeover',
-      },
-      {
-        id: '3',
-        type: 'low_open_rate',
-        severity: 'medium',
-        message: 'Email open rate is below threshold (15%)',
-        createdAt: dayjs().subtract(1, 'hour').toISOString(),
-        read: true,
-      },
-      {
-        id: '4',
-        type: 'high_intent_leads',
-        severity: 'medium',
-        message: '3 high intent leads need attention',
-        createdAt: dayjs().subtract(2, 'hours').toISOString(),
-        read: true,
-      },
-      {
-        id: '5',
-        type: 'account_warning',
-        severity: 'low',
-        message: 'Gmail account approaching daily limit (85/100)',
-        createdAt: dayjs().subtract(3, 'hours').toISOString(),
-        read: true,
-      },
-    ]
-  } catch (error) {
-    console.error('Failed to fetch alerts:', error)
+    const [gatewayResponse, reliableResponse] = await Promise.all([
+      api.get<GatewayStatus>('/api/v1/admin/ai-gateway/status'),
+      api.get<ReliableStatus>('/api/v1/admin/reliable-execution/status'),
+    ])
+    const gateway = gatewayResponse.data
+    const reliable = reliableResponse.data
+    const observedAt = reliable.checked_at || new Date().toISOString()
+    const next: OperationalAlert[] = []
+
+    if (gateway.enabled && (!gateway.ready || gateway.reachable === false)) {
+      next.push({ id: 'gateway-readiness', title: 'AI gateway is not ready', message: gateway.issues.join('; ') || 'Review provider and model alias configuration.', severity: 'critical', createdAt: observedAt })
+    }
+    gateway.issues.forEach((issue, index) => {
+      if (next.some((item) => item.message.includes(issue))) return
+      next.push({ id: `gateway-issue-${index}`, title: 'AI routing warning', message: issue, severity: 'warning', createdAt: observedAt })
+    })
+
+    const deadLetters = reliable.outbox_counts.dead_letter || 0
+    if (deadLetters > 0) {
+      next.push({ id: 'dead-letters', title: 'Dead-letter events require review', message: `${deadLetters} durable delivery events need an approved resolution.`, severity: 'critical', createdAt: observedAt, action: 'dead-letters' })
+    }
+    if (reliable.expired_outbox_leases > 0) {
+      next.push({ id: 'expired-leases', title: 'Expired delivery leases detected', message: `${reliable.expired_outbox_leases} outbox leases have expired and may need recovery.`, severity: 'warning', createdAt: observedAt })
+    }
+    const failedInvocations = reliable.llm_invocation_counts.failed || 0
+    if (failedInvocations > 0) {
+      next.push({ id: 'llm-failures', title: 'LLM invocations failed', message: `${failedInvocations} recorded invocations are in a failed state.`, severity: 'warning', createdAt: observedAt })
+    }
+    alerts.value = next
+  } catch {
+    alerts.value = []
+    errorMessage.value = 'Operational alerts could not be derived from the backend status endpoints.'
   } finally {
     loading.value = false
   }
 }
 
-function markAllRead() {
-  alerts.value.forEach((a) => (a.read = true))
-  ElMessage.success('All alerts marked as read')
-}
-
-function dismissAlert(id: string) {
-  alerts.value = alerts.value.filter((a) => a.id !== id)
-  ElMessage.info('Alert dismissed')
-}
-
-function handleAlert(alert: Alert) {
-  if (alert.actionable) {
-    if (alert.actionType === 'takeover') {
-      // Navigate to conversation
-      ElMessage.info(`Taking action on ${alert.type}`)
-    }
-  }
-}
-
-function getAlertIcon(severity: string) {
-  return alertIcons[severity] || 'Notification'
-}
-
-function getAlertType(severity: string) {
-  const types: Record<string, any> = {
-    critical: 'danger',
-    high: 'warning',
-    medium: 'warning',
-    low: 'info',
-  }
-  return types[severity] || 'info'
-}
-
-function formatTime(time: string) {
-  return dayjs(time).fromNow()
-}
-
-onMounted(() => {
-  fetchAlerts()
-})
+function formatTime(value: string) { return dayjs(value).fromNow() }
+onMounted(() => { void fetchAlerts() })
 </script>
 
-<style lang="scss" scoped>
-.alert-panel {
-  .panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-weight: 600;
-  }
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.panel-content {
-  min-height: 350px;
-}
-
-.alerts-list {
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.alert-item {
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-light);
-  transition: all 0.2s;
-
-  &:hover {
-    background: var(--el-fill-color-light);
-  }
-
-  &.unread {
-    border-left: 3px solid var(--el-color-primary);
-  }
-
-  &.alert-critical {
-    background: rgba(245, 108, 108, 0.05);
-    border-color: rgba(245, 108, 108, 0.3);
-  }
-}
-
-.alert-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.alert-item {
-  &.alert-critical .alert-icon {
-    background: var(--el-color-danger-light-9);
-    color: var(--el-color-danger);
-  }
-
-  &.alert-high .alert-icon {
-    background: var(--el-color-warning-light-9);
-    color: var(--el-color-warning);
-  }
-
-  &.alert-medium .alert-icon {
-    background: var(--el-color-info-light-9);
-    color: var(--el-color-info);
-  }
-}
-
-.alert-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.alert-message {
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-  line-height: 1.5;
-  margin-bottom: 6px;
-}
-
-.alert-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.alert-time {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-}
-
-.alert-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
+<style scoped lang="scss">
+.panel-header, .panel-title, .alert-item, .alert-action { display: flex; align-items: center; gap: 10px; }
+.panel-header { justify-content: space-between; }.panel-title > div { display: grid; gap: 2px; }.panel-title span, .alert-copy span { color: var(--el-text-color-secondary); font-size: 12px; }
+.alerts-list { display: grid; min-height: 140px; gap: 8px; }.alert-item { align-items: flex-start; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; }
+.alert-critical { border-color: var(--el-color-danger-light-7); }.alert-warning { border-color: var(--el-color-warning-light-7); }
+.alert-icon { margin-top: 3px; color: var(--el-color-warning); }.alert-critical .alert-icon { color: var(--el-color-danger); }
+.alert-copy { display: grid; flex: 1; gap: 4px; }.alert-copy p { margin: 0; color: var(--el-text-color-regular); line-height: 1.45; }
+.alert-action { align-items: flex-end; flex-direction: column; }
+@media (max-width: 640px) { .alert-item { flex-wrap: wrap; }.alert-action { width: 100%; align-items: center; flex-direction: row; justify-content: flex-end; } }
 </style>

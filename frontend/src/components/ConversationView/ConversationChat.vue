@@ -136,7 +136,8 @@
           <el-button
             icon="Paperclip"
             circle
-            @click="attachFile"
+            disabled
+            title="File attachments are not enabled by the backend"
           />
           <el-button
             type="primary"
@@ -219,10 +220,6 @@ function takeover() {
 function release() {
   emit('release')
   ElMessage.info('Conversation released to AI')
-}
-
-function attachFile() {
-  ElMessage.info('File attachment feature coming soon')
 }
 
 function executeAction(action: string) {

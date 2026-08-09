@@ -226,6 +226,8 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <AlertPanel />
   </section>
 </template>
 
@@ -233,6 +235,7 @@
 import { computed, onMounted, ref } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/api'
+import AlertPanel from '@/components/Monitor/AlertPanel.vue'
 
 interface HealthResponse {
   status: string

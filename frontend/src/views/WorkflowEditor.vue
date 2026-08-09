@@ -28,7 +28,6 @@
             <el-form-item label="Workflow Name">
               <el-input
                 v-model="workflowForm.name"
-                @change="updateWorkflowName"
               />
             </el-form-item>
 
@@ -37,7 +36,6 @@
                 v-model="workflowForm.description"
                 type="textarea"
                 placeholder="Describe this workflow..."
-                @change="updateWorkflowDescription"
               />
             </el-form-item>
 
@@ -48,7 +46,6 @@
                 filterable
                 allow-create
                 placeholder="Add tags..."
-                @change="updateWorkflowTags"
               >
                 <el-option
                   v-for="tag in availableTags"
@@ -58,37 +55,6 @@
                 />
               </el-select>
             </el-form-item>
-
-            <el-divider />
-
-            <h4>Execution Settings</h4>
-            <el-form-item label="Timeout (seconds)">
-              <el-input-number
-                v-model="workflowForm.timeout"
-                :min="1"
-                :max="3600"
-              />
-            </el-form-item>
-
-            <el-form-item label="Retry Strategy">
-              <el-radio-group v-model="workflowForm.retryStrategy">
-                <el-radio label="linear">
-                  Linear
-                </el-radio>
-                <el-radio label="exponential">
-                  Exponential
-                </el-radio>
-              </el-radio-group>
-            </el-form-item>
-
-            <el-form-item label="Max Retries">
-              <el-input-number
-                v-model="workflowForm.maxRetries"
-                :min="0"
-                :max="10"
-              />
-            </el-form-item>
-
             <el-divider />
 
             <div class="action-buttons">
@@ -143,18 +109,12 @@ interface WorkflowForm {
   name: string
   description: string
   tags: string[]
-  timeout: number
-  retryStrategy: 'linear' | 'exponential'
-  maxRetries: number
 }
 
 const workflowForm = reactive<WorkflowForm>({
   name: 'New Workflow',
   description: '',
   tags: [],
-  timeout: 300,
-  retryStrategy: 'linear',
-  maxRetries: 3,
 })
 
 // Workflow data
@@ -204,7 +164,12 @@ async function loadWorkflow() {
       }
 
       if (config && config.transitions) {
-        connections.value = config.transitions
+        connections.value = config.transitions.map((transition: any, index: number) => ({
+          ...transition,
+          id: transition.id || `transition-${index}`,
+          from: transition.from || transition.from_step,
+          to: transition.to || transition.to_step,
+        }))
       }
     }
   } catch (error) {
@@ -222,10 +187,18 @@ async function loadSkills() {
   }
 }
 
-function onSave() {
-  // Save workflow
+async function onSave() {
+  if (!workflowId.value) {
+    ElMessage.error('Create a workflow before opening the editor')
+    return
+  }
+  if (!workflowForm.name.trim()) {
+    ElMessage.error('Workflow name is required')
+    return
+  }
+
   const workflowData = {
-    name: workflowForm.name,
+    name: workflowForm.name.trim(),
     description: workflowForm.description,
     steps: workflowSteps.value.map((s) => ({
       name: s.name,
@@ -238,15 +211,21 @@ function onSave() {
       timeout: s.timeout,
       on_failure_action: s.onFailureAction,
     })),
-    transitions: connections.value,
+    transitions: connections.value.map((connection) => ({
+      from_step: connection.from_step || connection.from,
+      to_step: connection.to_step || connection.to,
+      condition: connection.condition,
+    })),
     tags: workflowForm.tags,
-    timeout: workflowForm.timeout,
-    retry_strategy: workflowForm.retryStrategy,
-    max_retries: workflowForm.maxRetries,
   }
 
-  console.log('Saving workflow:', workflowData)
-  ElMessage.success('Workflow saved successfully')
+  try {
+    await workflowApi.update(workflowId.value, workflowData)
+    ElMessage.success('Workflow saved successfully')
+  } catch (error) {
+    console.error('Failed to save workflow:', error)
+    ElMessage.error('Failed to save workflow')
+  }
 }
 
 async function onExecute() {
@@ -285,18 +264,6 @@ function onExport() {
 
 function onUpdateConnections(newConnections: any[]) {
   connections.value = newConnections
-}
-
-function updateWorkflowName() {
-  // Update workflow name
-}
-
-function updateWorkflowDescription() {
-  // Update workflow description
-}
-
-function updateWorkflowTags() {
-  // Update workflow tags
 }
 
 function validateWorkflow() {

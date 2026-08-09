@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '@/api'
+import { workflowApi } from '@/api/workflow'
 import type { Workflow, WorkflowCreate, WorkflowUpdate } from '@/types'
 
 export const useWorkflowStore = defineStore('workflow', () => {
@@ -105,12 +106,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     error.value = null
 
     try {
-      const response = await api.post(`/api/v1/workflows/${id}/execute`, {
-        workflow_id: id,
-        input_data: inputData,
-      })
-
-      return response.data
+      return await workflowApi.execute(id, inputData)
     } catch (e: any) {
       error.value = e.message
       throw e
