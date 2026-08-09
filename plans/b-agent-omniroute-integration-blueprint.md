@@ -1,7 +1,7 @@
 # B-agent × OmniRoute 二次改造实施蓝图
 
-> 状态：Draft for architecture review  
-> 日期：2026-08-09  
+> 状态：Draft for architecture review
+> 日期：2026-08-09
 > 目标：将 OmniRoute 作为 B-agent 的内部 AI Gateway，引入多模型路由、容灾、配额、成本和审计能力，同时保留 B-agent 的外贸销售业务域、工作流、渠道和人工接管能力。
 
 ## 1. 执行摘要
@@ -138,7 +138,7 @@ flowchart LR
 
 ### Gate -1 — 所有权与许可证确认
 
-**依赖：** 无，必须在任何开发前完成  
+**依赖：** 无，必须在任何开发前完成
 **目的：** 确认有权修改和分发两个项目，并确定交付物的许可证义务。
 
 **任务：**
@@ -155,8 +155,8 @@ flowchart LR
 
 ### Step 0 — 建立可构建的 B-agent 基线
 
-**依赖：** Gate -1  
-**建议交付：** PR 1A（仓库/构建）+ PR 1B（运行时/迁移/CI）  
+**依赖：** Gate -1
+**建议交付：** PR 1A（仓库/构建）+ PR 1B（运行时/迁移/CI）
 **目的：** 集成前先让原系统可重复构建和测试，否则无法判断问题来自 B-agent 还是 OmniRoute。
 
 **上下文：** 当前 B-agent 只有一次初始化提交，前端构建失败，Celery 依赖/Beat scheduler 不一致，README 有冲突，API 与页面调用有漂移。
@@ -189,8 +189,8 @@ curl -fsS http://localhost:8000/health
 
 ### Step 1 — 固化 ADR 和 Gateway 合同
 
-**依赖：** Step 0  
-**建议交付：** PR 2  
+**依赖：** Step 0
+**建议交付：** PR 2
 **目的：** 在写适配器前冻结边界，避免把 OmniRoute 内部实现泄露进业务层。
 
 **任务：**
@@ -213,8 +213,8 @@ curl -fsS http://localhost:8000/health
 
 ### Step 2 — 引入固定版本的 OmniRoute 内部服务
 
-**依赖：** Step 1  
-**建议交付：** PR 3  
+**依赖：** Step 1
+**建议交付：** PR 3
 **目的：** 先打通基础设施和健康检查，不迁移业务流量。
 
 **任务：**
@@ -244,8 +244,8 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 3 — 实现 Python Gateway Adapter 和双轨回滚
 
-**依赖：** Step 2  
-**建议交付：** PR 4  
+**依赖：** Step 2
+**建议交付：** PR 4
 **目的：** 用内部接口替换供应商 SDK 分支，但暂不大规模迁移 Skill。
 
 **主要文件：**
@@ -278,8 +278,8 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 4 — 增加业务 Use-case Policy 并迁移 AI Skill
 
-**依赖：** Step 3  
-**建议交付：** PR 5  
+**依赖：** Step 3
+**建议交付：** PR 5
 **目的：** 让业务表达“我要低成本分类/可靠回复”，而不是绑定 provider/model。
 
 **主要调用点：**
@@ -311,9 +311,9 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 5 — 调用归因、成本和健康度观测
 
-**依赖：** Step 3  
-**可与 Step 4、Step 7 并行：** 是  
-**建议交付：** PR 6  
+**依赖：** Step 3
+**可与 Step 4、Step 7 并行：** 是
+**建议交付：** PR 6
 **目的：** 把 Gateway 技术指标转成 B-agent 可理解的销售成本和可靠性指标。
 
 **任务：**
@@ -337,8 +337,8 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 6 — 改造管理台的 AI Gateway 页面
 
-**依赖：** Step 5  
-**建议交付：** PR 7  
+**依赖：** Step 5
+**建议交付：** PR 7
 **目的：** B-agent 展示业务相关配置和指标，不复制 OmniRoute 全量 Dashboard。
 
 **任务：**
@@ -360,9 +360,9 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 7 — 安全、隐私与租户隔离硬化
 
-**依赖：** Step 3  
-**可与 Step 4、Step 5 并行：** 是  
-**建议交付：** PR 8  
+**依赖：** Step 3
+**可与 Step 4、Step 5 并行：** 是
+**建议交付：** PR 8
 **目的：** 在真实客户数据进入 Gateway 前关闭最危险的信任边界问题。
 
 **任务：**
@@ -386,8 +386,8 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 8 — 质量评估、故障演练和性能测试
 
-**依赖：** Step 4、Step 5、Step 7  
-**建议交付：** PR 9  
+**依赖：** Step 4、Step 5、Step 7
+**建议交付：** PR 9
 **目的：** 证明“路由更便宜/更稳”没有以销售质量和合规为代价。
 
 **任务：**
@@ -409,8 +409,8 @@ docker compose exec backend curl -fsS -H "Authorization: Bearer $OMNIROUTE_API_K
 
 ### Step 9 — Canary、正式切流和旧代码退役
 
-**依赖：** Step 5、Step 7、Step 8；Step 6 的完整 UI 不阻塞 canary  
-**建议交付：** PR 10 + 发布变更  
+**依赖：** Step 5、Step 7、Step 8；Step 6 的完整 UI 不阻塞 canary
+**建议交付：** PR 10 + 发布变更
 **目的：** 可观察、可停止、可回滚地完成迁移。
 
 **任务：**

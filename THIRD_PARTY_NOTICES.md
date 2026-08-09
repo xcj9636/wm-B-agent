@@ -2,7 +2,7 @@
 
 ## OmniRoute
 
-Source: https://github.com/diegosouzapw/OmniRoute  
+Source: https://github.com/diegosouzapw/OmniRoute
 Candidate integration line: `release/v3.8.50`
 
 MIT License
