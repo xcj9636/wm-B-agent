@@ -49,6 +49,7 @@ test('application shell and login use macOS window conventions without legacy pu
   assert.match(layout, /sidebar-material/)
   assert.match(login, /login-window/)
   assert.match(login, /window-controls/)
+  assert.match(login, /\.login-page\s*\{[^}]*width:\s*100%/)
   assert.doesNotMatch(login, /#667eea|#764ba2/)
   assert.match(theme, /localStorage\.setItem\('theme'/)
 })
