@@ -1554,6 +1554,54 @@ class KnowledgeDocumentGrant(Base):
     )
 
 
+class AgentToolExecution(Base):
+    """Durable, fenced lifecycle for one server-authorized tool call."""
+
+    __tablename__ = "agent_tool_executions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    idempotency_key = Column(String(69), nullable=False, unique=True)
+    input_hash = Column(String(64), nullable=False)
+    run_id = Column(UUID(as_uuid=True), nullable=False)
+    turn_id = Column(UUID(as_uuid=True), nullable=False)
+    generation_epoch = Column(Integer, nullable=False)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    actor_user_id = Column(Integer, nullable=False)
+    tool_name = Column(String(128), nullable=False)
+    tool_version = Column(String(30), nullable=False)
+    risk = Column(String(20), nullable=False)
+    arguments = Column(JSON, nullable=False)
+    provenance = Column(JSON, nullable=False)
+    purpose = Column(String(255), nullable=False)
+    approval_required = Column(Boolean, nullable=False, default=False)
+    status = Column(String(30), nullable=False)
+    approved_by_user_id = Column(Integer)
+    approval_entitlements_hash = Column(String(64))
+    approved_at = Column(DateTime)
+    result_json = Column(JSON)
+    result_hash = Column(String(64))
+    error_code = Column(String(100))
+    outbox_event_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("outbox_events.id"),
+        unique=True,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_agent_tool_run_status", "run_id", "status"),
+        Index("idx_agent_tool_turn_status", "turn_id", "status"),
+        Index("idx_agent_tool_org_created", "org_id", "created_at"),
+    )
+
+
 class StatsDaily(Base):
     """Daily statistics model"""
     __tablename__ = "stats_daily"

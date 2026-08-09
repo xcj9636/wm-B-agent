@@ -102,8 +102,13 @@ def test_write_approval_requires_same_org_exact_call_and_four_eyes(db_session):
 
     with pytest.raises(ToolPolicyDenied, match="organization"):
         service.approve(call, approval, principal(uuid4(), 99, "sales"))
+    self_approval = ApprovalEnvelope(
+        call_id=call.call_id,
+        idempotency_key=call.idempotency_key,
+        approver_user_id=41,
+    )
     with pytest.raises(ToolPolicyDenied, match="separate"):
-        service.approve(call, approval, principal(org_id, 41, "sales"))
+        service.approve(call, self_approval, principal(org_id, 41, "sales"))
 
     approved = service.approve(call, approval, principal(org_id, 99, "sales"))
     assert row.status == "ready"
