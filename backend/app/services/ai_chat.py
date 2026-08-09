@@ -240,12 +240,16 @@ class AIChatService:
             return self._message_response(assistant)
         except BaseException:
             self._db.rollback()
-            self._fail_run(
+            may_fail_turn = self._fail_run(
                 run_service,
                 run,
                 worker_id=run_worker_id,
             )
-            coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
+            if may_fail_turn:
+                coordinator.fail(
+                    turn.id,
+                    generation_epoch=turn.generation_epoch,
+                )
             raise
         finally:
             if redaction_vault is not None:
@@ -391,12 +395,16 @@ class AIChatService:
             self._finish_turn(session, assistant, turn=turn)
         except BaseException:
             self._db.rollback()
-            self._fail_run(
+            may_fail_turn = self._fail_run(
                 run_service,
                 run,
                 worker_id=run_worker_id,
             )
-            coordinator.fail(turn.id, generation_epoch=turn.generation_epoch)
+            if may_fail_turn:
+                coordinator.fail(
+                    turn.id,
+                    generation_epoch=turn.generation_epoch,
+                )
             raise
         finally:
             if redaction_vault is not None:
@@ -525,12 +533,12 @@ class AIChatService:
                     except RunLeaseConflict:
                         run_service.recover_expired(now=datetime.utcnow())
                 else:
-                    self._fail_run(
+                    may_fail_turn = self._fail_run(
                         run_service,
                         run,
                         worker_id=worker_id,
                     )
-                    if turn is not None:
+                    if turn is not None and may_fail_turn:
                         coordinator.fail(
                             turn.id,
                             generation_epoch=turn.generation_epoch,
@@ -678,9 +686,11 @@ class AIChatService:
         run: Optional[AgentRun],
         *,
         worker_id: str,
-    ) -> None:
-        if run is None or run.status != "running":
-            return
+    ) -> bool:
+        if run is None:
+            return True
+        if run.status != "running":
+            return False
         try:
             service.fail(
                 run.id,
@@ -689,8 +699,10 @@ class AIChatService:
                 now=datetime.utcnow(),
                 commit=False,
             )
+            return True
         except RunLeaseConflict:
             service.recover_expired(now=datetime.utcnow())
+            return False
 
     def _messages_for_model(
         self, session: AIChatSession, current: AIChatMessage
