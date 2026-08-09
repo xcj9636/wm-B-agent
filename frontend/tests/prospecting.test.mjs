@@ -57,3 +57,19 @@ test('prospecting workspace exposes resumable batch enrichment jobs', () => {
   assert.match(messages, /'Request budget': '请求预算'/)
   assert.doesNotMatch(`${api}\n${view}`, /linkedin_handle/)
 })
+
+test('prospecting workspace exposes explainable ICP ranking and human review', () => {
+  const api = source('src/api/prospecting.ts')
+  const view = source('src/views/Prospecting.vue')
+  const messages = source('src/i18n/index.ts')
+
+  assert.match(api, /\/api\/v1\/prospecting\/icp-profile/)
+  assert.match(api, /\/score`/)
+  assert.match(api, /\/ranking`/)
+  assert.match(api, /\/review`/)
+  assert.match(view, /factor_scores/)
+  assert.match(view, /scoreActiveSearch/)
+  assert.match(view, /reviewScore/)
+  assert.match(messages, /'ICP ranking': 'ICP 优先级'/)
+  assert.match(messages, /'Why this score': '评分依据'/)
+})
