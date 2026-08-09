@@ -43,6 +43,13 @@
         :collapse="isCollapsed"
         class="console-menu"
       >
+        <el-menu-item index="/agent">
+          <el-icon><MagicStick /></el-icon>
+          <template #title>
+            {{ $t('Agent Center') }}
+          </template>
+        </el-menu-item>
+
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
           <template #title>

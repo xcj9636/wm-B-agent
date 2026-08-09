@@ -13,9 +13,15 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
-    redirect: '/dashboard',
+    redirect: '/agent',
     meta: { requiresAuth: true },
     children: [
+      {
+        path: 'agent',
+        name: 'AgentCenter',
+        component: () => import('@/views/AgentCenter.vue'),
+        meta: { title: 'Agent Center' },
+      },
       {
         path: 'dashboard',
         name: 'Dashboard',
@@ -118,8 +124,8 @@ router.beforeEach(async (to) => {
     }
   }
 
-  if (to.meta.guest && authStore.isAuthenticated) return { name: 'Dashboard' }
-  if (to.meta.requiresAdmin && !authStore.isAdmin) return { name: 'Dashboard' }
+  if (to.meta.guest && authStore.isAuthenticated) return { name: 'AgentCenter' }
+  if (to.meta.requiresAdmin && !authStore.isAdmin) return { name: 'AgentCenter' }
   return true
 })
 
