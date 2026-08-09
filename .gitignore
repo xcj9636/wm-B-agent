@@ -37,6 +37,8 @@ checkpoints/
 # Uploads and exports
 uploads/*
 exports/*
+data/secrets/*
+backend/data/secrets/*
 !uploads/.gitkeep
 !exports/.gitkeep
 

@@ -274,12 +274,13 @@ async def test_completion_accepts_an_approved_resolved_provider():
 
 
 @pytest.mark.asyncio
-async def test_streaming_fails_closed_when_provider_verification_is_required():
-    def unexpected_request(request):
-        raise AssertionError("unverifiable streaming traffic must not be sent")
-
+async def test_streaming_fails_closed_when_provider_header_is_missing():
     client = gateway_client(
-        unexpected_request,
+        lambda request: httpx.Response(
+            200,
+            content="data: [DONE]\n\n",
+            headers={"content-type": "text/event-stream"},
+        ),
         allowed_providers=["approved-provider"],
     )
 
@@ -288,3 +289,28 @@ async def test_streaming_fails_closed_when_provider_verification_is_required():
 
     assert raised.value.kind == GatewayErrorKind.INVALID_RESPONSE
     assert raised.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_streaming_accepts_verified_provider_response_headers():
+    client = gateway_client(
+        lambda request: httpx.Response(
+            200,
+            content=(
+                'data: {"id":"verified","choices":[{"delta":{"content":"ok"}}]}\n\n'
+                "data: [DONE]\n\n"
+            ),
+            headers={
+                "content-type": "text/event-stream",
+                "X-OmniRoute-Provider": "approved-provider",
+                "X-OmniRoute-Model": "reply-v1",
+            },
+        ),
+        allowed_providers=["approved-provider"],
+    )
+
+    chunks = [chunk async for chunk in client.stream(llm_request())]
+
+    assert chunks[0].delta == "ok"
+    assert chunks[0].resolved_provider == "approved-provider"
+    assert chunks[0].resolved_model == "reply-v1"

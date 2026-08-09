@@ -82,6 +82,8 @@ class LLMStreamChunk(BaseModel):
     finish_reason: Optional[str] = None
     usage: Optional[LLMUsage] = None
     gateway_request_id: Optional[str] = None
+    resolved_model: Optional[str] = None
+    resolved_provider: Optional[str] = None
 
 
 class GatewayErrorKind(str, Enum):

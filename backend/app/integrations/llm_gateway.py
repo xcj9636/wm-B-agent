@@ -137,14 +137,6 @@ class LLMGatewayClient:
             ) from exc
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMStreamChunk]:
-        if self._allowed_providers:
-            raise GatewayError(
-                GatewayErrorKind.INVALID_RESPONSE,
-                "Streaming is disabled when provider verification is required",
-                request_id=request.request_id,
-                retryable=False,
-            )
-
         payload = self._payload(request, stream=True)
         emitted = False
         saw_done = False
@@ -161,6 +153,12 @@ class LLMGatewayClient:
                 if not response.is_success:
                     await response.aread()
                 self._raise_for_status(response, request.request_id)
+                resolved_provider = response.headers.get("x-omniroute-provider")
+                resolved_model = response.headers.get("x-omniroute-model")
+                self._validate_resolved_provider(
+                    resolved_provider,
+                    request.request_id,
+                )
                 async for line in response.aiter_lines():
                     if line.startswith(":"):
                         continue
@@ -180,6 +178,8 @@ class LLMGatewayClient:
                         event,
                         request,
                         gateway_request_id,
+                        resolved_model,
+                        resolved_provider,
                     )
                     if chunk is not None:
                         emitted = True
@@ -194,6 +194,8 @@ class LLMGatewayClient:
                             event,
                             request,
                             gateway_request_id,
+                            resolved_model,
+                            resolved_provider,
                         )
                         if chunk is not None:
                             emitted = True
@@ -289,6 +291,8 @@ class LLMGatewayClient:
         event: str,
         request: LLMRequest,
         current_gateway_request_id: Optional[str],
+        resolved_model: Optional[str],
+        resolved_provider: Optional[str],
     ) -> Tuple[Optional[LLMStreamChunk], Optional[str]]:
         try:
             data = json.loads(event)
@@ -306,6 +310,8 @@ class LLMGatewayClient:
                     finish_reason=finish_reason,
                     usage=usage,
                     gateway_request_id=gateway_request_id,
+                    resolved_model=resolved_model,
+                    resolved_provider=resolved_provider,
                 ),
                 gateway_request_id,
             )

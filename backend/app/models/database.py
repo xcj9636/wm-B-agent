@@ -741,6 +741,83 @@ class OutboxResolutionApproval(Base):
     )
 
 
+class AIRuntimeConfiguration(Base):
+    """Versioned, non-secret AI routing configuration applied at request time."""
+
+    __tablename__ = "ai_runtime_configurations"
+
+    id = Column(Integer, primary_key=True, default=1)
+    backend = Column(String(20), nullable=False)
+    base_url = Column(String(500), nullable=False)
+    allowed_providers = Column(JSON, nullable=False, default=list)
+    model_aliases = Column(JSON, nullable=False, default=dict)
+    timeout_seconds = Column(Float, nullable=False, default=60.0)
+    version = Column(Integer, nullable=False, default=1)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+
+class AIChatSession(Base):
+    """Private workspace chat owned by one authenticated user."""
+
+    __tablename__ = "ai_chat_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(160), nullable=False, default="New conversation")
+    use_case = Column(String(50), nullable=False, default="live_reply")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    messages = relationship(
+        "AIChatMessage",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="AIChatMessage.created_at",
+    )
+
+    __table_args__ = (
+        Index("idx_ai_chat_session_user_updated", "user_id", "updated_at"),
+    )
+
+
+class AIChatMessage(Base):
+    """One persisted user or assistant turn in the operator chat."""
+
+    __tablename__ = "ai_chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    resolved_model = Column(String(255))
+    resolved_provider = Column(String(100))
+    gateway_request_id = Column(String(255))
+    usage_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    session = relationship("AIChatSession", back_populates="messages")
+
+    __table_args__ = (
+        Index("idx_ai_chat_message_session_created", "session_id", "created_at"),
+    )
+
+
 class StatsDaily(Base):
     """Daily statistics model"""
     __tablename__ = "stats_daily"
