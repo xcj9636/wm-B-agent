@@ -15,6 +15,9 @@ def test_dashboard_endpoint_serializes_empty_daily_stats(api_context):
     assert payload["month"]["emails_sent"] == 0
     assert payload["conversion_rate"] == 0
 
+    repeated_response = client.get("/api/v1/stats/dashboard")
+    assert repeated_response.status_code == 200, repeated_response.text
+
 
 def test_high_intent_endpoint_returns_only_prioritized_leads(api_context):
     client, db, _ = api_context

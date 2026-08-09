@@ -245,6 +245,9 @@ async def get_conversion_funnel(
 
 def _get_or_create_stats(db: Session, user_id: int, date):
     """获取或创建统计数据"""
+    if not isinstance(date, datetime):
+        date = datetime.combine(date, datetime.min.time())
+
     stats = db.query(StatsDaily).filter(
         StatsDaily.user_id == user_id,
         StatsDaily.date == date

@@ -4,7 +4,7 @@ Pydantic schemas for request/response validation
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Generic, TypeVar
 from uuid import UUID
-from pydantic import BaseModel, Field, EmailStr, validator
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, validator
 from enum import Enum
 
 
@@ -519,6 +519,8 @@ class TemplateResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     """Statistics response schema"""
+    model_config = ConfigDict(from_attributes=True)
+
     date: datetime
 
     # Customer stats
