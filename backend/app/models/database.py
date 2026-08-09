@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum,
-    JSON, Float, Index, UniqueConstraint, text
+    JSON, Float, Index, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.dialects.postgresql import UUID
@@ -1015,6 +1015,11 @@ class LLMInvocation(Base):
     idempotency_key = Column(String(255), nullable=False, unique=True)
     use_case = Column(String(50), nullable=False)
     backend = Column(String(50), nullable=False)
+    agent_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id"),
+    )
+    fencing_token = Column(Integer)
     status = Column(
         Enum(
             LLMInvocationStatus,
@@ -1050,7 +1055,13 @@ class LLMInvocation(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "(agent_run_id IS NULL AND fencing_token IS NULL) OR "
+            "(agent_run_id IS NOT NULL AND fencing_token IS NOT NULL)",
+            name="ck_llm_invocation_agent_run_fence",
+        ),
         Index("idx_llm_invocation_status_created", "status", "created_at"),
+        Index("idx_llm_invocation_agent_run", "agent_run_id"),
         Index("idx_llm_invocation_workflow", "workflow_execution_id"),
         Index("idx_llm_invocation_conversation", "conversation_id"),
     )

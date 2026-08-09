@@ -95,6 +95,10 @@ class LLMService:
         audit = self._start_audit(request, idempotency_key)
         if audit is not None and audit.cached_response is not None:
             return audit.cached_response
+        if audit is not None and request.request_id != audit.request_id:
+            request = request.model_copy(
+                update={"request_id": audit.request_id}
+            )
         try:
             response = await self._backend.complete(request)
         except Exception as exc:
@@ -133,6 +137,10 @@ class LLMService:
                 resolved_provider=response.resolved_provider,
             )
             return
+        if audit is not None and request.request_id != audit.request_id:
+            request = request.model_copy(
+                update={"request_id": audit.request_id}
+            )
 
         fragments: List[str] = []
         final_chunk: Optional[LLMStreamChunk] = None

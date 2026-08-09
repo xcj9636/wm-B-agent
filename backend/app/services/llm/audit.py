@@ -1,6 +1,7 @@
 """Transactional audit records for provider-neutral LLM invocations."""
 from datetime import datetime
-from typing import Tuple
+from typing import Optional, Tuple
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -24,17 +25,40 @@ class InvocationAuditService:
         idempotency_key: str,
         request: LLMRequest,
         backend: str,
+        run_id: Optional[UUID] = None,
+        fencing_token: Optional[int] = None,
     ) -> Tuple[LLMInvocation, bool]:
+        self._validate_fence(run_id, fencing_token)
         input_hash = canonical_hash(
             request.model_dump(mode="json", exclude={"request_id"})
         )
-        existing = self._session.query(LLMInvocation).filter(
-            LLMInvocation.idempotency_key == idempotency_key
-        ).one_or_none()
+        existing = (
+            self._session.query(LLMInvocation)
+            .filter(LLMInvocation.idempotency_key == idempotency_key)
+            .with_for_update()
+            .one_or_none()
+        )
         if existing is not None:
             if existing.input_hash != input_hash:
                 raise IdempotencyConflict(
                     "LLM idempotency key was reused for different input"
+                )
+            if existing.agent_run_id is not None:
+                if run_id != existing.agent_run_id:
+                    raise StaleInvocationFence(
+                        "LLM invocation belongs to a different agent run fence"
+                    )
+                if (
+                    existing.status == LLMInvocationStatus.PENDING
+                    and fencing_token is not None
+                    and fencing_token > existing.fencing_token
+                ):
+                    existing.fencing_token = fencing_token
+                    self._session.flush()
+                    return existing, True
+            elif run_id is not None:
+                raise StaleInvocationFence(
+                    "Unfenced LLM invocation cannot be claimed by an agent run"
                 )
             return existing, False
 
@@ -43,6 +67,8 @@ class InvocationAuditService:
             idempotency_key=idempotency_key,
             use_case=request.use_case.value,
             backend=backend,
+            agent_run_id=run_id,
+            fencing_token=fencing_token,
             status=LLMInvocationStatus.PENDING,
             input_hash=input_hash,
         )
@@ -54,7 +80,11 @@ class InvocationAuditService:
         self,
         invocation: LLMInvocation,
         response: LLMResponse,
+        *,
+        run_id: Optional[UUID] = None,
+        fencing_token: Optional[int] = None,
     ) -> LLMAttempt:
+        self._assert_current_fence(invocation, run_id, fencing_token)
         if response.request_id != invocation.request_id:
             raise ValueError("LLM response request ID does not match invocation")
 
@@ -99,8 +129,11 @@ class InvocationAuditService:
         *,
         error_kind: str,
         retryable: bool,
+        run_id: Optional[UUID] = None,
+        fencing_token: Optional[int] = None,
     ) -> LLMAttempt:
         """Record a normalized failure without persisting exception text."""
+        self._assert_current_fence(invocation, run_id, fencing_token)
         existing = self._session.query(LLMAttempt).filter(
             LLMAttempt.invocation_id == invocation.id,
             LLMAttempt.attempt_number == 1,
@@ -123,3 +156,39 @@ class InvocationAuditService:
         self._session.add(attempt)
         self._session.flush()
         return attempt
+
+    @staticmethod
+    def _validate_fence(
+        run_id: Optional[UUID],
+        fencing_token: Optional[int],
+    ) -> None:
+        if (run_id is None) != (fencing_token is None):
+            raise ValueError("run_id and fencing_token must be provided together")
+        if fencing_token is not None and fencing_token <= 0:
+            raise ValueError("fencing_token must be positive")
+
+    @classmethod
+    def _assert_current_fence(
+        cls,
+        invocation: LLMInvocation,
+        run_id: Optional[UUID],
+        fencing_token: Optional[int],
+    ) -> None:
+        cls._validate_fence(run_id, fencing_token)
+        if invocation.agent_run_id is None:
+            if run_id is not None:
+                raise StaleInvocationFence(
+                    "LLM invocation does not have an agent run fence"
+                )
+            return
+        if (
+            run_id != invocation.agent_run_id
+            or fencing_token != invocation.fencing_token
+        ):
+            raise StaleInvocationFence(
+                "LLM invocation completion lost its agent run fence"
+            )
+
+
+class StaleInvocationFence(RuntimeError):
+    """A superseded worker attempted to mutate an LLM invocation."""

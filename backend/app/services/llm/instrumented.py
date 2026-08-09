@@ -14,6 +14,7 @@ from app.services.llm.contracts import GatewayError, LLMRequest, LLMResponse
 @dataclass(frozen=True)
 class InvocationAuditStart:
     invocation_id: UUID
+    request_id: UUID
     created: bool
     cached_response: Optional[LLMResponse] = None
 
@@ -45,11 +46,15 @@ def _start_with_session(
     idempotency_key: str,
     request: LLMRequest,
     backend: str,
+    run_id: Optional[UUID] = None,
+    fencing_token: Optional[int] = None,
 ) -> InvocationAuditStart:
     invocation, created = InvocationAuditService(session).start(
         idempotency_key=idempotency_key,
         request=request,
         backend=backend,
+        run_id=run_id,
+        fencing_token=fencing_token,
     )
     cached = None
     if not created and invocation.status == LLMInvocationStatus.SUCCEEDED:
@@ -57,6 +62,7 @@ def _start_with_session(
     session.commit()
     return InvocationAuditStart(
         invocation_id=invocation.id,
+        request_id=invocation.request_id,
         created=created,
         cached_response=cached,
     )
@@ -66,11 +72,19 @@ def _succeed_with_session(
     session: Session,
     invocation_id: UUID,
     response: LLMResponse,
+    *,
+    run_id: Optional[UUID] = None,
+    fencing_token: Optional[int] = None,
 ) -> None:
     invocation = session.get(LLMInvocation, invocation_id)
     if invocation is None:
         raise LookupError("LLM invocation audit record not found")
-    InvocationAuditService(session).succeed(invocation, response)
+    InvocationAuditService(session).succeed(
+        invocation,
+        response,
+        run_id=run_id,
+        fencing_token=fencing_token,
+    )
     session.commit()
 
 
@@ -78,6 +92,9 @@ def _fail_with_session(
     session: Session,
     invocation_id: UUID,
     error: Exception,
+    *,
+    run_id: Optional[UUID] = None,
+    fencing_token: Optional[int] = None,
 ) -> None:
     invocation = session.get(LLMInvocation, invocation_id)
     if invocation is None:
@@ -92,6 +109,8 @@ def _fail_with_session(
         invocation,
         error_kind=error_kind,
         retryable=retryable,
+        run_id=run_id,
+        fencing_token=fencing_token,
     )
     session.commit()
 
@@ -99,17 +118,42 @@ def _fail_with_session(
 class SessionInvocationAuditSink:
     """Audit using the request-owned SQLAlchemy session."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        run_id: Optional[UUID] = None,
+        fencing_token: Optional[int] = None,
+    ) -> None:
         self._session = session
+        self._run_id = run_id
+        self._fencing_token = fencing_token
 
     def start(self, **kwargs) -> InvocationAuditStart:
-        return _start_with_session(self._session, **kwargs)
+        return _start_with_session(
+            self._session,
+            **kwargs,
+            run_id=self._run_id,
+            fencing_token=self._fencing_token,
+        )
 
     def succeed(self, invocation_id: UUID, response: LLMResponse) -> None:
-        _succeed_with_session(self._session, invocation_id, response)
+        _succeed_with_session(
+            self._session,
+            invocation_id,
+            response,
+            run_id=self._run_id,
+            fencing_token=self._fencing_token,
+        )
 
     def fail(self, invocation_id: UUID, error: Exception) -> None:
-        _fail_with_session(self._session, invocation_id, error)
+        _fail_with_session(
+            self._session,
+            invocation_id,
+            error,
+            run_id=self._run_id,
+            fencing_token=self._fencing_token,
+        )
 
 
 class SessionFactoryInvocationAuditSink:
