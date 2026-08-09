@@ -1,12 +1,32 @@
 """Authenticated Agent Center APIs."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_active_user
 from app.config import settings
 from app.core.agent import get_agent
 from app.core.skill_base import SkillRegistry
+from app.db import get_db
 from app.models.database import User
+from app.services.agent_research import (
+    AgentResearchService,
+    DraftCreate,
+    DraftReview,
+    OutreachDraftResponse,
+    ResearchConflict,
+    ResearchDraftInvalid,
+    ResearchEvidenceUpdate,
+    ResearchJobCreate,
+    ResearchJobResponse,
+    ResearchNotFound,
+    ResearchReview,
+)
+from app.services.ai_runtime import AIRuntimeService, get_ai_runtime_service
+from app.services.llm.contracts import GatewayError
 
 
 router = APIRouter()
@@ -65,6 +85,21 @@ def _capabilities():
     ]
 
 
+def _research_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ResearchNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, ResearchConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, ResearchDraftInvalid):
+        return HTTPException(status_code=502, detail=str(exc))
+    if isinstance(exc, GatewayError):
+        return HTTPException(
+            status_code=503,
+            detail=f"AI gateway request failed: {exc.kind.value}",
+        )
+    return HTTPException(status_code=503, detail="AI runtime is unavailable")
+
+
 @router.get("/overview")
 async def get_agent_overview(
     current_user: User = Depends(get_current_active_user),
@@ -111,6 +146,146 @@ async def list_agent_runs(
     current_user: User = Depends(get_current_active_user),
 ):
     return get_agent().list_execution_statuses()
+
+
+@router.get(
+    "/research-jobs",
+    response_model=List[ResearchJobResponse],
+)
+def list_research_jobs(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return AgentResearchService(db).list_jobs(user_id=current_user.id)
+
+
+@router.post(
+    "/research-jobs",
+    response_model=ResearchJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_research_job(
+    command: ResearchJobCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return AgentResearchService(db).create_job(
+            command,
+            user_id=current_user.id,
+        )
+    except ResearchNotFound as exc:
+        raise _research_http_error(exc) from exc
+
+
+@router.get(
+    "/research-jobs/{job_id}",
+    response_model=ResearchJobResponse,
+)
+def get_research_job(
+    job_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return AgentResearchService(db).get_job(
+            job_id,
+            user_id=current_user.id,
+        )
+    except ResearchNotFound as exc:
+        raise _research_http_error(exc) from exc
+
+
+@router.put(
+    "/research-jobs/{job_id}/evidence",
+    response_model=ResearchJobResponse,
+)
+def update_research_evidence(
+    job_id: UUID,
+    command: ResearchEvidenceUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return AgentResearchService(db).update_evidence(
+            job_id,
+            command,
+            user_id=current_user.id,
+        )
+    except ResearchNotFound as exc:
+        raise _research_http_error(exc) from exc
+
+
+@router.post(
+    "/research-jobs/{job_id}/review",
+    response_model=ResearchJobResponse,
+)
+def review_research_job(
+    job_id: UUID,
+    command: ResearchReview,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return AgentResearchService(db).review_job(
+            job_id,
+            command,
+            user_id=current_user.id,
+        )
+    except (ResearchNotFound, ResearchConflict) as exc:
+        raise _research_http_error(exc) from exc
+
+
+@router.post(
+    "/research-jobs/{job_id}/drafts",
+    response_model=OutreachDraftResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_research_draft(
+    job_id: UUID,
+    command: DraftCreate,
+    response: Response,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    runtime: AIRuntimeService = Depends(get_ai_runtime_service),
+):
+    try:
+        draft, created = await AgentResearchService(db).create_draft(
+            job_id,
+            command,
+            user_id=current_user.id,
+            runtime=runtime,
+        )
+        response.status_code = 201 if created else 200
+        return draft
+    except (
+        ResearchNotFound,
+        ResearchConflict,
+        ResearchDraftInvalid,
+        GatewayError,
+        RuntimeError,
+    ) as exc:
+        raise _research_http_error(exc) from exc
+
+
+@router.patch(
+    "/outreach-drafts/{draft_id}/review",
+    response_model=OutreachDraftResponse,
+)
+def review_research_draft(
+    draft_id: UUID,
+    command: DraftReview,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return AgentResearchService(db).review_draft(
+            draft_id,
+            command,
+            user_id=current_user.id,
+        )
+    except (ResearchNotFound, ResearchConflict) as exc:
+        raise _research_http_error(exc) from exc
 
 
 @router.get("/runs/{execution_id}")

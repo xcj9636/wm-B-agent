@@ -232,6 +232,11 @@ class Customer(Base):
         back_populates="customer",
         cascade="all, delete-orphan",
     )
+    research_jobs = relationship(
+        "AgentResearchJob",
+        back_populates="customer",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index('idx_customer_platform_status', 'platform', 'status'),
@@ -440,6 +445,103 @@ class ProspectingContactScore(Base):
     __table_args__ = (
         Index("idx_prospecting_score_profile_score", "profile_id", "base_score"),
         Index("idx_prospecting_score_review", "review_status", "reviewed_at"),
+    )
+
+
+class AgentResearchJob(Base):
+    """Versioned, user-owned dossier built from explicitly sourced evidence."""
+
+    __tablename__ = "agent_research_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    customer_id = Column(
+        Integer,
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    objective = Column(String(500), nullable=False)
+    status = Column(String(30), nullable=False, default="queued")
+    profile_evidence_json = Column(JSON, nullable=False, default=list)
+    market_signals_json = Column(JSON, nullable=False, default=list)
+    missing_fields_json = Column(JSON, nullable=False, default=list)
+    version = Column(Integer, nullable=False, default=1)
+    review_reason = Column(Text)
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    customer = relationship("Customer", back_populates="research_jobs")
+    drafts = relationship(
+        "ResearchOutreachDraft",
+        back_populates="research_job",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("idx_agent_research_user_status", "user_id", "status", "updated_at"),
+        Index("idx_agent_research_customer", "customer_id", "updated_at"),
+    )
+
+
+class ResearchOutreachDraft(Base):
+    """Evidence-bound outbound draft; approval never implies delivery."""
+
+    __tablename__ = "research_outreach_drafts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    research_job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_research_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    customer_id = Column(
+        Integer,
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    channel = Column(String(30), nullable=False)
+    language = Column(String(20), nullable=False)
+    goal = Column(String(500), nullable=False)
+    subject = Column(String(255))
+    body = Column(Text, nullable=False)
+    personalization_points_json = Column(JSON, nullable=False, default=list)
+    evidence_ids_json = Column(JSON, nullable=False, default=list)
+    status = Column(String(30), nullable=False, default="draft")
+    research_version = Column(Integer, nullable=False)
+    resolved_model = Column(String(255))
+    resolved_provider = Column(String(100))
+    gateway_request_id = Column(String(255))
+    usage_json = Column(JSON, nullable=False, default=dict)
+    review_reason = Column(Text)
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id"))
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    research_job = relationship("AgentResearchJob", back_populates="drafts")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_research_draft_user_idempotency",
+        ),
+        Index("idx_research_draft_job_status", "research_job_id", "status"),
     )
 
 

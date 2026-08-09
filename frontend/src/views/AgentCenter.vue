@@ -14,6 +14,9 @@
         <p>{{ $t('See how B-agent discovers prospects, runs skills, routes AI and converts conversations.') }}</p>
       </div>
       <div class="heading-actions">
+        <el-button @click="router.push('/settings')">
+          {{ $t('Configure AI route') }}
+        </el-button>
         <el-button @click="router.push('/workflows')">
           {{ $t('Open workflow studio') }}
         </el-button>
@@ -85,6 +88,136 @@
         </div>
       </div>
     </article>
+
+    <div class="section-heading research-heading">
+      <div>
+        <p class="page-kicker">
+          {{ $t('Evidence-led account intelligence') }}
+        </p>
+        <h2>{{ $t('Research queue') }}</h2>
+        <p>{{ $t('Build sourced company dossiers, review market signals and create approval-only outreach drafts.') }}</p>
+      </div>
+      <el-button
+        type="primary"
+        @click="openCreateResearch"
+      >
+        {{ $t('New research job') }}
+      </el-button>
+    </div>
+
+    <div class="research-metrics">
+      <div>
+        <span>{{ $t('Queued') }}</span>
+        <strong>{{ researchCounts.queued }}</strong>
+      </div>
+      <div>
+        <span>{{ $t('Awaiting review') }}</span>
+        <strong>{{ researchCounts.inReview }}</strong>
+      </div>
+      <div>
+        <span>{{ $t('Approved dossiers') }}</span>
+        <strong>{{ researchCounts.completed }}</strong>
+      </div>
+      <div>
+        <span>{{ $t('Outreach drafts') }}</span>
+        <strong>{{ researchCounts.drafts }}</strong>
+      </div>
+    </div>
+
+    <el-card
+      shadow="never"
+      class="research-card"
+    >
+      <el-table
+        v-loading="researchLoading"
+        :data="researchJobs"
+        row-key="id"
+        :empty-text="$t('No research jobs yet')"
+      >
+        <el-table-column
+          :label="$t('Company')"
+          min-width="190"
+        >
+          <template #default="{ row }">
+            <div class="research-company">
+              <strong>{{ row.company_name }}</strong>
+              <a
+                v-if="row.website"
+                :href="row.website"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ row.website }}</a>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="objective"
+          :label="$t('Research objective')"
+          min-width="220"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          :label="$t('Status')"
+          width="130"
+        >
+          <template #default="{ row }">
+            <el-tag
+              :type="researchStatusType(row.status)"
+              effect="plain"
+            >
+              {{ $t(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Evidence')"
+          width="126"
+        >
+          <template #default="{ row }">
+            {{ row.profile_evidence.length + row.market_signals.length }} · v{{ row.version }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Missing signals')"
+          min-width="170"
+        >
+          <template #default="{ row }">
+            <span v-if="row.missing_fields.length">{{ formatMissingFields(row.missing_fields) }}</span>
+            <el-tag
+              v-else
+              type="success"
+              size="small"
+              effect="plain"
+            >
+              {{ $t('Complete') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="$t('Actions')"
+          min-width="250"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              @click="openEvidence(row)"
+            >
+              {{ $t('Evidence review') }}
+            </el-button>
+            <el-button
+              link
+              type="primary"
+              :disabled="row.status !== 'completed'"
+              @click="openDraft(row)"
+            >
+              {{ $t('Generate outreach draft') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
     <div class="section-heading">
       <div>
@@ -287,6 +420,311 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <el-dialog
+      v-model="createResearchVisible"
+      append-to-body
+      :title="$t('New research job')"
+      width="min(560px, 94vw)"
+    >
+      <el-form label-position="top">
+        <el-form-item :label="$t('Customer')">
+          <el-select
+            v-model="researchCreate.customer_id"
+            filterable
+            :placeholder="$t('Choose an imported customer')"
+          >
+            <el-option
+              v-for="customer in customers"
+              :key="customer.id"
+              :label="customer.company_name || customer.username || customer.email || `#${customer.id}`"
+              :value="customer.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('Research objective')">
+          <el-input
+            v-model="researchCreate.objective"
+            type="textarea"
+            :rows="3"
+            :placeholder="$t('Example: validate distributor fit and recent expansion signals')"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createResearchVisible = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="creatingResearch"
+          :disabled="!researchCreate.customer_id || researchCreate.objective.trim().length < 3"
+          @click="createResearchJob"
+        >
+          {{ $t('Create research job') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="evidenceVisible"
+      class="research-dialog"
+      append-to-body
+      :title="$t('Evidence review')"
+      width="min(880px, 96vw)"
+      top="4vh"
+    >
+      <div
+        v-if="activeResearch"
+        class="evidence-workbench"
+      >
+        <div class="dialog-context">
+          <div>
+            <span>{{ $t('Company') }}</span>
+            <strong>{{ activeResearch.company_name }}</strong>
+          </div>
+          <div>
+            <span>{{ $t('Research objective') }}</span>
+            <strong>{{ activeResearch.objective }}</strong>
+          </div>
+          <el-tag :type="researchStatusType(activeResearch.status)">
+            {{ $t(activeResearch.status) }} · v{{ activeResearch.version }}
+          </el-tag>
+        </div>
+
+        <div class="evidence-section">
+          <div class="evidence-heading">
+            <div>
+              <strong>{{ $t('Company profile evidence') }}</strong>
+              <span>{{ $t('Every value must include a public HTTP(S) source.') }}</span>
+            </div>
+            <el-button @click="addProfileEvidence">
+              {{ $t('Add profile evidence') }}
+            </el-button>
+          </div>
+          <div
+            v-for="(item, index) in evidenceDraft.profile_evidence"
+            :key="`profile-${index}`"
+            class="evidence-row profile-row"
+          >
+            <el-select v-model="item.field">
+              <el-option
+                v-for="field in profileFields"
+                :key="field"
+                :label="$t(field)"
+                :value="field"
+              />
+            </el-select>
+            <el-input
+              v-model="item.value"
+              :placeholder="$t('Observed value')"
+            />
+            <el-input
+              v-model="item.source_url"
+              placeholder="https://"
+            />
+            <el-input-number
+              v-model="item.confidence"
+              :min="0"
+              :max="1"
+              :step="0.05"
+            />
+            <el-button
+              circle
+              text
+              type="danger"
+              :aria-label="$t('Remove')"
+              @click="evidenceDraft.profile_evidence.splice(index, 1)"
+            >
+              ×
+            </el-button>
+          </div>
+        </div>
+
+        <div class="evidence-section">
+          <div class="evidence-heading">
+            <div>
+              <strong>{{ $t('Market signals') }}</strong>
+              <span>{{ $t('Record a specific event, its date and the original source.') }}</span>
+            </div>
+            <el-button @click="addMarketSignal">
+              {{ $t('Add market signal') }}
+            </el-button>
+          </div>
+          <div
+            v-for="(item, index) in evidenceDraft.market_signals"
+            :key="`signal-${index}`"
+            class="evidence-row signal-row"
+          >
+            <el-select v-model="item.type">
+              <el-option
+                v-for="signal in signalTypes"
+                :key="signal"
+                :label="$t(signal)"
+                :value="signal"
+              />
+            </el-select>
+            <el-input
+              v-model="item.summary"
+              :placeholder="$t('Observed market signal')"
+            />
+            <el-input
+              v-model="item.source_url"
+              placeholder="https://"
+            />
+            <el-input-number
+              v-model="item.confidence"
+              :min="0"
+              :max="1"
+              :step="0.05"
+            />
+            <el-button
+              circle
+              text
+              type="danger"
+              :aria-label="$t('Remove')"
+              @click="evidenceDraft.market_signals.splice(index, 1)"
+            >
+              ×
+            </el-button>
+          </div>
+        </div>
+
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          :title="$t('AI will only receive evidence from the approved dossier and current ICP context.')"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="evidenceVisible = false">
+          {{ $t('Close') }}
+        </el-button>
+        <el-button
+          :loading="savingEvidence"
+          @click="saveEvidence"
+        >
+          {{ $t('Save evidence') }}
+        </el-button>
+        <el-button
+          type="danger"
+          plain
+          :disabled="activeResearch?.status !== 'in_review'"
+          @click="reviewResearch('reject')"
+        >
+          {{ $t('Request revision') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="activeResearch?.status !== 'in_review'"
+          @click="reviewResearch('approve')"
+        >
+          {{ $t('Approve dossier') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="draftVisible"
+      class="draft-dialog"
+      append-to-body
+      :title="$t('Generate outreach draft')"
+      width="min(720px, 95vw)"
+      top="5vh"
+    >
+      <div
+        v-if="activeResearch"
+        class="draft-workbench"
+      >
+        <el-alert
+          v-if="latestDraft?.stale"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="$t('This draft is stale because its research dossier changed.')"
+        />
+        <el-form label-position="top">
+          <div class="draft-form-grid">
+            <el-form-item :label="$t('Channel')">
+              <el-select v-model="draftCreate.channel">
+                <el-option
+                  :label="$t('Email')"
+                  value="email"
+                />
+                <el-option
+                  :label="$t('WhatsApp')"
+                  value="whatsapp"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="$t('Language')">
+              <el-input v-model="draftCreate.language" />
+            </el-form-item>
+          </div>
+          <el-form-item :label="$t('One clear goal')">
+            <el-input
+              v-model="draftCreate.goal"
+              :placeholder="$t('Example: request a 20-minute distributor-fit call')"
+            />
+          </el-form-item>
+        </el-form>
+
+        <div
+          v-if="latestDraft"
+          class="draft-preview"
+        >
+          <div class="draft-meta">
+            <el-tag :type="draftStatusType(latestDraft.status)">
+              {{ $t(latestDraft.status) }}
+            </el-tag>
+            <span>{{ latestDraft.resolved_provider || $t('Provider unavailable') }} · {{ latestDraft.resolved_model || $t('Model unavailable') }}</span>
+          </div>
+          <div v-if="latestDraft.subject">
+            <span>{{ $t('Subject') }}</span>
+            <strong>{{ latestDraft.subject }}</strong>
+          </div>
+          <div>
+            <span>{{ $t('Body') }}</span>
+            <pre>{{ latestDraft.body }}</pre>
+          </div>
+          <div class="draft-evidence">
+            <span>{{ $t('Evidence references') }}</span>
+            <code
+              v-for="evidenceId in latestDraft.evidence_ids"
+              :key="evidenceId"
+            >{{ evidenceId }}</code>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="draftVisible = false">
+          {{ $t('Close') }}
+        </el-button>
+        <el-button
+          :loading="generatingDraft"
+          :disabled="draftCreate.goal.trim().length < 3"
+          @click="generateDraft"
+        >
+          {{ $t('Generate outreach draft') }}
+        </el-button>
+        <el-button
+          type="danger"
+          plain
+          :disabled="!latestDraft || latestDraft.status !== 'draft'"
+          @click="reviewDraft('reject')"
+        >
+          {{ $t('Reject draft') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!latestDraft || latestDraft.status !== 'draft' || latestDraft.stale"
+          @click="reviewDraft('approve')"
+        >
+          {{ $t('Approve draft') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -294,35 +732,244 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { agentApi } from '@/api/agent'
-import type { AgentOverview, AgentRun } from '@/types/agent'
+import { customerApi } from '@/api/customer'
+import type { Customer } from '@/types'
+import type {
+  AgentOverview,
+  AgentResearchJob,
+  AgentRun,
+  ResearchEvidenceUpdate,
+  ResearchOutreachDraft,
+} from '@/types/agent'
 import { translate } from '@/i18n'
+
+type ResearchCustomerOption = Customer & { company_name?: string }
 
 const router = useRouter()
 const loading = ref(false)
 const errorMessage = ref('')
 const overview = ref<AgentOverview | null>(null)
 const runs = ref<AgentRun[]>([])
+const customers = ref<ResearchCustomerOption[]>([])
+const researchJobs = ref<AgentResearchJob[]>([])
+const researchLoading = ref(false)
+const createResearchVisible = ref(false)
+const creatingResearch = ref(false)
+const evidenceVisible = ref(false)
+const savingEvidence = ref(false)
+const draftVisible = ref(false)
+const generatingDraft = ref(false)
+const activeResearch = ref<AgentResearchJob | null>(null)
+const researchCreate = ref({ customer_id: undefined as number | undefined, objective: '' })
+const evidenceDraft = ref<ResearchEvidenceUpdate>({ profile_evidence: [], market_signals: [] })
+const draftCreate = ref({
+  channel: 'email' as 'email' | 'whatsapp',
+  language: 'en',
+  goal: '',
+  idempotency_key: '',
+})
+
+const profileFields = ['industry', 'country', 'company_size', 'company_type', 'website', 'market'] as const
+const signalTypes = ['market_expansion', 'product_launch', 'hiring', 'funding', 'certification', 'distribution', 'partnership', 'news', 'other'] as const
 
 const configuredModels = computed(() => Object.entries(overview.value?.routing.models || {}).filter(([, model]) => Boolean(model)))
 const providerPolicy = computed(() => overview.value?.routing.provider_policy.length
   ? overview.value.routing.provider_policy.join(', ')
   : translate('No providers approved'))
+const researchCounts = computed(() => ({
+  queued: researchJobs.value.filter((item) => item.status === 'queued').length,
+  inReview: researchJobs.value.filter((item) => ['in_review', 'needs_revision'].includes(item.status)).length,
+  completed: researchJobs.value.filter((item) => item.status === 'completed').length,
+  drafts: researchJobs.value.reduce((count, item) => count + item.drafts.length, 0),
+}))
+const latestDraft = computed(() => activeResearch.value?.drafts[0] ?? null)
 
 async function loadAgent() {
   loading.value = true
+  researchLoading.value = true
   errorMessage.value = ''
   try {
-    const [overviewResult, runResult] = await Promise.all([
+    const [overviewResult, runResult, researchResult, customerResult] = await Promise.all([
       agentApi.overview(),
       agentApi.runs(),
+      agentApi.researchJobs(),
+      customerApi.list({ page: 1, page_size: 100 }),
     ])
     overview.value = overviewResult
     runs.value = runResult
+    researchJobs.value = researchResult
+    customers.value = customerResult.items as ResearchCustomerOption[]
   } catch {
     errorMessage.value = translate('Agent runtime could not be loaded.')
   } finally {
     loading.value = false
+    researchLoading.value = false
+  }
+}
+
+function openCreateResearch() {
+  researchCreate.value = { customer_id: undefined, objective: '' }
+  createResearchVisible.value = true
+}
+
+async function createResearchJob() {
+  if (!researchCreate.value.customer_id) return
+  creatingResearch.value = true
+  try {
+    const created = await agentApi.createResearchJob({
+      customer_id: researchCreate.value.customer_id,
+      objective: researchCreate.value.objective.trim(),
+    })
+    researchJobs.value.unshift(created)
+    createResearchVisible.value = false
+    ElMessage.success(translate('Research job created.'))
+  } catch {
+    ElMessage.error(translate('Research job could not be created.'))
+  } finally {
+    creatingResearch.value = false
+  }
+}
+
+function openEvidence(job: AgentResearchJob) {
+  activeResearch.value = job
+  evidenceDraft.value = {
+    profile_evidence: job.profile_evidence.map((item) => ({
+      field: item.field,
+      value: item.value,
+      source_url: item.source_url,
+      observed_at: item.observed_at,
+      confidence: item.confidence,
+    })),
+    market_signals: job.market_signals.map((item) => ({
+      type: item.type,
+      summary: item.summary,
+      source_url: item.source_url,
+      observed_at: item.observed_at,
+      confidence: item.confidence,
+    })),
+  }
+  if (!evidenceDraft.value.profile_evidence.length) addProfileEvidence()
+  if (!evidenceDraft.value.market_signals.length) addMarketSignal()
+  evidenceVisible.value = true
+}
+
+function addProfileEvidence() {
+  evidenceDraft.value.profile_evidence.push({
+    field: 'industry',
+    value: '',
+    source_url: '',
+    observed_at: new Date().toISOString(),
+    confidence: 0.8,
+  })
+}
+
+function addMarketSignal() {
+  evidenceDraft.value.market_signals.push({
+    type: 'market_expansion',
+    summary: '',
+    source_url: '',
+    observed_at: new Date().toISOString(),
+    confidence: 0.8,
+  })
+}
+
+function replaceResearchJob(job: AgentResearchJob) {
+  const index = researchJobs.value.findIndex((item) => item.id === job.id)
+  if (index >= 0) researchJobs.value.splice(index, 1, job)
+  else researchJobs.value.unshift(job)
+  activeResearch.value = job
+}
+
+async function saveEvidence() {
+  if (!activeResearch.value) return
+  savingEvidence.value = true
+  try {
+    const updated = await agentApi.updateResearchEvidence(
+      activeResearch.value.id,
+      evidenceDraft.value,
+    )
+    replaceResearchJob(updated)
+    ElMessage.success(translate('Research evidence saved for review.'))
+  } catch {
+    ElMessage.error(translate('Research evidence could not be saved. Check every source URL and field.'))
+  } finally {
+    savingEvidence.value = false
+  }
+}
+
+async function reviewResearch(decision: 'approve' | 'reject') {
+  if (!activeResearch.value) return
+  try {
+    const prompt = await ElMessageBox.prompt(
+      translate(decision === 'approve' ? 'Record why this dossier is approved.' : 'Describe what evidence must be revised.'),
+      translate(decision === 'approve' ? 'Approve dossier' : 'Request revision'),
+      { inputValidator: (value: string) => value.trim().length >= 3 || translate('A review reason is required.') },
+    )
+    const reason = (prompt as { value: string }).value.trim()
+    const updated = await agentApi.reviewResearchJob(activeResearch.value.id, {
+      decision,
+      reason,
+    })
+    replaceResearchJob(updated)
+    ElMessage.success(translate(decision === 'approve' ? 'Research dossier approved.' : 'Revision requested.'))
+  } catch (error) {
+    if (isDialogCancel(error)) return
+    ElMessage.error(translate('Research review could not be saved.'))
+  }
+}
+
+function openDraft(job: AgentResearchJob) {
+  activeResearch.value = job
+  draftCreate.value = {
+    channel: 'email',
+    language: 'en',
+    goal: '',
+    idempotency_key: `research-${job.id}-${window.crypto.randomUUID()}`,
+  }
+  draftVisible.value = true
+}
+
+async function generateDraft() {
+  if (!activeResearch.value) return
+  generatingDraft.value = true
+  try {
+    const draft = await agentApi.createOutreachDraft(activeResearch.value.id, {
+      ...draftCreate.value,
+      goal: draftCreate.value.goal.trim(),
+      language: draftCreate.value.language.trim(),
+    })
+    const drafts = activeResearch.value.drafts.filter((item) => item.id !== draft.id)
+    replaceResearchJob({ ...activeResearch.value, drafts: [draft, ...drafts] })
+    ElMessage.success(translate('Evidence-bound draft generated.'))
+  } catch {
+    ElMessage.error(translate('Draft could not be generated. Check ICP, contact verification and AI route configuration.'))
+  } finally {
+    generatingDraft.value = false
+  }
+}
+
+async function reviewDraft(decision: 'approve' | 'reject') {
+  const draft = latestDraft.value
+  if (!draft || !activeResearch.value) return
+  try {
+    const prompt = await ElMessageBox.prompt(
+      translate(decision === 'approve' ? 'Record why this draft is ready.' : 'Describe why this draft is rejected.'),
+      translate(decision === 'approve' ? 'Approve draft' : 'Reject draft'),
+      { inputValidator: (value: string) => value.trim().length >= 3 || translate('A review reason is required.') },
+    )
+    const reason = (prompt as { value: string }).value.trim()
+    const reviewed = await agentApi.reviewOutreachDraft(draft.id, {
+      decision,
+      reason,
+    })
+    const drafts = activeResearch.value.drafts.map((item) => item.id === reviewed.id ? reviewed : item)
+    replaceResearchJob({ ...activeResearch.value, drafts })
+    ElMessage.success(translate(decision === 'approve' ? 'Draft approved for later delivery workflow.' : 'Draft rejected.'))
+  } catch (error) {
+    if (isDialogCancel(error)) return
+    ElMessage.error(translate('Draft review could not be saved.'))
   }
 }
 
@@ -332,6 +979,25 @@ function capabilityReady(name: string) {
 
 function statusType(status: AgentRun['status']) {
   return ({ completed: 'success', failed: 'danger', running: 'primary', paused: 'warning', cancelled: 'info', pending: 'info' } as const)[status]
+}
+
+function researchStatusType(status: AgentResearchJob['status']) {
+  return ({ queued: 'info', in_review: 'warning', completed: 'success', needs_revision: 'danger' } as const)[status]
+}
+
+function draftStatusType(status: ResearchOutreachDraft['status']) {
+  return ({ draft: 'info', approved: 'success', rejected: 'danger' } as const)[status]
+}
+
+function formatMissingFields(values: string[]) {
+  return values.map((item) => translate(item)).join(', ')
+}
+
+function isDialogCancel(error: unknown) {
+  const action = typeof error === 'string'
+    ? error
+    : (error as { action?: string } | null)?.action
+  return action === 'cancel' || action === 'close'
 }
 
 function formatKey(value: string) {
@@ -357,6 +1023,12 @@ onMounted(loadAgent)
 .runtime-grid { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .runtime-metric { display: grid; min-height: 92px; align-content: center; gap: 8px; padding: 16px; border: 1px solid var(--border-hairline); border-radius: 16px; background: color-mix(in srgb, var(--surface-elevated) 78%, transparent); }.runtime-metric span { color: var(--el-text-color-secondary); font-size: 12px; }.runtime-metric strong { font-size: 22px; letter-spacing: -0.03em; white-space: nowrap; }.runtime-metric:first-child strong { font-size: 18px; }
 .section-heading { display: flex; justify-content: space-between; margin-top: 4px; }.section-heading h2 { margin: 3px 0 7px; font-size: 24px; letter-spacing: -0.025em; }.section-heading p:last-child { margin: 0; color: var(--el-text-color-secondary); }
+.research-heading { align-items: end; gap: 20px; }
+.research-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }.research-metrics > div { display: grid; gap: 7px; padding: 16px 18px; border: 1px solid var(--border-hairline); border-radius: 16px; background: var(--surface-elevated); box-shadow: var(--shadow-card); }.research-metrics span { color: var(--el-text-color-secondary); font-size: 12px; }.research-metrics strong { font-size: 24px; letter-spacing: -0.04em; }
+.research-card :deep(.el-card__body) { padding-top: 8px; }.research-company { display: grid; gap: 4px; }.research-company strong { font-size: 13px; }.research-company a { overflow: hidden; color: var(--apple-blue); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-workbench, .draft-workbench { display: grid; gap: 18px; }.dialog-context { display: grid; grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1.2fr) auto; align-items: center; gap: 16px; padding: 15px; border-radius: 14px; background: var(--el-fill-color-light); }.dialog-context > div { display: grid; gap: 4px; }.dialog-context span { color: var(--el-text-color-secondary); font-size: 11px; }.dialog-context strong { font-size: 13px; }
+.evidence-section { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border-hairline); border-radius: 16px; }.evidence-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.evidence-heading > div { display: grid; gap: 4px; }.evidence-heading span { color: var(--el-text-color-secondary); font-size: 12px; }.evidence-row { display: grid; grid-template-columns: 150px minmax(170px, 1fr) minmax(210px, 1.2fr) 110px 34px; align-items: center; gap: 8px; }.evidence-row :deep(.el-input-number) { width: 100%; }
+.draft-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.draft-preview { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--border-hairline); border-radius: 16px; background: var(--el-fill-color-extra-light); }.draft-preview > div:not(.draft-meta) { display: grid; gap: 6px; }.draft-preview span { color: var(--el-text-color-secondary); font-size: 11px; }.draft-preview pre { margin: 0; font: inherit; line-height: 1.7; white-space: pre-wrap; }.draft-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.draft-evidence code { overflow: hidden; font-size: 10px; text-overflow: ellipsis; }
 .pipeline-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .pipeline-card { --pipeline-accent: var(--apple-blue); overflow: hidden; padding: 20px; border: 1px solid var(--border-hairline); border-radius: 20px; background: var(--surface-elevated); box-shadow: var(--shadow-card); }.pipeline-card--green { --pipeline-accent: var(--el-color-success); }.pipeline-card--orange { --pipeline-accent: var(--el-color-warning); }
 .pipeline-header { display: flex; min-height: 94px; gap: 13px; }.pipeline-index { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 11px; background: color-mix(in srgb, var(--pipeline-accent) 12%, transparent); color: var(--pipeline-accent); font-size: 12px; font-weight: 700; }.pipeline-header h3 { margin: 2px 0 6px; font-size: 17px; }.pipeline-header p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
@@ -365,6 +1037,10 @@ onMounted(loadAgent)
 .routing-details { display: grid; gap: 0; margin: 0; }.routing-details > div { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 11px 0; border-bottom: 1px solid var(--border-hairline); }.routing-details dt { color: var(--el-text-color-secondary); }.routing-details dd { margin: 0; font-weight: 600; text-align: right; }.model-list { display: grid; gap: 8px; margin-top: 14px; }.model-list > div { display: grid; grid-template-columns: 1fr minmax(130px, auto); gap: 12px; padding: 9px 11px; border-radius: 10px; background: var(--el-fill-color-light); }.model-list span { color: var(--el-text-color-secondary); font-size: 12px; }.model-list code { font-size: 11px; text-align: right; }
 .capability-list { display: grid; max-height: 390px; overflow: auto; }.capability-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px 2px; border-bottom: 1px solid var(--border-hairline); }.capability-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-danger); }.capability-dot.is-ready { background: var(--el-color-success); box-shadow: 0 0 0 4px color-mix(in srgb, var(--el-color-success) 12%, transparent); }.capability-row > div { display: grid; gap: 3px; }.capability-row strong { font-size: 13px; }.capability-row span { color: var(--el-text-color-secondary); font-size: 11px; }.capability-row code { color: var(--el-text-color-secondary); font-size: 11px; }
 .runs-card :deep(.el-card__body) { padding-top: 4px; }
-@media (max-width: 1180px) { .agent-hero { grid-template-columns: 1fr; }.pipeline-grid { grid-template-columns: 1fr; }.pipeline-header { min-height: auto; }.agent-details-grid { grid-template-columns: 1fr; } }
-@media (max-width: 720px) { .heading-actions { width: 100%; }.heading-actions .el-button { flex: 1; margin: 0; }.agent-hero { padding: 20px; }.agent-identity { align-items: flex-start; }.agent-orb { width: 64px; flex-basis: 64px; border-radius: 18px; }.agent-orb img { width: 44px; height: 44px; }.runtime-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.agent-details-grid { display: block; }.agent-details-grid > * + * { margin-top: 16px; }.capability-row { grid-template-columns: 10px minmax(0, 1fr); }.capability-row code { grid-column: 2; }.pipeline-card { padding: 16px; } }
+@media (max-width: 1180px) { .agent-hero { grid-template-columns: 1fr; }.pipeline-grid { grid-template-columns: 1fr; }.pipeline-header { min-height: auto; }.agent-details-grid { grid-template-columns: 1fr; }.evidence-row { grid-template-columns: 140px 1fr 1fr; }.evidence-row > :nth-child(4) { grid-column: 1 / 2; }.evidence-row > :nth-child(5) { grid-column: 3; grid-row: 2; justify-self: end; } }
+@media (max-width: 720px) { .heading-actions { width: 100%; }.heading-actions .el-button { flex: 1; margin: 0; }.agent-hero { padding: 20px; }.agent-identity { align-items: flex-start; }.agent-orb { width: 64px; flex-basis: 64px; border-radius: 18px; }.agent-orb img { width: 44px; height: 44px; }.runtime-grid, .research-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.research-heading { align-items: stretch; flex-direction: column; }.agent-details-grid { display: block; }.agent-details-grid > * + * { margin-top: 16px; }.capability-row { grid-template-columns: 10px minmax(0, 1fr); }.capability-row code { grid-column: 2; }.pipeline-card { padding: 16px; }.dialog-context { grid-template-columns: 1fr; }.evidence-heading { align-items: stretch; flex-direction: column; }.evidence-row { grid-template-columns: 1fr; padding-bottom: 14px; border-bottom: 1px solid var(--border-hairline); }.evidence-row > :nth-child(4), .evidence-row > :nth-child(5) { grid-column: 1; grid-row: auto; }.evidence-row > :nth-child(5) { justify-self: end; }.draft-form-grid { grid-template-columns: 1fr; }.draft-meta { align-items: flex-start; flex-direction: column; } }
+</style>
+
+<style lang="scss">
+.research-dialog, .draft-dialog { max-height: 92vh; overflow: auto; }
 </style>

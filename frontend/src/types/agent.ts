@@ -58,3 +58,67 @@ export interface AgentOverview {
   pipelines: AgentPipeline[]
   capabilities: AgentCapability[]
 }
+
+export interface ResearchProfileEvidence {
+  id: string
+  field: 'industry' | 'country' | 'company_size' | 'company_type' | 'website' | 'market'
+  value: string
+  source_url: string
+  observed_at: string
+  confidence: number
+}
+
+export interface ResearchMarketSignal {
+  id: string
+  type: 'market_expansion' | 'product_launch' | 'hiring' | 'funding' | 'certification' | 'distribution' | 'partnership' | 'news' | 'other'
+  summary: string
+  source_url: string
+  observed_at: string
+  confidence: number
+}
+
+export interface ResearchOutreachDraft {
+  id: string
+  research_job_id: string
+  customer_id: number
+  channel: 'email' | 'whatsapp'
+  language: string
+  goal: string
+  subject?: string
+  body: string
+  personalization_points: string[]
+  evidence_ids: string[]
+  status: 'draft' | 'approved' | 'rejected'
+  research_version: number
+  stale: boolean
+  resolved_model?: string
+  resolved_provider?: string
+  usage: Record<string, unknown>
+  review_reason?: string
+  reviewed_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentResearchJob {
+  id: string
+  customer_id: number
+  company_name: string
+  website?: string
+  objective: string
+  status: 'queued' | 'in_review' | 'completed' | 'needs_revision'
+  profile_evidence: ResearchProfileEvidence[]
+  market_signals: ResearchMarketSignal[]
+  missing_fields: string[]
+  version: number
+  review_reason?: string
+  reviewed_at?: string
+  drafts: ResearchOutreachDraft[]
+  created_at: string
+  updated_at: string
+}
+
+export type ResearchEvidenceUpdate = {
+  profile_evidence: Omit<ResearchProfileEvidence, 'id'>[]
+  market_signals: Omit<ResearchMarketSignal, 'id'>[]
+}

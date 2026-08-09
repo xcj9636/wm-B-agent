@@ -49,8 +49,9 @@ class FakeRuntime:
 
 
 def seed_customer(db, *, suppressed=False, stale_icp=False):
+    suffix = db.query(Customer).count() + 1
     customer = Customer(
-        username="ada.buyer",
+        username=f"ada.buyer.{suffix}",
         platform="hunter",
         email="ada@acme.example",
         company_name="Acme Distribution",
