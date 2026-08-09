@@ -2,8 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.database import AgentTurn, User
+from app.models.database import AIChatMessage, AgentTurn, User
 from app.services.ai_chat import AIChatService
+from app.services.data_policy import DataPolicyUnavailable
 from app.services.idempotency import IdempotencyConflict
 from app.services.llm.contracts import (
     GatewayError,
@@ -13,11 +14,14 @@ from app.services.llm.contracts import (
 
 
 class ChatBackend:
-    def __init__(self, *, fail=False):
+    def __init__(self, *, fail=False, content="safe response"):
         self.fail = fail
+        self.content = content
         self.closed = False
+        self.requests = []
 
     async def complete(self, request):
+        self.requests.append(request)
         if self.fail:
             raise GatewayError(
                 GatewayErrorKind.UPSTREAM_UNAVAILABLE,
@@ -25,7 +29,7 @@ class ChatBackend:
                 request_id=request.request_id,
                 retryable=True,
             )
-        return LLMResponse(request_id=request.request_id, content="safe response")
+        return LLMResponse(request_id=request.request_id, content=self.content)
 
     async def aclose(self):
         self.closed = True
@@ -187,3 +191,39 @@ async def test_backend_construction_failure_closes_the_durable_turn(db_session):
     turn = db_session.query(AgentTurn).one()
     assert turn.status == "failed"
     assert turn.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_chat_redacts_pii_before_llm_and_rehydrates_final_response(db_session):
+    backend = ChatBackend(content="Contact [[EMAIL_1]] after review.")
+    user, session, service = user_and_session(db_session, backend)
+
+    response = await service.complete(
+        session.id,
+        user.id,
+        "Please contact buyer@example.com",
+        idempotency_key="chat-redacted-pii",
+    )
+
+    serialized = backend.requests[0].model_dump_json()
+    assert "buyer@example.com" not in serialized
+    assert "[[EMAIL_1]]" in serialized
+    assert response.content == "Contact buyer@example.com after review."
+
+
+@pytest.mark.asyncio
+async def test_restricted_secret_is_rejected_before_message_or_llm_persistence(db_session):
+    backend = ChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+
+    with pytest.raises(DataPolicyUnavailable):
+        await service.complete(
+            session.id,
+            user.id,
+            "Use token sk-abcdefghijklmnopqrstuvwxyz123456",
+            idempotency_key="chat-restricted-secret",
+        )
+
+    assert backend.requests == []
+    assert db_session.query(AIChatMessage).count() == 0
+    assert db_session.query(AgentTurn).one().status == "failed"

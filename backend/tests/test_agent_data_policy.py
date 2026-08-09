@@ -40,6 +40,20 @@ def test_redaction_vault_uses_run_scoped_placeholders_and_controlled_rehydration
         vault.rehydrate(redacted.text, run_id="another-run")
 
 
+def test_redaction_vault_accumulates_unique_placeholders_across_context_sections():
+    vault = RedactionVault()
+
+    first = vault.redact("First: one@example.com", run_id="run-2")
+    second = vault.redact("Second: two@example.com", run_id="run-2")
+
+    assert "[[EMAIL_1]]" in first.text
+    assert "[[EMAIL_2]]" in second.text
+    assert vault.rehydrate(
+        f"{first.text} / {second.text}",
+        run_id="run-2",
+    ) == "First: one@example.com / Second: two@example.com"
+
+
 def test_provider_policy_fails_closed_when_route_or_dependency_is_missing():
     policy = ProviderRoutePolicy(
         {
