@@ -221,9 +221,19 @@ def schedule_outreach_task(
                         "error": exc.error_code,
                     }
                 )
-            except Exception as e:
-                logger.error(f"Failed to send to customer {customer_id}: {str(e)}")
-                results.append({"customer_id": customer_id, "status": "failed", "error": str(e)})
+            except Exception as exc:
+                logger.error(
+                    "Outreach queue failed for customer_id=%s error_type=%s",
+                    customer_id,
+                    type(exc).__name__,
+                )
+                results.append(
+                    {
+                        "customer_id": customer_id,
+                        "status": "failed",
+                        "error": "outreach_queue_failed",
+                    }
+                )
 
         db.commit()
 

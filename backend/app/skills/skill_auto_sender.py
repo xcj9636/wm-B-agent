@@ -16,6 +16,7 @@ from app.core.skill_base import BaseSkill, register_skill
 from app.core.context import ExecutionContext
 from app.db import SessionLocal
 from app.services.outreach_queue import (
+    OutreachQuotaExceeded,
     OutreachQueueService,
     QueueOutreachCommand,
 )
@@ -312,9 +313,12 @@ class AutoSenderSkill(BaseSkill):
                 result["status"] = "queued"
             result["account_id"] = account.get("id") if account else None
 
-        except Exception as e:
+        except OutreachQuotaExceeded as exc:
             result["status"] = "failed"
-            result["error"] = str(e)
+            result["error"] = exc.error_code
+        except Exception:
+            result["status"] = "failed"
+            result["error"] = "outreach_queue_failed"
 
         return result
 

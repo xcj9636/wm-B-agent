@@ -108,7 +108,6 @@ def test_schedule_task_queues_once_without_network_or_early_quota_update(
     finally:
         session.close()
 
-
 @pytest.mark.asyncio
 async def test_auto_sender_queues_instead_of_opening_smtp(
     session_factory,
@@ -289,6 +288,24 @@ def test_dead_letter_marks_outreach_failed_without_consuming_quota(
     finally:
         session.close()
 
+    monkeypatch.setattr(
+        task_functions,
+        "get_outbox_delivery_router",
+        lambda: UnknownRouter(),
+    )
+    task_functions.dispatch_outbox_task.run(worker_id="worker-1", batch_size=10)
+
+    session = session_factory()
+    try:
+        log = session.get(OutreachLog, log_id)
+        account = session.get(Account, account_id)
+        assert log.status == OutreachStatus.FAILED
+        assert log.error_msg == "provider_response_lost"
+        assert log.sent_at is None
+        assert account.today_sent == 0
+    finally:
+        session.close()
+
 
 @pytest.mark.asyncio
 async def test_auto_sender_sanitizes_queue_failures(
@@ -363,21 +380,3 @@ def test_schedule_task_sanitizes_queue_failures(
     assert result["results"][0]["error"] == "outreach_queue_failed"
     assert private_detail not in str(result)
     assert private_detail not in caplog.text
-
-    monkeypatch.setattr(
-        task_functions,
-        "get_outbox_delivery_router",
-        lambda: UnknownRouter(),
-    )
-    task_functions.dispatch_outbox_task.run(worker_id="worker-1", batch_size=10)
-
-    session = session_factory()
-    try:
-        log = session.get(OutreachLog, log_id)
-        account = session.get(Account, account_id)
-        assert log.status == OutreachStatus.FAILED
-        assert log.error_msg == "provider_response_lost"
-        assert log.sent_at is None
-        assert account.today_sent == 0
-    finally:
-        session.close()
