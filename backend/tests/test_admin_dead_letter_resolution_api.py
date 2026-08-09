@@ -172,3 +172,26 @@ def test_confirmed_sent_reconciles_without_external_delivery(api_context):
     assert "Private message body" not in second.text
     assert "provider-audit/SENT-001" not in second.text
 
+
+def test_resolution_rejects_invalid_outreach_aggregate_identity(api_context):
+    client, db, first_admin = api_context
+    first_admin.is_superuser = True
+    second_admin = create_admin(db, username="second-invalid-aggregate-admin")
+    event, _, _ = create_dead_outreach(db, key="invalid-aggregate")
+    event.aggregate_id = "not-a-uuid"
+    db.commit()
+    request_body = {
+        "action": "confirmed_sent",
+        "evidence_reference": "provider-audit/SENT-INVALID-001",
+        "external_message_id": "provider-message-invalid-001",
+    }
+
+    first = client.post(approval_url(event), json=request_body)
+    app.dependency_overrides[get_current_active_user] = lambda: second_admin
+    second = client.post(approval_url(event), json=request_body)
+    db.refresh(event)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"] == "Invalid outreach aggregate identity"
+    assert event.status == OutboxStatus.DEAD_LETTER
