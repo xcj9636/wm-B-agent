@@ -82,3 +82,22 @@ def test_connector_update_is_versioned_and_secret_is_write_only(
     stored = db.query(ConnectorConfiguration).one()
     assert Path(stored.secret_ref).read_text() == "second-secret"
 
+
+def test_connector_cannot_be_enabled_before_a_healthy_probe(
+    api_context,
+    tmp_path,
+    monkeypatch,
+):
+    client, db, user = api_context
+    user.is_superuser = True
+    db.commit()
+    monkeypatch.setattr(settings, "CONNECTOR_SECRET_DIR", str(tmp_path))
+    connector = client.post(
+        "/api/v1/connectors",
+        json={"provider": "hunter", "name": "Primary", "secret": "secret"},
+    ).json()
+
+    response = client.post(f"/api/v1/connectors/{connector['id']}/enable")
+
+    assert response.status_code == 409
+    assert "connection test" in response.json()["detail"].lower()
