@@ -1,6 +1,6 @@
 # 可靠执行与 Outbox 运维 Runbook
 
-本文覆盖 LLM 调用审计和对外消息 Outbox 的数据库状态机。它提供持久幂等、投递租约、有限重试和死信隔离，但当前仍是基础设施阶段：遗留的 `schedule_outreach_task` 与 `skill_auto_sender` 尚未全部切换到 Outbox，不能把本文当作“所有发送链路已迁移”的声明。
+本文覆盖 LLM 调用审计和对外消息 Outbox 的数据库状态机。它提供持久幂等、投递租约、有限重试和死信隔离。`schedule_outreach_task` 与 `AutoSenderSkill` 已切换到 Outbox；新增外发入口仍必须通过 `OutreachQueueService`，不得重新引入生产者直连 SMTP 或 WhatsApp API。
 
 ## 1. 数据与隐私边界
 
@@ -24,6 +24,10 @@ alembic current
 ## 3. 生产者事务规则
 
 业务写入和 `OutboxService.enqueue()` 必须使用同一个数据库 session，并由调用方统一 commit。禁止在 enqueue 与业务变更之间提交，否则会出现“业务已成功但事件丢失”或相反状态。
+
+触达业务应调用 `OutreachQueueService.queue()`，由它在同一事务创建 `OutreachLog` 和 `OutboxEvent`。定时批次必须提供稳定的 `schedule_config.idempotency_key`；AutoSender 使用 workflow execution ID 生成业务键。不要用当前时间或随机数作为重试时的幂等键。
+
+账号日额度在入队时通过账号行锁预留，计算口径为 `today_sent + pending + scheduled`。真正发送成功后 Worker 才增加 `today_sent`；死信不会消耗已发送额度。Outbox payload 只能包含投递目标和消息内容，账号凭证不得进入 payload。
 
 同一个 `(channel, business_key, event_type)`：
 
@@ -74,4 +78,3 @@ docker compose stop celery_worker
 ```
 
 回滚应用镜像后，仅在数据模型兼容且旧版本不会直接发送同一业务动作时恢复 Worker。数据库 downgrade 是最后手段；执行前必须导出 `llm_invocations`、`llm_attempts`、`outbox_events` 并确认没有 PENDING、RETRY 或 PROCESSING 事件。
-
