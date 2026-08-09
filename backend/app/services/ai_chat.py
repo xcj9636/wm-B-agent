@@ -179,7 +179,9 @@ class AIChatService:
             )
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
-            self._db.flush()
+            self._db.commit()
+            self._db.refresh(turn)
+            self._db.refresh(user_message)
             runtime_config = self._runtime.get_config()
             backend = self._runtime.build_backend()
             service = LLMService(
@@ -314,7 +316,9 @@ class AIChatService:
             )
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
-            self._db.flush()
+            self._db.commit()
+            self._db.refresh(turn)
+            self._db.refresh(user_message)
             runtime_config = self._runtime.get_config()
             backend = self._runtime.build_backend()
             service = LLMService(
@@ -396,6 +400,147 @@ class AIChatService:
             "event": "done",
             "data": self._message_response(assistant).model_dump(mode="json"),
         }
+
+    async def resume_claimed(
+        self,
+        run_id: UUID,
+        *,
+        worker_id: str,
+        fencing_token: int,
+    ) -> AIChatMessageResponse:
+        """Resume one safely leased chat run from its durable user message."""
+        run_service = AgentRunService(self._db)
+        coordinator = AgentTurnCoordinator(self._db)
+        run = self._db.get(AgentRun, run_id)
+        turn: Optional[AgentTurn] = None
+        lease_validated = False
+        backend = None
+        redaction_vault = None
+        rehydration_placeholders: set[str] = set()
+        concurrency_lease: Optional[ConcurrencyLease] = None
+        try:
+            if run is None:
+                raise LookupError("Agent run not found")
+            run = run_service.heartbeat(
+                run.id,
+                worker_id=worker_id,
+                fencing_token=fencing_token,
+                now=datetime.utcnow(),
+                lease_seconds=self.RUN_LEASE_SECONDS,
+            )
+            lease_validated = True
+            turn, session, user_message = self._recoverable_chat_context(run)
+            self._enforce_current_input_policy(Sensitivity(run.sensitivity))
+            concurrency_lease = await self._concurrency.acquire(
+                ConcurrencyRequest(
+                    org_id=run.org_id,
+                    user_id=run.user_id,
+                ),
+                now=datetime.now(timezone.utc),
+                lease_seconds=settings.AGENT_CONCURRENCY_LEASE_SECONDS,
+            )
+            runtime_config = self._runtime.get_config()
+            backend = self._runtime.build_backend()
+            service = LLMService(
+                backend,
+                audit_sink=SessionInvocationAuditSink(self._db),
+                backend_name=runtime_config.backend,
+            )
+            (
+                model_messages,
+                redaction_vault,
+                rehydration_placeholders,
+            ) = self._redact_model_messages(
+                self._messages_for_model(session, user_message),
+                run_id=str(turn.id),
+            )
+            response = await service.complete(
+                LLMUseCase.LIVE_REPLY,
+                model_messages,
+                temperature=0.3,
+                max_output_tokens=1600,
+                idempotency_key=f"ai-chat:{turn.id}:llm",
+            )
+            response_content = redaction_vault.rehydrate(
+                response.content,
+                run_id=str(turn.id),
+                allowed_placeholders=rehydration_placeholders,
+            )
+            assistant = AIChatMessage(
+                session_id=session.id,
+                role="assistant",
+                content=response_content,
+                resolved_model=response.resolved_model,
+                resolved_provider=response.resolved_provider,
+                gateway_request_id=response.gateway_request_id,
+                usage_json=response.usage.model_dump(),
+            )
+            coordinator.complete(
+                turn.id,
+                generation_epoch=turn.generation_epoch,
+                commit=False,
+            )
+            run_service.complete(
+                run.id,
+                worker_id=worker_id,
+                fencing_token=fencing_token,
+                now=datetime.utcnow(),
+                commit=False,
+            )
+            self._finish_turn(session, assistant, turn=turn)
+            return self._message_response(assistant)
+        except BaseException:
+            self._db.rollback()
+            if lease_validated:
+                self._fail_run(
+                    run_service,
+                    run,
+                    worker_id=worker_id,
+                )
+                if turn is not None:
+                    coordinator.fail(
+                        turn.id,
+                        generation_epoch=turn.generation_epoch,
+                    )
+            raise
+        finally:
+            if redaction_vault is not None and turn is not None:
+                redaction_vault.purge(run_id=str(turn.id))
+            if concurrency_lease is not None:
+                await self._release_concurrency(concurrency_lease)
+            if backend is not None:
+                await self._close_backend(backend)
+
+    def _recoverable_chat_context(
+        self,
+        run: AgentRun,
+    ) -> tuple[AgentTurn, AIChatSession, AIChatMessage]:
+        if (
+            run.use_case != LLMUseCase.LIVE_REPLY.value
+            or run.org_id != settings.AGENT_ORG_ID
+            or run.session_id is None
+            or run.turn_id is None
+        ):
+            raise ValueError("Agent run is not a recoverable AI chat run")
+        session = self._owned_session(run.session_id, run.user_id)
+        turn = self._db.get(AgentTurn, run.turn_id)
+        if (
+            turn is None
+            or turn.session_id != session.id
+            or turn.status != "running"
+            or turn.generation_epoch != run.generation_epoch
+            or session.generation_epoch != run.generation_epoch
+            or turn.user_message_id is None
+        ):
+            raise RunLeaseConflict("AI chat turn lost its recovery fence")
+        user_message = self._db.get(AIChatMessage, turn.user_message_id)
+        if (
+            user_message is None
+            or user_message.session_id != session.id
+            or user_message.role != "user"
+        ):
+            raise LookupError("Durable AI chat input is unavailable")
+        return turn, session, user_message
 
     def _owned_session(self, session_id: UUID, user_id: int) -> AIChatSession:
         row = (
