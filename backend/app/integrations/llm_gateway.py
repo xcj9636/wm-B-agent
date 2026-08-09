@@ -1,6 +1,7 @@
 """OpenAI-compatible inference adapter for the internal OmniRoute gateway."""
 import json
-from typing import Any, AsyncIterator, Dict, Mapping, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Iterable, Mapping, Optional, Set, Tuple
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -24,10 +25,16 @@ class LLMGatewayClient:
         base_url: str,
         api_key: str,
         model_aliases: Mapping[LLMUseCase, str],
+        allowed_providers: Iterable[str] = (),
         timeout_seconds: float = 60.0,
         http_client: Optional[httpx.AsyncClient] = None,
     ) -> None:
         self._model_aliases = dict(model_aliases)
+        self._allowed_providers = {
+            provider.strip().lower()
+            for provider in allowed_providers
+            if provider.strip()
+        }
         self._owns_client = http_client is None
         self._client = http_client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -41,6 +48,40 @@ class LLMGatewayClient:
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+    async def list_models(self) -> Set[str]:
+        """Return model and combo IDs exposed to this gateway API key."""
+        request_id = uuid4()
+        try:
+            response = await self._client.get(
+                "/v1/models",
+                headers=self._headers_for_request_id(request_id),
+            )
+        except httpx.TimeoutException as exc:
+            raise self._timeout_error(request_id) from exc
+        except httpx.HTTPError as exc:
+            raise GatewayError(
+                GatewayErrorKind.UPSTREAM_UNAVAILABLE,
+                "Gateway model discovery failed",
+                request_id=request_id,
+                retryable=True,
+            ) from exc
+
+        self._raise_for_status(response, request_id)
+        try:
+            data = response.json()["data"]
+            models = {item["id"] for item in data}
+            if not models or not all(isinstance(model, str) for model in models):
+                raise ValueError("model list is empty or invalid")
+            return models
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GatewayError(
+                GatewayErrorKind.INVALID_RESPONSE,
+                "Gateway returned an invalid model list",
+                request_id=request_id,
+                status_code=response.status_code,
+                retryable=False,
+            ) from exc
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         payload = self._payload(request, stream=False)
@@ -60,11 +101,15 @@ class LLMGatewayClient:
                 retryable=True,
             ) from exc
 
-        self._raise_for_status(response, request)
+        self._raise_for_status(response, request.request_id)
         try:
             data = response.json()
             choice = data["choices"][0]
             usage = self._usage(data.get("usage"))
+            self._validate_resolved_provider(
+                data.get("provider"),
+                request.request_id,
+            )
             return LLMResponse(
                 request_id=request.request_id,
                 content=choice["message"]["content"],
@@ -101,7 +146,7 @@ class LLMGatewayClient:
             ) as response:
                 if not response.is_success:
                     await response.aread()
-                self._raise_for_status(response, request)
+                self._raise_for_status(response, request.request_id)
                 async for line in response.aiter_lines():
                     if line.startswith(":"):
                         continue
@@ -203,7 +248,27 @@ class LLMGatewayClient:
         return model
 
     def _request_headers(self, request: LLMRequest) -> Dict[str, str]:
-        return {**self._headers, "X-Request-Id": str(request.request_id)}
+        return self._headers_for_request_id(request.request_id)
+
+    def _headers_for_request_id(self, request_id: UUID) -> Dict[str, str]:
+        return {**self._headers, "X-Request-Id": str(request_id)}
+
+    def _validate_resolved_provider(
+        self,
+        provider: Optional[str],
+        request_id: UUID,
+    ) -> None:
+        if not self._allowed_providers:
+            return
+
+        normalized = provider.strip().lower() if provider else ""
+        if normalized not in self._allowed_providers:
+            raise GatewayError(
+                GatewayErrorKind.INVALID_RESPONSE,
+                "Gateway resolved an unapproved or unknown provider",
+                request_id=request_id,
+                retryable=False,
+            )
 
     def _stream_chunk(
         self,
@@ -250,16 +315,19 @@ class LLMGatewayClient:
         )
 
     @staticmethod
-    def _timeout_error(request: LLMRequest) -> GatewayError:
+    def _timeout_error(request: LLMRequest | UUID) -> GatewayError:
+        request_id = (
+            request.request_id if isinstance(request, LLMRequest) else request
+        )
         return GatewayError(
             GatewayErrorKind.TIMEOUT,
             "Gateway request timed out",
-            request_id=request.request_id,
+            request_id=request_id,
             retryable=True,
         )
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response, request: LLMRequest) -> None:
+    def _raise_for_status(response: httpx.Response, request_id: UUID) -> None:
         if response.is_success:
             return
 
@@ -288,7 +356,7 @@ class LLMGatewayClient:
         raise GatewayError(
             kind,
             f"Gateway returned HTTP {status_code}",
-            request_id=request.request_id,
+            request_id=request_id,
             status_code=status_code,
             retryable=retryable,
         )
