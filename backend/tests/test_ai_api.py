@@ -1,0 +1,147 @@
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from app.main import app
+from app.services.ai_chat import get_ai_chat_service
+from app.services.ai_runtime import (
+    AIRuntimeConfig,
+    AIRuntimeProbe,
+    get_ai_runtime_service,
+)
+from app.services.llm.contracts import LLMResponse, LLMUsage
+
+
+class FakeRuntimeService:
+    def __init__(self):
+        self.updated = None
+
+    def get_config(self):
+        return AIRuntimeConfig(
+            backend="omniroute",
+            base_url="http://omniroute.test",
+            allowed_providers=["approved-provider"],
+            model_aliases={"message_draft": "draft-v1", "live_reply": "reply-v1"},
+            timeout_seconds=60,
+            source="runtime",
+            version=4,
+            api_key_configured=True,
+            updated_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
+        )
+
+    def update_config(self, update, updated_by_user_id):
+        self.updated = (update, updated_by_user_id)
+        return self.get_config().model_copy(update={"version": 5})
+
+    async def probe(self):
+        return AIRuntimeProbe(ready=True, reachable=True, models=["draft-v1", "reply-v1"], issues=[])
+
+    async def list_models(self):
+        return ["draft-v1", "reply-v1"]
+
+
+class FakeChatService:
+    def __init__(self):
+        self.session_id = uuid4()
+
+    def list_sessions(self, user_id):
+        return []
+
+    def create_session(self, user_id, title=None):
+        return {
+            "id": self.session_id,
+            "title": title or "New conversation",
+            "use_case": "live_reply",
+            "created_at": datetime(2026, 8, 9, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 8, 9, tzinfo=timezone.utc),
+            "messages": [],
+        }
+
+    def get_session(self, session_id, user_id):
+        return self.create_session(user_id, "Export planning")
+
+    async def complete(self, session_id, user_id, content):
+        return {
+            "id": uuid4(),
+            "session_id": session_id,
+            "role": "assistant",
+            "content": "Prioritize EU distributors.",
+            "resolved_model": "reply-v1",
+            "resolved_provider": "approved-provider",
+            "usage": {"input_tokens": 5, "output_tokens": 4, "total_tokens": 9},
+            "created_at": datetime(2026, 8, 9, tzinfo=timezone.utc),
+        }
+
+    async def stream(self, session_id, user_id, content):
+        yield {"event": "delta", "data": {"delta": "Prioritize "}}
+        yield {"event": "delta", "data": {"delta": "EU distributors."}}
+        yield {"event": "done", "data": {"session_id": str(session_id)}}
+
+
+def test_ai_runtime_config_is_admin_only_and_never_echoes_key(api_context):
+    client, db, user = api_context
+    runtime = FakeRuntimeService()
+    app.dependency_overrides[get_ai_runtime_service] = lambda: runtime
+
+    assert client.get("/api/v1/ai/config").status_code == 403
+    user.is_superuser = True
+    db.commit()
+
+    response = client.get("/api/v1/ai/config")
+    assert response.status_code == 200
+    assert response.json()["version"] == 4
+    assert "api_key" not in response.json()
+    assert "secret" not in response.text.lower()
+
+
+def test_admin_can_hot_apply_and_probe_runtime_config(api_context):
+    client, db, user = api_context
+    user.is_superuser = True
+    db.commit()
+    runtime = FakeRuntimeService()
+    app.dependency_overrides[get_ai_runtime_service] = lambda: runtime
+
+    payload = {
+        "backend": "omniroute",
+        "base_url": "http://omniroute.test",
+        "allowed_providers": ["approved-provider"],
+        "model_aliases": {"message_draft": "draft-v2", "live_reply": "reply-v2"},
+        "timeout_seconds": 30,
+        "api_key": "write-only-value",
+    }
+    updated = client.put("/api/v1/ai/config", json=payload)
+    probed = client.post("/api/v1/ai/config/test")
+    models = client.get("/api/v1/ai/models")
+
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 5
+    assert "write-only-value" not in updated.text
+    assert runtime.updated[1] == user.id
+    assert probed.json()["ready"] is True
+    assert models.json() == {"models": ["draft-v1", "reply-v1"]}
+
+
+def test_ai_chat_supports_session_completion_and_sse_without_browser_gateway_access(api_context):
+    client, _, user = api_context
+    chat = FakeChatService()
+    app.dependency_overrides[get_ai_chat_service] = lambda: chat
+
+    created = client.post("/api/v1/ai/chat/sessions", json={"title": "Export planning"})
+    session_id = created.json()["id"]
+    completed = client.post(
+        f"/api/v1/ai/chat/sessions/{session_id}/messages",
+        json={"content": "Which market should we enter first?"},
+    )
+    streamed = client.post(
+        f"/api/v1/ai/chat/sessions/{session_id}/messages/stream",
+        json={"content": "Give me the top priority."},
+    )
+
+    assert created.status_code == 201
+    assert completed.status_code == 200
+    assert completed.json()["resolved_provider"] == "approved-provider"
+    assert streamed.status_code == 200
+    assert streamed.headers["content-type"].startswith("text/event-stream")
+    assert "event: delta" in streamed.text
+    assert "event: done" in streamed.text
+    assert user.id
+
