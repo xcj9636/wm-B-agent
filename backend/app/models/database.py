@@ -617,6 +617,7 @@ class OutboxEvent(Base):
     attempt_count = Column(Integer, nullable=False, default=0)
     max_attempts = Column(Integer, nullable=False, default=5)
     last_error = Column(Text)
+    external_message_id = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
