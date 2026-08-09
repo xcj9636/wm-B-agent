@@ -13,7 +13,7 @@
       >
         <StatCard
           label="Total Customers"
-          :value="stats.today?.new_customers || 0"
+          :value="stats?.today?.new_customers || 0"
           icon="User"
           color="primary"
         />
@@ -26,7 +26,7 @@
       >
         <StatCard
           label="Messages Sent"
-          :value="stats.today?.emails_sent || 0"
+          :value="stats?.today?.emails_sent || 0"
           icon="Promotion"
           color="success"
         />
@@ -39,7 +39,7 @@
       >
         <StatCard
           label="Replies"
-          :value="stats.today?.emails_replied || 0"
+          :value="stats?.today?.emails_replied || 0"
           icon="ChatDotRound"
           color="warning"
         />
@@ -52,7 +52,7 @@
       >
         <StatCard
           label="Conversions"
-          :value="stats.today?.converted_customers || 0"
+          :value="stats?.today?.converted_customers || 0"
           icon="TrendCharts"
           color="danger"
         />

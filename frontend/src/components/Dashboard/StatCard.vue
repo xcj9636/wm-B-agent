@@ -4,7 +4,10 @@
     shadow="hover"
   >
     <div class="stat-content">
-      <div class="stat-icon">
+      <div
+        class="stat-icon"
+        :class="colorClass"
+      >
         <component
           :is="icon"
           :size="32"
@@ -35,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed } from 'vue'
 
 interface Props {
   label: string

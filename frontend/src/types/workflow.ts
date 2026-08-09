@@ -19,7 +19,7 @@ export interface Workflow {
   description?: string
   status: 'draft' | 'active' | 'archived'
   version: string
-  configJson: {
+  config_json: {
     steps: any[]
     transitions: any[]
     variables?: Record<string, any>

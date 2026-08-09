@@ -10,7 +10,7 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item @click="refresh">Refresh</el-dropdown-item>
-              <el-dropdown-item @click="export">Export Data</el-dropdown-item>
+              <el-dropdown-item @click="exportData">Export Data</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -59,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 
 interface Stage {
@@ -102,25 +102,25 @@ async function fetchFunnelData() {
       {
         name: 'Contacted',
         value: data.contacted,
-        rate: ((data.contacted / data.total_customers) * 100).toFixed(1),
+        rate: Number(((data.contacted / data.total_customers) * 100).toFixed(1)),
         color: stageColors[1],
       },
       {
         name: 'Engaged',
         value: data.engaged,
-        rate: ((data.engaged / data.contacted) * 100).toFixed(1),
+        rate: Number(((data.engaged / data.contacted) * 100).toFixed(1)),
         color: stageColors[2],
       },
       {
         name: 'Replied',
         value: data.replied,
-        rate: ((data.replied / data.engaged) * 100).toFixed(1),
+        rate: Number(((data.replied / data.engaged) * 100).toFixed(1)),
         color: stageColors[2],
       },
       {
         name: 'Converted',
         value: data.converted,
-        rate: ((data.converted / data.replied) * 100).toFixed(1),
+        rate: Number(((data.converted / data.replied) * 100).toFixed(1)),
         color: stageColors[3],
       },
     ]

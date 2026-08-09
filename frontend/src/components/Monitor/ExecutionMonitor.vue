@@ -223,11 +223,11 @@ interface Execution {
   id: string
   workflowName: string
   status: string
-  currentStep: string
+  currentStep: string | null
   progress: number
   duration: string
   startedAt: string
-  finishedAt: string
+  finishedAt: string | null
   completedSteps: string[]
   steps?: any[]
   errorMsg?: string
@@ -371,7 +371,7 @@ function getStepStatus(status: string) {
   return types[status] || 'info'
 }
 
-function formatTime(time?: string) {
+function formatTime(time?: string | null) {
   return time ? dayjs(time).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 

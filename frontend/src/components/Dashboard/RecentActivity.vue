@@ -65,7 +65,6 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { api } from '@/api'
 import type { ActivityItem } from '@/types'
 
 dayjs.extend(relativeTime)
@@ -86,7 +85,9 @@ const displayActivities = computed(() => {
   return props.activities.length > 0 ? props.activities : internalActivities.value
 })
 
-const activityTypes = {
+type TimelineItemType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
+
+const activityTypes: Record<ActivityItem['type'], TimelineItemType> = {
   message_sent: 'primary',
   message_delivered: 'success',
   message_opened: 'warning',
@@ -167,8 +168,8 @@ async function fetchActivities() {
   }
 }
 
-function getActivityType(type: string) {
-  return activityTypes[type as keyof typeof activityTypes] || 'primary'
+function getActivityType(type: ActivityItem['type']): TimelineItemType {
+  return activityTypes[type]
 }
 
 function getActivityIcon(type: string) {

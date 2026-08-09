@@ -399,10 +399,9 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useAuthStore, useThemeStore } from '@/stores'
+import { useAuthStore } from '@/stores'
 
 const userStore = useAuthStore()
-const themeStore = useThemeStore()
 
 // Dialog states
 const showPasswordDialog = ref(false)
@@ -452,7 +451,16 @@ const timezones = [
   { value: 'Australia/Sydney', label: 'Australian Eastern Time' },
 ]
 
-const accounts = ref([
+interface ConnectedAccount {
+  id: number
+  type: string
+  name: string
+  email?: string
+  phone?: string
+  isVerified: boolean
+}
+
+const accounts = ref<ConnectedAccount[]>([
   { id: 1, type: 'gmail', name: 'Work Email', email: 'work@company.com', isVerified: true },
   { id: 2, type: 'outlook', name: 'Personal', email: 'personal@outlook.com', isVerified: true },
 ])
@@ -464,10 +472,6 @@ const apiProviders = ref([
 ])
 
 // Methods
-function changeTheme(theme: string) {
-  themeStore.setTheme(theme === 'auto' ? 'auto' : theme === 'dark')
-}
-
 async function changePassword() {
   if (passwordForm.new !== passwordForm.confirm) {
     ElMessage.error('Passwords do not match')

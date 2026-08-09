@@ -32,7 +32,7 @@
               v-for="alert in allAlerts"
               :key="alert.id"
               class="alert-item"
-              :class="{ 'unread': !alert.read, 'alert-' + alert.severity }"
+              :class="[{ unread: !alert.read }, `alert-${alert.severity}`]"
             >
               <div class="alert-icon">
                 <el-icon><component :is="getAlertIcon(alert.severity)" /></el-icon>
@@ -78,7 +78,7 @@
               v-for="alert in criticalAlerts"
               :key="alert.id"
               class="alert-item"
-              :class="{ 'unread': !alert.read, 'alert-' + alert.severity }"
+              :class="[{ unread: !alert.read }, `alert-${alert.severity}`]"
             >
               <div class="alert-icon">
                 <el-icon><Warning /></el-icon>
@@ -124,7 +124,7 @@
               v-for="alert in warningAlerts"
               :key="alert.id"
               class="alert-item"
-              :class="{ 'unread': !alert.read, 'alert-' + alert.severity }"
+              :class="[{ unread: !alert.read }, `alert-${alert.severity}`]"
             >
               <div class="alert-icon">
                 <el-icon><Warning /></el-icon>
@@ -158,7 +158,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 

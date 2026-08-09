@@ -12,7 +12,6 @@
         v-model:connections="connections"
         :skills="skills"
         @update:connections="onUpdateConnections"
-        @node-click="onNodeClick"
       />
 
       <!-- WorkflowEditor右侧面板 -->
@@ -127,8 +126,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 import WorkflowToolbar from '@/components/WorkflowEditor/WorkflowToolbar.vue'
 import WorkflowCanvas from '@/components/WorkflowEditor/WorkflowCanvas.vue'
@@ -138,10 +137,18 @@ import { workflowApi } from '@/api/workflow'
 import { skillApi } from '@/api/skill'
 
 const route = useRoute()
-const router = useRouter()
 
 // Workflow form
-const workflowForm = reactive({
+interface WorkflowForm {
+  name: string
+  description: string
+  tags: string[]
+  timeout: number
+  retryStrategy: 'linear' | 'exponential'
+  maxRetries: number
+}
+
+const workflowForm = reactive<WorkflowForm>({
   name: 'New Workflow',
   description: '',
   tags: [],
@@ -171,9 +178,9 @@ const workflowId = computed(() => route.params.id as string)
 async function loadWorkflow() {
   try {
     if (workflowId.value) {
-      const workflow = await workflowApi.get(workflowId)
+      const workflow = await workflowApi.get(workflowId.value)
       workflowForm.name = workflow.name
-      workflowForm.description = workflow.description
+      workflowForm.description = workflow.description ?? ''
       workflowForm.tags = workflow.tags || []
 
       // Parse steps from config
@@ -196,8 +203,8 @@ async function loadWorkflow() {
         }))
       }
 
-      if (config && config.connections) {
-        connections.value = config.connections
+      if (config && config.transitions) {
+        connections.value = config.transitions
       }
     }
   } catch (error) {
@@ -257,7 +264,7 @@ function onSave() {
 
 async function onExecute() {
   try {
-    await workflowApi.execute(workflowId, {})
+    await workflowApi.execute(workflowId.value, {})
     showExecutionPanel.value = true
     currentExecution.value = {
       id: `exec_${Date.now()}`,
@@ -296,10 +303,6 @@ function onUpdateConnections(newConnections: any[]) {
   connections.value = newConnections
 }
 
-function onNodeClick(stepId: string) {
-  // Handle node click - could show properties panel
-}
-
 function updateWorkflowName() {
   // Update workflow name
 }
@@ -323,7 +326,7 @@ function validateWorkflow() {
   if (!errors.length) {
     ElMessage.success('Workflow is valid')
   } else {
-    ElMessage.error('Workflow validation failed', errors.join(', '))
+    ElMessage.error(`Workflow validation failed: ${errors.join(', ')}`)
   }
 }
 

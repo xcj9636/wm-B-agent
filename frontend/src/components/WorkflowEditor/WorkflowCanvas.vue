@@ -23,7 +23,7 @@
         class="workflow-nodes"
       >
         <div
-          v-for="(step, index) in steps"
+          v-for="step in steps"
           :key="step.id"
           class="workflow-node"
           :style="{ left: step.x + 'px', top: step.y + 'px' }"
@@ -168,7 +168,7 @@
               <el-option
                 v-for="skill in skills"
                 :key="skill.name"
-                :label="skill.display_name"
+                :label="skill.displayName"
                 :value="skill.name"
               />
             </el-select>
@@ -282,7 +282,7 @@
             <el-icon><Operation /></el-icon>
           </div>
           <div class="skill-info">
-            <span class="skill-name">{{ skill.display_name }}</span>
+            <span class="skill-name">{{ skill.displayName }}</span>
             <span class="skill-category">{{ skill.category }}</span>
           </div>
         </div>
@@ -348,7 +348,11 @@ function onDrop(event: DragEvent) {
   // Handle skill drop
   const skillData = event.dataTransfer?.getData('application/json')
   if (skillData) {
-    addNode(event, skillData)
+    try {
+      addNode(event, JSON.parse(skillData) as Skill)
+    } catch {
+      ElMessage.error('Invalid skill data')
+    }
   }
 }
 
@@ -357,7 +361,6 @@ function onSkillDragStart(event: DragEvent, skill: Skill) {
 }
 
 function addNode(event: DragEvent, skill: Skill) {
-  const rect = (event.target as HTMLElement).getBoundingClientRect()
   const canvasRect = canvasRef.value?.getBoundingClientRect()
 
   const x = event.clientX - (canvasRect?.left || 0)
@@ -365,9 +368,9 @@ function addNode(event: DragEvent, skill: Skill) {
 
   const newNode: WorkflowStep = {
     id: `step_${Date.now()}`,
-    name: `${skill.display_name} ${steps.value.length + 1}`,
+    name: `${skill.displayName} ${steps.value.length + 1}`,
     skillName: skill.name,
-    skillDisplayName: skill.display_name,
+    skillDisplayName: skill.displayName,
     x: x - 75,
     y: y - 30,
     config: {},
@@ -431,20 +434,13 @@ function removeStep(id: string) {
   }
 }
 
-function selectNode(id: string) {
-  selectedStep.value = steps.value.find(s => s.id === id) || null
-  if (selectedStep.value) {
-    showProperties.value = true
-  }
-}
-
 function selectConnection(id: string) {
   selectedConnection.value = props.connections.find(c => c.id === id) || null
 }
 
 function showConnections(stepId: string, type: string) {
   // Show connection options
-  ElMessage.info('Connection mode: click on another node to connect')
+  ElMessage.info(`Connection mode (${type}) from ${stepId}: click another node to connect`)
 }
 
 function updateStep() {
