@@ -42,6 +42,11 @@ class ChatRuntime:
         return self.backend
 
 
+class BrokenRuntime(ChatRuntime):
+    def build_backend(self):
+        raise RuntimeError("backend construction failed")
+
+
 def user_and_session(db_session, backend):
     user = User(
         username="turn-user",
@@ -147,3 +152,38 @@ async def test_ai_chat_idempotency_key_rejects_changed_input(db_session):
             "Changed message",
             idempotency_key="chat-input-conflict",
         )
+
+
+@pytest.mark.asyncio
+async def test_blank_chat_input_does_not_create_a_running_turn(db_session):
+    backend = ChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        await service.complete(
+            session.id,
+            user.id,
+            "   ",
+            idempotency_key="chat-blank-input",
+        )
+
+    assert db_session.query(AgentTurn).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_backend_construction_failure_closes_the_durable_turn(db_session):
+    backend = ChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+    service._runtime = BrokenRuntime(backend)
+
+    with pytest.raises(RuntimeError, match="construction failed"):
+        await service.complete(
+            session.id,
+            user.id,
+            "Hello",
+            idempotency_key="chat-backend-construction-failure",
+        )
+
+    turn = db_session.query(AgentTurn).one()
+    assert turn.status == "failed"
+    assert turn.completed_at is not None
