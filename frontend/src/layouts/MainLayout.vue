@@ -49,6 +49,16 @@
           </template>
         </el-menu-item>
 
+        <el-menu-item
+          v-if="authStore.isAdmin"
+          index="/operations/dead-letters"
+        >
+          <el-icon><WarningFilled /></el-icon>
+          <template #title>
+            Dead Letters
+          </template>
+        </el-menu-item>
+
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <template #title>

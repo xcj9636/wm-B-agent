@@ -3,6 +3,34 @@ import { ref, computed } from 'vue'
 import { api } from '@/api'
 import type { User, LoginRequest } from '@/types'
 
+interface UserResponse {
+  id: number
+  username: string
+  email: string
+  full_name?: string
+  role: User['role']
+  is_active: boolean
+  is_superuser: boolean
+  created_at: string
+  updated_at: string
+  last_login?: string
+}
+
+function normalizeUser(data: UserResponse): User {
+  return {
+    id: data.id,
+    username: data.username,
+    email: data.email,
+    fullName: data.full_name,
+    role: data.role,
+    isActive: data.is_active,
+    isSuperuser: data.is_superuser,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    lastLogin: data.last_login,
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('access_token'))
   const refreshToken = ref<string | null>(localStorage.getItem('refresh_token'))
@@ -42,8 +70,8 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUser() {
     if (!token.value) return
 
-    const response = await api.get('/api/v1/auth/me')
-    user.value = response.data
+    const response = await api.get<UserResponse>('/api/v1/auth/me')
+    user.value = normalizeUser(response.data)
   }
 
   async function refreshAccessToken() {

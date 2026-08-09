@@ -64,6 +64,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Analytics' },
       },
       {
+        path: 'operations/dead-letters',
+        name: 'DeadLetters',
+        component: () => import('@/views/DeadLetters.vue'),
+        meta: { title: 'Dead-letter Operations', requiresAdmin: true },
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
@@ -79,21 +85,29 @@ const router = createRouter({
 })
 
 // Navigation guard
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
 
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next({ name: 'Login', query: { redirect: to.fullPath } })
-  } else if (to.meta.guest && authStore.isAuthenticated) {
-    next({ name: 'Dashboard' })
-  } else {
-    next()
-  }
-
-  // Set page title
   if (to.meta.title) {
     document.title = `${to.meta.title} - Trade AI Agent`
   }
+
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    return { name: 'Login', query: { redirect: to.fullPath } }
+  }
+
+  if (authStore.isAuthenticated && !authStore.user) {
+    try {
+      await authStore.fetchUser()
+    } catch {
+      await authStore.logout()
+      return { name: 'Login', query: { redirect: to.fullPath } }
+    }
+  }
+
+  if (to.meta.guest && authStore.isAuthenticated) return { name: 'Dashboard' }
+  if (to.meta.requiresAdmin && !authStore.isAdmin) return { name: 'Dashboard' }
+  return true
 })
 
 export default router
