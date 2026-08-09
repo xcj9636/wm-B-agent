@@ -2,7 +2,7 @@
 from pathlib import Path
 from typing import Optional
 
-from app.config import settings
+from app.config import Settings, settings
 from app.integrations.ai_provider import get_ai_provider
 from app.integrations.llm_gateway import LLMGatewayClient
 from app.services.llm.contracts import LLMUseCase
@@ -23,19 +23,25 @@ def get_llm_service() -> LLMService:
         _service = LLMService(DirectProviderAdapter(get_ai_provider()))
         return _service
 
-    api_key = _read_gateway_api_key()
-    aliases = {
-        LLMUseCase(use_case): alias
-        for use_case, alias in settings.omniroute_model_aliases().items()
-    }
-    _gateway_client = LLMGatewayClient(
-        base_url=settings.OMNIROUTE_BASE_URL,
-        api_key=api_key,
-        model_aliases=aliases,
-        timeout_seconds=settings.OMNIROUTE_TIMEOUT_SECONDS,
-    )
+    _gateway_client = build_gateway_client(settings)
     _service = LLMService(_gateway_client)
     return _service
+
+
+def build_gateway_client(config: Settings = settings) -> LLMGatewayClient:
+    """Build a new gateway client from validated runtime configuration."""
+    api_key = _read_gateway_api_key(config)
+    aliases = {
+        LLMUseCase(use_case): alias
+        for use_case, alias in config.omniroute_model_aliases().items()
+    }
+    return LLMGatewayClient(
+        base_url=config.OMNIROUTE_BASE_URL,
+        api_key=api_key,
+        model_aliases=aliases,
+        allowed_providers=config.OMNIROUTE_ALLOWED_PROVIDERS,
+        timeout_seconds=config.OMNIROUTE_TIMEOUT_SECONDS,
+    )
 
 
 async def close_llm_service() -> None:
@@ -46,16 +52,16 @@ async def close_llm_service() -> None:
     _gateway_client = None
 
 
-def _read_gateway_api_key() -> str:
-    if settings.OMNIROUTE_API_KEY_FILE:
+def _read_gateway_api_key(config: Settings = settings) -> str:
+    if config.OMNIROUTE_API_KEY_FILE:
         try:
-            key = Path(settings.OMNIROUTE_API_KEY_FILE).read_text(
+            key = Path(config.OMNIROUTE_API_KEY_FILE).read_text(
                 encoding="utf-8"
             ).strip()
         except OSError as exc:
             raise RuntimeError("Unable to read the OmniRoute API key file") from exc
     else:
-        key = settings.OMNIROUTE_API_KEY.strip()
+        key = config.OMNIROUTE_API_KEY.strip()
 
     if not key:
         raise RuntimeError("OmniRoute is enabled but no API key is configured")

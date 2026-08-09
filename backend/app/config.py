@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     OMNIROUTE_BASE_URL: str = "http://omniroute:20128"
     OMNIROUTE_API_KEY: str = ""
     OMNIROUTE_API_KEY_FILE: str = ""
+    OMNIROUTE_ALLOWED_PROVIDERS: List[str] = []
     OMNIROUTE_TIMEOUT_SECONDS: float = 60.0
     OMNIROUTE_MODEL_LEAD_CLASSIFICATION: str = ""
     OMNIROUTE_MODEL_MESSAGE_DRAFT: str = ""
@@ -120,6 +121,16 @@ class Settings(BaseSettings):
         if value.lower().startswith("auto/"):
             raise ValueError("dynamic auto/* routes are not approved")
         return value
+
+    @field_validator("OMNIROUTE_ALLOWED_PROVIDERS")
+    @classmethod
+    def normalize_gateway_provider_allowlist(cls, values: List[str]) -> List[str]:
+        providers = []
+        for value in values:
+            provider = value.strip().lower()
+            if provider and provider not in providers:
+                providers.append(provider)
+        return providers
 
     def omniroute_model_aliases(self) -> Dict[str, str]:
         aliases = {
