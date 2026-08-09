@@ -18,6 +18,11 @@ import httpx
 from app.core.skill_base import BaseSkill, register_skill
 from app.core.context import ExecutionContext
 from app.config import settings
+from app.db import SessionLocal
+from app.services.outreach_queue import (
+    OutreachQueueService,
+    QueueOutreachCommand,
+)
 
 
 @register_skill
@@ -115,6 +120,9 @@ class AutoSenderSkill(BaseSkill):
             },
             "scheduled_count": {
                 "type": "integer"
+            },
+            "queued_count": {
+                "type": "integer"
             }
         }
     }
@@ -154,6 +162,7 @@ class AutoSenderSkill(BaseSkill):
         success_count = 0
         failed_count = 0
         scheduled_count = 0
+        queued_count = 0
 
         # Process messages
         if isinstance(messages, list) and len(messages) == len(customers):
@@ -166,6 +175,9 @@ class AutoSenderSkill(BaseSkill):
                     schedule,
                     send_immediately,
                     dry_run,
+                    business_key=(
+                        f"auto:{context.execution_id}:{i}:{channel}"
+                    ),
                 )
                 results.append(result)
 
@@ -173,6 +185,8 @@ class AutoSenderSkill(BaseSkill):
                     success_count += 1
                 elif result["status"] == "scheduled":
                     scheduled_count += 1
+                elif result["status"] == "queued":
+                    queued_count += 1
                 else:
                     failed_count += 1
 
@@ -190,6 +204,9 @@ class AutoSenderSkill(BaseSkill):
                     schedule,
                     send_immediately,
                     dry_run,
+                    business_key=(
+                        f"auto:{context.execution_id}:{i}:{channel}"
+                    ),
                 )
                 results.append(result)
 
@@ -197,6 +214,8 @@ class AutoSenderSkill(BaseSkill):
                     success_count += 1
                 elif result["status"] == "scheduled":
                     scheduled_count += 1
+                elif result["status"] == "queued":
+                    queued_count += 1
                 else:
                     failed_count += 1
 
@@ -208,16 +227,19 @@ class AutoSenderSkill(BaseSkill):
         context.set_state("send_stats", {
             "success": success_count,
             "failed": failed_count,
-            "scheduled": scheduled_count
+            "scheduled": scheduled_count,
+            "queued": queued_count,
         })
         context.increment_metric("messages_sent", success_count)
         context.increment_metric("messages_failed", failed_count)
+        context.increment_metric("messages_queued", queued_count)
 
         return {
             "results": results,
             "success_count": success_count,
             "failed_count": failed_count,
-            "scheduled_count": scheduled_count
+            "scheduled_count": scheduled_count,
+            "queued_count": queued_count,
         }
 
     async def _send_single(
@@ -228,6 +250,7 @@ class AutoSenderSkill(BaseSkill):
         schedule: Optional[Dict[str, Any]],
         send_immediately: bool,
         dry_run: bool,
+        business_key: str,
     ) -> Dict[str, Any]:
         """Send a single message"""
         result = {
@@ -240,27 +263,57 @@ class AutoSenderSkill(BaseSkill):
         }
 
         try:
+            available_at = datetime.utcnow()
             # Check if should schedule instead of immediate send
             if not send_immediately and schedule:
-                send_time = self._calculate_send_time(customer, schedule)
-                if send_time > datetime.utcnow():
-                    result["status"] = "scheduled"
-                    result["scheduled_at"] = send_time.isoformat()
-                    return result
+                available_at = self._calculate_send_time(customer, schedule)
 
             # Get account
             account = self._get_next_account(channel, customer)
 
-            # Send based on channel
+            if dry_run:
+                result["status"] = "sent"
+                result["sent_at"] = datetime.utcnow().isoformat()
+                return result
+
             if channel == "email":
-                await self._send_email(customer, message, account, dry_run)
+                recipient = customer.get("email")
+                subject = message.get("subject", "")
+                body = message.get("body", "")
             elif channel == "whatsapp":
-                await self._send_whatsapp(customer, message, account, dry_run)
+                recipient = customer.get("whatsapp")
+                subject = None
+                body = message.get("whatsapp_message") or message.get("body", "")
             else:
                 raise ValueError(f"Unsupported channel: {channel}")
 
-            result["status"] = "sent"
-            result["sent_at"] = datetime.utcnow().isoformat()
+            db = SessionLocal()
+            try:
+                outreach, _ = OutreachQueueService(db).queue(
+                    QueueOutreachCommand(
+                        customer_id=customer.get("id"),
+                        channel=channel,
+                        recipient=recipient,
+                        subject=subject,
+                        body=body,
+                        account_id=account.get("id") if account else None,
+                        available_at=available_at,
+                        business_key=business_key,
+                    )
+                )
+                db.commit()
+                result["message_id"] = str(outreach.id)
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+            if available_at > datetime.utcnow():
+                result["status"] = "scheduled"
+                result["scheduled_at"] = available_at.isoformat()
+            else:
+                result["status"] = "queued"
             result["account_id"] = account.get("id") if account else None
 
         except Exception as e:

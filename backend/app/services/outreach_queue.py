@@ -1,0 +1,96 @@
+"""Transactional producer for outreach logs and delivery outbox events."""
+from datetime import datetime
+from typing import Literal, Optional, Tuple
+import uuid
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy.orm import Session
+
+from app.models.database import OutreachLog, OutreachStatus
+from app.services.outbox import OutboxCommand, OutboxService
+
+
+class QueueOutreachCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: int
+    channel: Literal["email", "whatsapp"]
+    recipient: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1)
+    business_key: str = Field(min_length=1, max_length=255)
+    subject: Optional[str] = Field(default=None, max_length=255)
+    template_id: Optional[str] = Field(default=None, max_length=100)
+    account_id: Optional[int] = None
+    available_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def require_email_subject(self) -> "QueueOutreachCommand":
+        if self.channel == "email" and not self.subject:
+            raise ValueError("email outreach requires a subject")
+        return self
+
+
+class OutreachQueueService:
+    """Create the business record and external side effect atomically."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+        self._outbox = OutboxService(session)
+
+    def queue(
+        self,
+        command: QueueOutreachCommand,
+    ) -> Tuple[OutreachLog, bool]:
+        log_id = uuid.uuid4()
+        available_at = command.available_at or datetime.utcnow()
+        payload = self._delivery_payload(command)
+        event, created = self._outbox.enqueue(
+            OutboxCommand(
+                aggregate_type="outreach_log",
+                aggregate_id=str(log_id),
+                event_type="send",
+                business_key=command.business_key,
+                channel=command.channel,
+                payload=payload,
+                available_at=available_at,
+            )
+        )
+        if not created:
+            existing = self._session.get(
+                OutreachLog,
+                uuid.UUID(event.aggregate_id),
+            )
+            if existing is None:
+                raise RuntimeError("Outbox event has no outreach business record")
+            return existing, False
+
+        status = (
+            OutreachStatus.SCHEDULED
+            if available_at > datetime.utcnow()
+            else OutreachStatus.PENDING
+        )
+        outreach = OutreachLog(
+            id=log_id,
+            customer_id=command.customer_id,
+            channel=command.channel,
+            status=status,
+            subject=command.subject,
+            content=command.body,
+            template_id=command.template_id,
+            account_id=command.account_id,
+            scheduled_at=available_at,
+        )
+        self._session.add(outreach)
+        self._session.flush()
+        return outreach, True
+
+    @staticmethod
+    def _delivery_payload(command: QueueOutreachCommand):
+        if command.channel == "email":
+            return {
+                "to": command.recipient,
+                "subject": command.subject,
+                "body": command.body,
+            }
+        return {"to": command.recipient, "text": command.body}
+

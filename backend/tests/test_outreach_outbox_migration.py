@@ -76,10 +76,6 @@ def test_schedule_task_queues_once_without_network_or_early_quota_update(
 ):
     customer_id, account_id = create_customer_and_account(session_factory)
 
-    def direct_send_forbidden(*args, **kwargs):
-        raise AssertionError("producer must not call an email provider")
-
-    monkeypatch.setattr(task_functions, "get_email_service", direct_send_forbidden)
     schedule = {"idempotency_key": "campaign-2026-08", "interval_min": 0, "interval_max": 0}
 
     first = task_functions.schedule_outreach_task.run(
@@ -217,4 +213,3 @@ def test_worker_marks_outreach_sent_and_consumes_quota_after_delivery(
         assert account.today_sent == 1
     finally:
         session.close()
-

@@ -2,24 +2,32 @@
 Celery任务函数
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Any
 import logging
+import uuid
 
 from app.tasks.celery_worker import celery
 from app.config import settings
 from app.db import SessionLocal
 from app.models.database import (
-    Customer, OutreachLog, Conversation, TaskQueue, Account
+    Account,
+    Conversation,
+    Customer,
+    OutreachLog,
+    OutreachStatus,
+    OutboxStatus,
+    TaskQueue,
 )
 from app.core.agent import get_agent
-from app.integrations.email_service import get_email_service
-from app.integrations.whatsapp_service import get_whatsapp_service
-from app.models.database import OutboxStatus
 from app.services.outbox import DeliveryFailureKind, OutboxService
 from app.services.outbox_delivery import (
     DeliveryResult,
     get_outbox_delivery_router,
+)
+from app.services.outreach_queue import (
+    OutreachQueueService,
+    QueueOutreachCommand,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +82,12 @@ def dispatch_outbox_task(
                     external_message_id=result.external_message_id,
                     now=completed_at,
                 )
+                _sync_outreach_result(
+                    db,
+                    event,
+                    result,
+                    completed_at=completed_at,
+                )
                 counters["sent"] += 1
             else:
                 service.mark_failure(
@@ -82,6 +96,12 @@ def dispatch_outbox_task(
                     kind=result.failure_kind,
                     error_code=result.error_code,
                     now=completed_at,
+                )
+                _sync_outreach_result(
+                    db,
+                    event,
+                    result,
+                    completed_at=completed_at,
                 )
                 if event.status == OutboxStatus.RETRY:
                     counters["retry"] += 1
@@ -134,7 +154,12 @@ def schedule_outreach_task(
             logger.error(f"No available account for channel: {channel}")
             return {"success": False, "error": "No available account"}
 
-        # Process each customer
+        producer = OutreachQueueService(db)
+        campaign_key = schedule_config.get("idempotency_key")
+        if not campaign_key:
+            raise ValueError("schedule_config.idempotency_key is required")
+
+        # Create business records and outbox events in one transaction.
         results = []
         for customer_id in customer_ids:
             customer = db.query(Customer).filter(Customer.id == customer_id).first()
@@ -147,38 +172,46 @@ def schedule_outreach_task(
                 send_time = _calculate_send_time(customer, schedule_config)
                 now = datetime.utcnow()
 
-                if send_time > now:
-                    # Schedule for later
-                    _schedule_task(
-                        db,
-                        customer_id,
-                        channel,
-                        template_id,
-                        send_time
-                    )
-                    results.append({"customer_id": customer_id, "status": "scheduled"})
-                    continue
-
-                # Send message
                 if channel == "email":
-                    result = _send_email(db, customer, account, template_id)
+                    recipient = customer.email
+                    subject = "Partnership Opportunity"
+                    body = (
+                        f"Hi {customer.username or 'there'},\n\n"
+                        "We would like to discuss a potential collaboration..."
+                    )
                 elif channel == "whatsapp":
-                    result = _send_whatsapp(db, customer, account, template_id)
+                    recipient = customer.whatsapp
+                    subject = None
+                    body = (
+                        f"Hi {customer.username or 'there'}! We would like "
+                        "to discuss a potential collaboration..."
+                    )
                 else:
                     logger.error(f"Unsupported channel: {channel}")
                     continue
 
-                results.append(result)
-
-                # Update account
-                account.today_sent += 1
-
-                # Add delay between sends
-                import time
-                delay_min = schedule_config.get("interval_min", 30)
-                delay_max = schedule_config.get("interval_max", 120)
-                delay = (delay_min + delay_max) / 2
-                time.sleep(delay)
+                outreach, _ = producer.queue(
+                    QueueOutreachCommand(
+                        customer_id=customer.id,
+                        channel=channel,
+                        recipient=recipient,
+                        subject=subject,
+                        body=body,
+                        template_id=template_id,
+                        account_id=account.id,
+                        available_at=send_time,
+                        business_key=(
+                            f"scheduled:{campaign_key}:{channel}:{customer.id}"
+                        ),
+                    )
+                )
+                results.append(
+                    {
+                        "customer_id": customer.id,
+                        "status": "queued",
+                        "message_id": str(outreach.id),
+                    }
+                )
 
             except Exception as e:
                 logger.error(f"Failed to send to customer {customer_id}: {str(e)}")
@@ -377,95 +410,39 @@ def _schedule_task(
     db.add(task)
 
 
-def _send_email(
-    db: SessionLocal,
-    customer: Customer,
-    account: Account,
-    template_id: str
-) -> Dict[str, Any]:
-    """发送邮件"""
-    # Get email service
-    email_service = get_email_service(
-        service_type="smtp",
-        **account.credentials_json
-    )
+def _sync_outreach_result(
+    db,
+    event,
+    result: DeliveryResult,
+    *,
+    completed_at: datetime,
+) -> None:
+    """Update the outreach business record in the worker transaction."""
+    if event.aggregate_type != "outreach_log":
+        return
 
-    # Generate message
-    # from app.skills.skill_message_generator import MessageGeneratorSkill
-    # generator = MessageGeneratorSkill()
-    # result = generator.execute(...)
+    outreach = db.get(OutreachLog, uuid.UUID(event.aggregate_id))
+    if outreach is None:
+        raise RuntimeError("Outbox event has no outreach business record")
 
-    # For now, use simple message
-    subject = "Partnership Opportunity"
-    body = f"Hi {customer.username or 'there'},\n\nWe would like to discuss a potential collaboration..."
+    if result.success:
+        outreach.status = OutreachStatus.SENT
+        outreach.message_id = result.external_message_id
+        outreach.sent_at = completed_at
+        outreach.error_msg = None
+        if outreach.account_id is not None:
+            account = db.get(Account, outreach.account_id)
+            if account is not None:
+                account.today_sent = (account.today_sent or 0) + 1
+                account.last_used = completed_at
+        customer = db.get(Customer, outreach.customer_id)
+        if customer is not None:
+            customer.first_contacted_at = (
+                customer.first_contacted_at or completed_at
+            )
+            customer.last_contacted_at = completed_at
+        return
 
-    # Send
-    import asyncio
-    result = asyncio.run(email_service.send_email(
-        to=customer.email,
-        subject=subject,
-        body=body
-    ))
-
-    # Log outreach
-    log = OutreachLog(
-        customer_id=customer.id,
-        channel="email",
-        status="sent" if result.get("success") else "failed",
-        subject=subject,
-        content=body,
-        template_id=template_id,
-        account_id=account.id,
-        sent_at=datetime.utcnow() if result.get("success") else None,
-        error_msg=result.get("error")
-    )
-    db.add(log)
-
-    return {
-        "customer_id": customer.id,
-        "status": log.status.value,
-        "message_id": str(log.id)
-    }
-
-
-def _send_whatsapp(
-    db: SessionLocal,
-    customer: Customer,
-    account: Account,
-    template_id: str
-) -> Dict[str, Any]:
-    """发送WhatsApp消息"""
-    # Get WhatsApp service
-    whatsapp_service = get_whatsapp_service(
-        phone_number_id=account.credentials_json.get("phone_number_id"),
-        access_token=account.credentials_json.get("access_token")
-    )
-
-    # Generate message
-    message = f"Hi {customer.username or 'there'}! We would like to discuss a potential collaboration..."
-
-    # Send
-    import asyncio
-    result = asyncio.run(whatsapp_service.send_message(
-        to=customer.whatsapp,
-        text=message
-    ))
-
-    # Log outreach
-    log = OutreachLog(
-        customer_id=customer.id,
-        channel="whatsapp",
-        status="sent" if result.get("success") else "failed",
-        content=message,
-        template_id=template_id,
-        account_id=account.id,
-        sent_at=datetime.utcnow() if result.get("success") else None,
-        error_msg=result.get("error")
-    )
-    db.add(log)
-
-    return {
-        "customer_id": customer.id,
-        "status": log.status.value,
-        "message_id": str(log.id)
-    }
+    if event.status == OutboxStatus.DEAD_LETTER:
+        outreach.status = OutreachStatus.FAILED
+        outreach.error_msg = result.error_code
