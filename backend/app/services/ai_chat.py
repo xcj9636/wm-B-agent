@@ -187,7 +187,11 @@ class AIChatService:
             backend = self._runtime.build_backend()
             service = LLMService(
                 backend,
-                audit_sink=SessionInvocationAuditSink(self._db),
+                audit_sink=SessionInvocationAuditSink(
+                    self._db,
+                    run_id=run.id,
+                    fencing_token=run.fencing_token,
+                ),
                 backend_name=runtime_config.backend,
             )
             (
@@ -324,7 +328,11 @@ class AIChatService:
             backend = self._runtime.build_backend()
             service = LLMService(
                 backend,
-                audit_sink=SessionInvocationAuditSink(self._db),
+                audit_sink=SessionInvocationAuditSink(
+                    self._db,
+                    run_id=run.id,
+                    fencing_token=run.fencing_token,
+                ),
                 backend_name=runtime_config.backend,
             )
             (
@@ -444,7 +452,11 @@ class AIChatService:
             backend = self._runtime.build_backend()
             service = LLMService(
                 backend,
-                audit_sink=SessionInvocationAuditSink(self._db),
+                audit_sink=SessionInvocationAuditSink(
+                    self._db,
+                    run_id=run.id,
+                    fencing_token=run.fencing_token,
+                ),
                 backend_name=runtime_config.backend,
             )
             (
