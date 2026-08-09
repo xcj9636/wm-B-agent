@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -418,6 +418,75 @@ def test_schedule_task_persists_batch_delivery_spacing(session_factory):
         assert len(events) == 2
         spacing = events[1].available_at - events[0].available_at
         assert spacing.total_seconds() >= 30
+    finally:
+        session.close()
+
+
+def test_worker_syncs_expired_lease_to_outreach_dead_letter(
+    session_factory,
+    monkeypatch,
+):
+    customer_id, account_id = create_customer_and_account(session_factory)
+    session = session_factory()
+    try:
+        log = OutreachLog(
+            customer_id=customer_id,
+            channel="email",
+            status=OutreachStatus.PENDING,
+            subject="Hello",
+            content="Introduction",
+            account_id=account_id,
+        )
+        session.add(log)
+        session.flush()
+        event, _ = OutboxService(session).enqueue(
+            OutboxCommand(
+                aggregate_type="outreach_log",
+                aggregate_id=str(log.id),
+                event_type="send",
+                business_key="expired-outreach-lease",
+                channel="email",
+                payload={
+                    "to": "buyer@example.com",
+                    "subject": "Hello",
+                    "body": "Introduction",
+                },
+            )
+        )
+        event.status = OutboxStatus.PROCESSING
+        event.leased_by = "crashed-worker"
+        event.lease_until = datetime.utcnow() - timedelta(seconds=1)
+        log_id = log.id
+        session.commit()
+    finally:
+        session.close()
+
+    class DeliveryForbidden:
+        async def deliver(self, event):
+            raise AssertionError("expired leases must not be delivered")
+
+    monkeypatch.setattr(
+        task_functions,
+        "get_outbox_delivery_router",
+        lambda: DeliveryForbidden(),
+    )
+    result = task_functions.dispatch_outbox_task.run(
+        worker_id="replacement-worker",
+        batch_size=10,
+    )
+
+    session = session_factory()
+    try:
+        log = session.get(OutreachLog, log_id)
+        event = session.query(OutboxEvent).one()
+        account = session.get(Account, account_id)
+        assert result["expired_dead_letter"] == 1
+        assert result["claimed"] == 0
+        assert event.status == OutboxStatus.DEAD_LETTER
+        assert event.last_error == "lease_expired_unknown_delivery_state"
+        assert log.status == OutreachStatus.FAILED
+        assert log.error_msg == "lease_expired_unknown_delivery_state"
+        assert account.today_sent == 0
     finally:
         session.close()
 
