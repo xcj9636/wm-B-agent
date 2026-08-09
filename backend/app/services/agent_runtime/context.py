@@ -140,8 +140,12 @@ class ContextAssembler:
 
         included: List[ContextManifestItem] = []
         dropped: List[ContextManifestItem] = []
-        ordered = sorted(sections, key=lambda item: (-item.priority, item.section_id))
-        for section in ordered:
+        selected = []
+        ordered = sorted(
+            enumerate(sections),
+            key=lambda item: (-item[1].priority, item[0]),
+        )
+        for position, section in ordered:
             rendered = self._render(section)
             token_count = self._message_tokens(rendered)
             manifest = ContextManifestItem(
@@ -157,13 +161,16 @@ class ContextAssembler:
                 reason="included",
             )
             if used + token_count <= self._policy.input_token_budget:
-                messages.append(ContextMessage(role=section.role, content=rendered))
                 included.append(manifest)
+                selected.append((position, section.role, rendered))
                 used += token_count
             else:
                 dropped.append(
                     manifest.model_copy(update={"reason": "token_budget_exceeded"})
                 )
+
+        for _, role, rendered in sorted(selected, key=lambda item: item[0]):
+            messages.append(ContextMessage(role=role, content=rendered))
 
         payload = {
             "tokenizer": getattr(self._counter, "encoding_name", "custom"),

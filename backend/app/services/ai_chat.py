@@ -10,16 +10,18 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models.database import AIChatMessage, AIChatSession
 from app.services.ai_runtime import AIRuntimeService
+from app.services.agent_runtime.context import (
+    ContextAssembler,
+    ContextBudgetPolicy,
+    ContextRole,
+    ContextSection,
+    ContextTrust,
+    TiktokenCounter,
+)
+from app.services.agent_runtime.prompts import get_default_prompt_registry
 from app.services.llm.contracts import LLMUseCase
 from app.services.llm.instrumented import SessionInvocationAuditSink
 from app.services.llm.service import LLMService
-
-
-SYSTEM_PROMPT = """You are B-agent, an AI copilot for foreign-trade teams. Help with
-market selection, prospect research, multilingual outreach, reply handling,
-quotation preparation and sales operations. Clearly separate facts from
-assumptions, do not invent customer or compliance data, and ask for human
-approval before any external message or irreversible business action."""
 
 
 class AIChatMessageResponse(BaseModel):
@@ -47,7 +49,9 @@ class AIChatSessionResponse(BaseModel):
 
 
 class AIChatService:
-    MAX_HISTORY_MESSAGES = 30
+    MODEL_CONTEXT_TOKENS = 16384
+    RESERVED_OUTPUT_TOKENS = 1600
+    SAFETY_MARGIN_TOKENS = 512
 
     def __init__(self, db: Session, runtime: AIRuntimeService) -> None:
         self._db = db
@@ -208,17 +212,58 @@ class AIChatService:
     ) -> List[Dict[str, str]]:
         history = [
             item
-            for item in session.messages[-self.MAX_HISTORY_MESSAGES :]
+            for item in session.messages
             if item.id != current.id
         ]
+        prompt = get_default_prompt_registry().active("live_reply").render(
+            locale="zh-CN",
+            use_case=LLMUseCase.LIVE_REPLY.value,
+        )
+        eligible = [item for item in history if item.role in {"user", "assistant"}]
+        sections = []
+        total = max(len(eligible), 1)
+        for index, item in enumerate(eligible):
+            sections.append(
+                ContextSection(
+                    section_id=f"message:{item.id}",
+                    source_type="chat_message",
+                    source_id=str(item.id),
+                    source_version=str(getattr(item, "created_at", "1")),
+                    content=item.content,
+                    priority=min(90, 40 + int(50 * (index + 1) / total)),
+                    trust=ContextTrust.UNTRUSTED,
+                    role=(
+                        ContextRole.USER
+                        if item.role == "user"
+                        else ContextRole.ASSISTANT
+                    ),
+                    sensitivity="confidential",
+                )
+            )
+        sections.append(
+            ContextSection(
+                section_id=f"message:{current.id}",
+                source_type="chat_message",
+                source_id=str(current.id),
+                source_version=str(getattr(current, "created_at", "1")),
+                content=current.content,
+                priority=100,
+                trust=ContextTrust.UNTRUSTED,
+                role=ContextRole.USER,
+                sensitivity="confidential",
+            )
+        )
+        snapshot = ContextAssembler(
+            TiktokenCounter("cl100k_base"),
+            ContextBudgetPolicy(
+                model_context_tokens=self.MODEL_CONTEXT_TOKENS,
+                reserved_output_tokens=self.RESERVED_OUTPUT_TOKENS,
+                safety_margin_tokens=self.SAFETY_MARGIN_TOKENS,
+            ),
+        ).assemble(system_messages=[prompt], sections=sections)
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            *[
-                {"role": item.role, "content": item.content}
-                for item in history
-                if item.role in {"user", "assistant"}
-            ],
-            {"role": "user", "content": current.content},
+            {"role": message.role.value, "content": message.content}
+            for message in snapshot.messages
         ]
 
     def _finish_turn(
