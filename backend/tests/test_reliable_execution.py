@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from uuid import uuid4
 
 from app.db import Base
 from app.models.database import (
@@ -117,6 +118,60 @@ def test_invocation_success_records_a_single_provider_attempt(db_session):
     assert first_attempt.provider == "openai"
     assert first_attempt.total_tokens == 16
     assert db_session.query(type(first_attempt)).count() == 1
+
+
+def test_newer_run_fence_takes_over_pending_invocation_and_rejects_old_result(
+    db_session,
+):
+    service = InvocationAuditService(db_session)
+    run_id = uuid4()
+    first, first_acquired = service.start(
+        idempotency_key="agent-run:pending-takeover:llm",
+        request=llm_request(),
+        backend="omniroute",
+        run_id=run_id,
+        fencing_token=1,
+    )
+    original_request_id = first.request_id
+    db_session.commit()
+
+    takeover, takeover_acquired = service.start(
+        idempotency_key="agent-run:pending-takeover:llm",
+        request=llm_request(),
+        backend="omniroute",
+        run_id=run_id,
+        fencing_token=2,
+    )
+
+    assert first_acquired is True
+    assert takeover_acquired is True
+    assert takeover.id == first.id
+    assert takeover.request_id == original_request_id
+    assert takeover.fencing_token == 2
+
+    old_response = LLMResponse(
+        request_id=original_request_id,
+        content="late result from stale worker",
+    )
+    with pytest.raises(RuntimeError, match="fenc"):
+        service.succeed(
+            takeover,
+            old_response,
+            run_id=run_id,
+            fencing_token=1,
+        )
+
+    current_response = old_response.model_copy(
+        update={"content": "result from current worker"}
+    )
+    service.succeed(
+        takeover,
+        current_response,
+        run_id=run_id,
+        fencing_token=2,
+    )
+    assert takeover.status == LLMInvocationStatus.SUCCEEDED
+    assert takeover.response_json["content"] == "result from current worker"
 
 
 def outbox_command(**overrides):

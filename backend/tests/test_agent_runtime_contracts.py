@@ -29,6 +29,7 @@ from app.services.llm.contracts import (
     LLMUseCase,
 )
 from app.services.llm.instrumented import SessionInvocationAuditSink
+from app.services.llm.audit import InvocationAuditService
 from app.services.llm.service import LLMService
 
 
@@ -145,6 +146,18 @@ class FailingBackend:
         )
 
 
+class CapturingBackend:
+    def __init__(self):
+        self.requests = []
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.requests.append(request)
+        return LLMResponse(
+            request_id=request.request_id,
+            content="recovered response",
+        )
+
+
 @pytest.mark.asyncio
 async def test_llm_service_centrally_audits_success_without_raw_prompt(db_session):
     service = LLMService(
@@ -190,3 +203,48 @@ async def test_llm_service_centrally_audits_normalized_failure(db_session):
     assert invocation.retryable is True
     assert attempt.status == LLMAttemptStatus.FAILED
     assert "provider detail" not in repr(invocation.__dict__)
+
+
+@pytest.mark.asyncio
+async def test_llm_service_takeover_reuses_original_provider_request_id(db_session):
+    run_id = uuid4()
+    messages = [{"role": "user", "content": "recover buyer request"}]
+    pending_request = LLMRequest(
+        use_case=LLMUseCase.LIVE_REPLY,
+        messages=messages,
+        temperature=0.3,
+        max_output_tokens=1600,
+    )
+    pending, _ = InvocationAuditService(db_session).start(
+        idempotency_key="ai-chat:recovered-turn:llm",
+        request=pending_request,
+        backend="omniroute",
+        run_id=run_id,
+        fencing_token=1,
+    )
+    original_request_id = pending.request_id
+    db_session.commit()
+    backend = CapturingBackend()
+    service = LLMService(
+        backend,
+        audit_sink=SessionInvocationAuditSink(
+            db_session,
+            run_id=run_id,
+            fencing_token=2,
+        ),
+        backend_name="omniroute",
+    )
+
+    response = await service.complete(
+        LLMUseCase.LIVE_REPLY,
+        messages,
+        temperature=0.3,
+        max_output_tokens=1600,
+        idempotency_key="ai-chat:recovered-turn:llm",
+    )
+
+    assert backend.requests[0].request_id == original_request_id
+    assert response.request_id == original_request_id
+    db_session.refresh(pending)
+    assert pending.status == LLMInvocationStatus.SUCCEEDED
+    assert pending.fencing_token == 2
