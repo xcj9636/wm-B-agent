@@ -425,3 +425,46 @@ def test_dispatch_setup_failure_is_visible_in_durable_job(configured_api):
     assert result.status == ProspectingJobStatus.FAILED
     assert result.error_code == "connector_secret_unavailable"
     assert result.completed_at is not None
+
+
+def test_due_job_sweep_recovers_queue_retry_and_expired_lease(configured_api):
+    _, db, user = configured_api
+    service = ProspectingJobService(db)
+    now = datetime(2026, 8, 9, 12, 0, 0)
+    queued = service.create_job(
+        job_command(domains=["queued.example"]),
+        user_id=user.id,
+    )
+    retry_due = service.create_job(
+        job_command(domains=["retry.example"]),
+        user_id=user.id,
+    )
+    retry_future = service.create_job(
+        job_command(domains=["future.example"]),
+        user_id=user.id,
+    )
+    expired = service.create_job(
+        job_command(domains=["expired.example"]),
+        user_id=user.id,
+    )
+    paused = service.create_job(
+        job_command(domains=["paused.example"]),
+        user_id=user.id,
+    )
+
+    due_row = db.get(ProspectingJob, retry_due.id)
+    due_row.status = ProspectingJobStatus.RETRY_WAIT.value
+    due_row.next_attempt_at = now - timedelta(seconds=1)
+    future_row = db.get(ProspectingJob, retry_future.id)
+    future_row.status = ProspectingJobStatus.RETRY_WAIT.value
+    future_row.next_attempt_at = now + timedelta(minutes=1)
+    expired_row = db.get(ProspectingJob, expired.id)
+    expired_row.status = ProspectingJobStatus.RUNNING.value
+    expired_row.lease_until = now - timedelta(seconds=1)
+    paused_row = db.get(ProspectingJob, paused.id)
+    paused_row.status = ProspectingJobStatus.PAUSED.value
+    db.commit()
+
+    due_ids = service.list_due_job_ids(now=now)
+
+    assert due_ids == [queued.id, retry_due.id, expired.id]
