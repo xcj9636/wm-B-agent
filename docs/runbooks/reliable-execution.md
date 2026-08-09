@@ -8,6 +8,7 @@
 - `llm_attempts` 保存每次调用的 provider/model、状态、延迟和经过清理的错误码。
 - `outbox_events` 保存投递所需 payload。生产数据库、备份和读权限必须按敏感业务数据管理；日志、指标和管理员状态接口不得复制 payload。
 - `GET /api/v1/admin/reliable-execution/status` 仅限超级管理员，返回状态数量、过期租约数和最早待处理时间，不返回收件人、正文、prompt 或生成结果。
+- `GET /api/v1/admin/reliable-execution/dead-letters` 仅限超级管理员，支持 `channel` 和 `limit`，只返回事件/聚合标识、尝试次数、时间和稳定错误码；不返回 payload、business key 或历史原始异常。
 
 ## 2. 数据库升级
 
@@ -49,7 +50,7 @@ Celery Beat 每 10 秒触发 `dispatch_outbox_task`。Worker 用 `FOR UPDATE SKI
 | `permanent` | 明确的 HTTP 4xx、无效 channel/payload | 立即进入死信 |
 | `unknown_after_send` | HTTP 5xx、读取响应失败、SMTP 返回失败、未分类异常 | 立即进入死信，不自动重试 |
 
-`unknown_after_send` 可能已经被上游接收。把它自动重试会造成重复邮件或 WhatsApp，因此必须 fail-closed。PROCESSING 租约过期同样表示发送结果未知，会转入死信而不是重新领取。
+`unknown_after_send` 可能已经被上游接收。把它自动重试会造成重复邮件或 WhatsApp，因此必须 fail-closed。PROCESSING 租约过期同样表示发送结果未知，会转入死信而不是重新领取；Worker 会在同一事务把关联 `OutreachLog` 同步为 failed，并通过 `expired_dead_letter` 计数暴露本批次处理量。
 
 ## 5. 监控与告警
 
