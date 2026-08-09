@@ -25,9 +25,11 @@
           v-if="!isCollapsed"
           class="brand"
         >
-          <div class="brand-mark">
-            B
-          </div>
+          <img
+            class="brand-mark"
+            src="/b-agent-logo.svg"
+            alt=""
+          >
           <div class="brand-copy">
             <strong>B-agent</strong>
             <span>Revenue operations</span>
@@ -262,17 +264,11 @@ async function logout() {
 }
 
 .brand-mark {
-  display: grid;
   width: 30px;
   height: 30px;
   flex: 0 0 auto;
-  place-items: center;
   border-radius: 8px;
-  color: #fff;
-  background: var(--apple-blue);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 2px 6px rgb(0 122 255 / 0.2);
-  font-size: 14px;
-  font-weight: 720;
 }
 
 .brand-copy {

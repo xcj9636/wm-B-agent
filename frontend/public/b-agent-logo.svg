@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
+  <title id="title">B-agent</title>
+  <desc id="description">A white geometric B with a connected route motif on a blue rounded square.</desc>
+  <rect width="64" height="64" rx="15" fill="#007aff"/>
+  <path
+    fill="#fff"
+    fill-rule="evenodd"
+    d="M17 11h19.2C45 11 50 15.5 50 22.7c0 4.5-2.4 8-6.2 9.8 4.7 1.6 7.2 5.4 7.2 10.2C51 50.3 45.5 55 36.1 55H17V11Zm10 8.2v9.7h8.2c3.3 0 5.2-1.8 5.2-4.9 0-3-1.9-4.8-5.2-4.8H27Zm0 17.3v10.3h9c3.5 0 5.4-1.9 5.4-5.2 0-3.2-2-5.1-5.5-5.1H27Z"
+  />
+  <path d="m35.5 29.2 5.2 7.1" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="2.6"/>
+  <circle cx="35.2" cy="28.9" r="2.2" fill="#fff"/>
+  <circle cx="41" cy="36.7" r="2.2" fill="#fff"/>
+</svg>

@@ -35,12 +35,11 @@
       </header>
 
       <div class="login-content">
-        <div
+        <img
           class="app-icon"
-          aria-hidden="true"
+          src="/b-agent-logo.svg"
+          alt="B-agent"
         >
-          B
-        </div>
         <div class="login-heading">
           <h1 id="login-title">
             Welcome back
@@ -222,18 +221,12 @@ async function handleLogin() {
 }
 
 .app-icon {
-  display: grid;
+  display: block;
   width: 58px;
   height: 58px;
   margin: 0 auto 20px;
-  place-items: center;
   border-radius: 15px;
-  color: #fff;
-  background: var(--apple-blue);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 10px 24px rgb(0 122 255 / 0.24);
-  font-size: 25px;
-  font-weight: 720;
-  letter-spacing: -0.04em;
 }
 
 .login-heading {

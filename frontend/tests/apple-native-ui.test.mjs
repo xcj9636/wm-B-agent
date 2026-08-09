@@ -64,6 +64,7 @@ test('B-agent brand mark is shared by the browser, login, and application shell'
   assert.match(index, /href="\/apple-touch-icon\.png"/)
   assert.match(layout, /src="\/b-agent-logo\.svg"/)
   assert.match(login, /src="\/b-agent-logo\.svg"/)
+  assert.match(login, /\.app-icon\s*\{[^}]*display:\s*block/)
   assert.match(logo, /viewBox="0 0 64 64"/)
   assert.match(logo, /#007aff/i)
 })
