@@ -10,6 +10,7 @@ from app.config import settings
 from app.main import app
 from app.models.database import Account, MailboxOAuthSession
 from app.services.mailbox_oauth import (
+    MailboxCredentialService,
     MailboxIdentity,
     MailboxOAuthService,
     OAuthTokenSet,
@@ -20,6 +21,7 @@ class FakeOAuthProvider:
     def __init__(self, provider="gmail"):
         self.provider = provider
         self.exchanges = []
+        self.refreshes = []
 
     def authorization_url(self, *, state, code_challenge):
         base = (
@@ -47,6 +49,15 @@ class FakeOAuthProvider:
             subject="provider-user-7",
             email="sales@example.com",
             display_name="Export Sales",
+        )
+
+    async def refresh(self, *, refresh_token):
+        self.refreshes.append(refresh_token)
+        return OAuthTokenSet(
+            access_token="rotated-access-secret",
+            refresh_token=None,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+            scopes=["mail.send", "mail.read"],
         )
 
 
@@ -191,3 +202,41 @@ def test_oauth_rejects_open_redirect_and_wrong_provider_state(api_context, tmp_p
     assert open_redirect.status_code == 422
     assert wrong_provider.status_code == 409
     assert provider.exchanges == []
+
+
+async def test_expired_access_token_is_refreshed_server_side_without_losing_refresh_token(
+    api_context,
+    tmp_path,
+):
+    client, db, user = api_context
+    provider = FakeOAuthProvider()
+    service = oauth_service(db, tmp_path, provider)
+    app.dependency_overrides[get_mailbox_oauth_service] = lambda: service
+    started = client.post(
+        "/api/v1/mailboxes/oauth/start",
+        json={"provider": "gmail", "return_to": "/settings"},
+    ).json()
+    state = parse_qs(urlparse(started["authorization_url"]).query)["state"][0]
+    client.get(
+        "/api/v1/mailboxes/oauth/callback/gmail",
+        params={"code": "authorization-code", "state": state},
+        follow_redirects=False,
+    )
+    account = db.query(Account).filter(Account.user_id == user.id).one()
+    account.token_expires_at = datetime.utcnow() - timedelta(minutes=1)
+    db.commit()
+
+    token = await MailboxCredentialService(
+        db,
+        config=settings,
+        provider_builder=lambda name: provider,
+        secret_root=tmp_path,
+    ).access_token(account)
+
+    assert token == "rotated-access-secret"
+    assert provider.refreshes == ["refresh-secret"]
+    secret = json.loads(Path(account.credential_secret_ref).read_text())
+    assert secret["access_token"] == "rotated-access-secret"
+    assert secret["refresh_token"] == "refresh-secret"
+    assert account.connection_status == "connected"
+    assert account.credential_version == 2
