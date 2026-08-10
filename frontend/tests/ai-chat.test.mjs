@@ -39,6 +39,19 @@ test('browser uses only B-agent AI endpoints and never stores OmniRoute credenti
   assert.doesNotMatch(allBrowserSource, /localStorage\.(setItem|getItem)\([^)]*api.key/i)
 })
 
+test('AI chat streaming is idempotent and can resume from a durable event cursor', () => {
+  const chatApi = source('src/api/ai.ts')
+  const view = source('src/views/AIChat.vue')
+
+  assert.match(chatApi, /idempotencyKey/)
+  assert.match(chatApi, /Last-Event-ID/)
+  assert.match(chatApi, /\/api\/v1\/agent\/runs\/\$\{runId\}\/events/)
+  assert.match(chatApi, /line\.startsWith\('id:'\)/)
+  assert.match(chatApi, /event === 'heartbeat'/)
+  assert.match(view, /crypto\.randomUUID\(\)/)
+  assert.match(view, /idempotencyKey/)
+})
+
 test('AI chat and route configuration are bilingual', () => {
   const messages = source('src/i18n/index.ts')
   assert.match(messages, /'AI Chat': 'AI 对话'/)

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.main import app
@@ -63,7 +63,7 @@ class FakeChatService:
     def get_session(self, session_id, user_id):
         return self.create_session(user_id, "Export planning")
 
-    async def complete(self, session_id, user_id, content):
+    async def complete(self, session_id, user_id, content, *, idempotency_key=None):
         return {
             "id": uuid4(),
             "session_id": session_id,
@@ -75,10 +75,15 @@ class FakeChatService:
             "created_at": datetime(2026, 8, 9, tzinfo=timezone.utc),
         }
 
-    async def stream(self, session_id, user_id, content):
-        yield {"event": "delta", "data": {"delta": "Prioritize "}}
-        yield {"event": "delta", "data": {"delta": "EU distributors."}}
-        yield {"event": "done", "data": {"session_id": str(session_id)}}
+    async def stream(self, session_id, user_id, content, *, idempotency_key=None):
+        yield {
+            "id": 1,
+            "event": "run.started",
+            "data": {"run_id": str(uuid4())},
+        }
+        yield {"id": 2, "event": "delta", "data": {"delta": "Prioritize "}}
+        yield {"id": 3, "event": "delta", "data": {"delta": "EU distributors."}}
+        yield {"id": 4, "event": "done", "data": {"session_id": str(session_id)}}
 
 
 class FailingChatService(FakeChatService):
@@ -154,9 +159,67 @@ def test_ai_chat_supports_session_completion_and_sse_without_browser_gateway_acc
     assert completed.json()["resolved_provider"] == "approved-provider"
     assert streamed.status_code == 200
     assert streamed.headers["content-type"].startswith("text/event-stream")
+    assert "id: 1" in streamed.text
+    assert "event: run.started" in streamed.text
     assert "event: delta" in streamed.text
     assert "event: done" in streamed.text
     assert user.id
+
+
+def test_agent_run_event_endpoint_replays_only_after_last_event_id(api_context):
+    client, db, user = api_context
+    now = datetime.utcnow()
+    from app.services.agent_run_events import AgentRunEventService
+    from app.services.agent_runs import AgentRunCommand, AgentRunService
+    from app.services.agent_runtime.contracts import Sensitivity
+
+    run, _ = AgentRunService(db).create(
+        AgentRunCommand(
+            idempotency_key=f"agent-run:api-events:{uuid4()}",
+            org_id=uuid4(),
+            user_id=user.id,
+            use_case="live_reply",
+            input={"content": "do not expose"},
+            sensitivity=Sensitivity.INTERNAL,
+            generation_epoch=1,
+            deadline_at=now.replace(tzinfo=timezone.utc) + timedelta(minutes=5),
+        )
+    )
+    run = AgentRunService(db).claim_one(
+        run.id,
+        worker_id="api-event-worker",
+        now=now,
+        lease_seconds=60,
+    )
+    event_log = AgentRunEventService(db)
+    event_log.append(
+        run.id,
+        worker_id="api-event-worker",
+        fencing_token=run.fencing_token,
+        event_type="run.started",
+        data={"run_id": str(run.id)},
+        now=now,
+    )
+    event_log.append(
+        run.id,
+        worker_id="api-event-worker",
+        fencing_token=run.fencing_token,
+        event_type="message.delta",
+        data={"delta": "safe replay"},
+        now=now,
+    )
+
+    response = client.get(
+        f"/api/v1/agent/runs/{run.id}/events",
+        headers={"Last-Event-ID": "1", "Accept": "text/event-stream"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "id: 1" not in response.text
+    assert "id: 2" in response.text
+    assert "event: message.delta" in response.text
+    assert "safe replay" in response.text
 
 
 def test_ai_chat_returns_retryable_429_when_concurrency_budget_is_full(api_context):
