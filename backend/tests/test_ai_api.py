@@ -149,7 +149,7 @@ def test_admin_can_hot_apply_and_probe_runtime_config(api_context):
     assert models.json() == {"models": ["draft-v1", "reply-v1"]}
 
 
-def test_ai_chat_supports_session_completion_and_sse_without_browser_gateway_access(api_context):
+def test_ai_chat_supports_completion_and_retires_connection_bound_stream(api_context):
     client, _, user = api_context
     chat = FakeChatService()
     app.dependency_overrides[get_ai_chat_service] = lambda: chat
@@ -168,12 +168,10 @@ def test_ai_chat_supports_session_completion_and_sse_without_browser_gateway_acc
     assert created.status_code == 201
     assert completed.status_code == 200
     assert completed.json()["resolved_provider"] == "approved-provider"
-    assert streamed.status_code == 200
-    assert streamed.headers["content-type"].startswith("text/event-stream")
-    assert "id: 1" in streamed.text
-    assert "event: run.started" in streamed.text
-    assert "event: delta" in streamed.text
-    assert "event: done" in streamed.text
+    assert streamed.status_code == 410
+    assert streamed.json() == {
+        "detail": "Use the detached chat run and agent event endpoints"
+    }
     assert user.id
 
 
