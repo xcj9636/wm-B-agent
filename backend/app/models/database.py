@@ -4,7 +4,7 @@ SQLAlchemy database models
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum,
+    BigInteger, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum,
     JSON, Float, Index, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.orm import relationship, declarative_base
@@ -1700,6 +1700,143 @@ class AgentRunEvent(Base):
         ),
         Index("idx_agent_run_event_replay", "run_id", "sequence"),
         Index("idx_agent_run_event_expiry", "expires_at"),
+    )
+
+
+class MediaUploadIntent(Base):
+    """Server-keyed, one-use upload intent for a quarantined object."""
+
+    __tablename__ = "media_upload_intents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    actor_user_id = Column(Integer, nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    storage_key = Column(String(1000), nullable=False, unique=True)
+    kind = Column(String(30), nullable=False)
+    expected_mime_type = Column(String(255), nullable=False)
+    expected_size_bytes = Column(BigInteger, nullable=False)
+    expected_sha256 = Column(String(64), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    consent_required = Column(Boolean, nullable=False, default=False)
+    status = Column(String(30), nullable=False, default="pending")
+    asset_id = Column(UUID(as_uuid=True), ForeignKey("media_assets.id"))
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "actor_user_id",
+            "idempotency_key",
+            name="uq_media_upload_scope_idempotency",
+        ),
+        Index("idx_media_upload_status_expiry", "status", "expires_at"),
+        Index("idx_media_upload_org_created", "org_id", "created_at"),
+    )
+
+
+class MediaAsset(Base):
+    """Immutable media object metadata and its quarantine state."""
+
+    __tablename__ = "media_assets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    owner_user_id = Column(Integer, nullable=False)
+    kind = Column(String(30), nullable=False)
+    source = Column(String(30), nullable=False)
+    storage_backend = Column(String(50), nullable=False)
+    storage_key = Column(String(1000), nullable=False, unique=True)
+    sha256 = Column(String(64), nullable=False)
+    mime_type = Column(String(255), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    quarantined = Column(Boolean, nullable=False, default=True)
+    scan_status = Column(String(30), nullable=False, default="pending")
+    rights_status = Column(String(30), nullable=False, default="unknown")
+    consent_required = Column(Boolean, nullable=False, default=False)
+    consent_status = Column(String(30), nullable=False, default="unknown")
+    metadata_json = Column(JSON, nullable=False, default=dict)
+    reviewed_by_user_id = Column(Integer)
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    deleted_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_media_asset_org_created", "org_id", "created_at"),
+        Index("idx_media_asset_org_hash", "org_id", "sha256"),
+        Index("idx_media_asset_quarantine", "quarantined", "scan_status"),
+        CheckConstraint("size_bytes > 0", name="ck_media_asset_size_positive"),
+    )
+
+
+class MediaAssetRelation(Base):
+    """Generation and derivation lineage between immutable media assets."""
+
+    __tablename__ = "media_asset_relations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    parent_asset_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    child_asset_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    relation_type = Column(String(50), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "parent_asset_id",
+            "child_asset_id",
+            "relation_type",
+            name="uq_media_asset_relation",
+        ),
+        CheckConstraint(
+            "parent_asset_id <> child_asset_id",
+            name="ck_media_asset_relation_not_self",
+        ),
+        Index("idx_media_asset_relation_child", "child_asset_id"),
+    )
+
+
+class MediaConsentRecord(Base):
+    """Evidence-backed consent scope; never represented as a boolean alone."""
+
+    __tablename__ = "media_consent_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    subject_ref = Column(String(255), nullable=False)
+    purpose = Column(String(500), nullable=False)
+    regions = Column(JSON, nullable=False, default=list)
+    media_types = Column(JSON, nullable=False, default=list)
+    status = Column(String(30), nullable=False)
+    valid_from = Column(DateTime, nullable=False)
+    valid_until = Column(DateTime)
+    evidence_asset_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id"),
+        nullable=False,
+    )
+    created_by_user_id = Column(Integer, nullable=False)
+    revoked_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_media_consent_org_status", "org_id", "status"),
+        CheckConstraint(
+            "valid_until IS NULL OR valid_until > valid_from",
+            name="ck_media_consent_valid_range",
+        ),
     )
 
 

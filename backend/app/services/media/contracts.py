@@ -26,6 +26,14 @@ class GenerationMode(str, Enum):
     REFERENCE_TO_VIDEO = "reference_to_video"
 
 
+class MediaAssetKind(str, Enum):
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
+    SUBTITLE = "subtitle"
+    PROJECT_FILE = "project_file"
+
+
 class PersonaStatus(str, Enum):
     DRAFT = "draft"
     APPROVED = "approved"
@@ -220,4 +228,3 @@ class MediaPolicyDecision(BaseModel):
 
     def signing_payload(self) -> dict:
         return self.model_dump(mode="json", exclude={"signature"})
-
