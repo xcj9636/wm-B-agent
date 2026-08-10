@@ -1,54 +1,63 @@
-/* Apple platform materials are not available on the web. These tokens provide a restrained frosted-material approximation. */
+/* Neutral AI-workspace theme. Legacy variable aliases remain so feature views can migrate incrementally. */
 :root {
   color-scheme: light;
-  --apple-blue: #007aff;
-  --apple-blue-hover: #006ee6;
-  --apple-green: #30a46c;
-  --apple-orange: #f59e0b;
-  --apple-red: #e5484d;
-  --apple-gray: #667085;
-  --surface-canvas: #f2f3f5;
-  --surface-sidebar: rgb(241 243 247 / 0.78);
-  --surface-glass: rgb(255 255 255 / 0.72);
-  --surface-elevated: rgb(255 255 255 / 0.94);
-  --surface-sunken: rgb(118 118 128 / 0.08);
-  --surface-hover: rgb(118 118 128 / 0.1);
-  --surface-selected: rgb(0 122 255 / 0.12);
-  --text-primary: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-tertiary: #8e8e93;
-  --border-hairline: rgb(60 60 67 / 0.16);
-  --border-highlight: rgb(255 255 255 / 0.72);
+  --brand-accent: #10a37f;
+  --brand-accent-hover: #0d8f70;
+  --control-primary: #087a5f;
+  --control-primary-hover: #06664f;
+  --apple-blue: var(--brand-accent);
+  --apple-blue-hover: var(--brand-accent-hover);
+  --apple-green: #10a37f;
+  --apple-orange: #c77d18;
+  --apple-red: #d00e17;
+  --apple-gray: #6b6b6b;
+  --surface-canvas: #ffffff;
+  --surface-sidebar: #f7f7f8;
+  --surface-glass: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-panel: #ffffff;
+  --surface-sunken: #f4f4f4;
+  --surface-muted: #f7f7f8;
+  --surface-hover: #ececec;
+  --surface-selected: #e7e7e7;
+  --text-primary: #0d0d0d;
+  --text-secondary: #5d5d5d;
+  --text-tertiary: #777777;
+  --border-hairline: #e5e5e5;
+  --border-subtle: #e8e8e8;
+  --border-color: #dedede;
+  --border-highlight: transparent;
   --radius-control: 10px;
-  --radius-card: 14px;
-  --radius-window: 20px;
+  --radius-card: 12px;
+  --radius-window: 16px;
   --radius-pill: 999px;
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 28px rgb(15 23 42 / 0.06);
-  --shadow-window: 0 24px 80px rgb(15 23 42 / 0.18), 0 2px 8px rgb(15 23 42 / 0.08);
-  --motion-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.035);
+  --shadow-window: 0 16px 48px rgb(0 0 0 / 0.12);
+  --shadow-floating: 0 12px 32px rgb(0 0 0 / 0.12);
+  --motion-spring: cubic-bezier(0.2, 0, 0, 1);
   --console-radius: var(--radius-card);
 
-  --color-primary: var(--apple-blue);
+  --color-primary: var(--brand-accent);
   --color-success: var(--apple-green);
   --color-warning: var(--apple-orange);
   --color-danger: var(--apple-red);
   --color-info: var(--apple-gray);
-  --el-color-primary: var(--apple-blue);
-  --el-color-primary-light-3: #4da2ff;
-  --el-color-primary-light-5: #80bdff;
-  --el-color-primary-light-7: #b3d8ff;
-  --el-color-primary-light-9: #e6f2ff;
-  --el-color-primary-dark-2: #0062cc;
+  --el-color-primary: var(--control-primary);
+  --el-color-primary-light-3: #56bca2;
+  --el-color-primary-light-5: #88cebc;
+  --el-color-primary-light-7: #b9e1d7;
+  --el-color-primary-light-9: #e7f5f1;
+  --el-color-primary-dark-2: #0d8f70;
   --el-bg-color: var(--surface-elevated);
   --el-bg-color-page: var(--surface-canvas);
   --el-fill-color-blank: var(--surface-elevated);
   --el-fill-color-light: var(--surface-sunken);
   --el-fill-color-lighter: rgb(118 118 128 / 0.06);
   --el-border-color: var(--border-hairline);
-  --el-border-color-light: rgb(60 60 67 / 0.12);
-  --el-border-color-lighter: rgb(60 60 67 / 0.09);
+  --el-border-color-light: #e8e8e8;
+  --el-border-color-lighter: #eeeeee;
   --el-text-color-primary: var(--text-primary);
-  --el-text-color-regular: #3a3a3c;
+  --el-text-color-regular: #333333;
   --el-text-color-secondary: var(--text-secondary);
   --el-text-color-placeholder: var(--text-tertiary);
   --el-border-radius-base: var(--radius-control);
@@ -56,39 +65,67 @@
 
 .dark {
   color-scheme: dark;
-  --apple-blue: #0a84ff;
-  --apple-blue-hover: #409cff;
-  --apple-green: #32d583;
-  --apple-orange: #fdb022;
-  --apple-red: #ff6961;
-  --apple-gray: #98a2b3;
-  --surface-canvas: #171719;
-  --surface-sidebar: rgb(34 34 37 / 0.8);
-  --surface-glass: rgb(44 44 47 / 0.72);
-  --surface-elevated: rgb(37 37 40 / 0.96);
-  --surface-sunken: rgb(118 118 128 / 0.16);
-  --surface-hover: rgb(255 255 255 / 0.08);
-  --surface-selected: rgb(10 132 255 / 0.2);
-  --text-primary: #f5f5f7;
-  --text-secondary: #a1a1a6;
-  --text-tertiary: #8e8e93;
-  --border-hairline: rgb(255 255 255 / 0.13);
-  --border-highlight: rgb(255 255 255 / 0.12);
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 36px rgb(0 0 0 / 0.18);
-  --shadow-window: 0 28px 90px rgb(0 0 0 / 0.55), 0 2px 10px rgb(0 0 0 / 0.28);
-  --el-color-primary-light-9: rgb(10 132 255 / 0.16);
+  --brand-accent: #19c79a;
+  --brand-accent-hover: #27d3a8;
+  --control-primary: #087a5f;
+  --control-primary-hover: #0a6a54;
+  --apple-blue: var(--brand-accent);
+  --apple-blue-hover: var(--brand-accent-hover);
+  --apple-green: #19c79a;
+  --apple-orange: #e9a23b;
+  --apple-red: #ff6b6b;
+  --apple-gray: #a6a6a6;
+  --surface-canvas: #212121;
+  --surface-sidebar: #171717;
+  --surface-glass: #2f2f2f;
+  --surface-elevated: #2f2f2f;
+  --surface-panel: #2f2f2f;
+  --surface-sunken: #272727;
+  --surface-muted: #282828;
+  --surface-hover: #2f2f2f;
+  --surface-selected: #333333;
+  --text-primary: #ececec;
+  --text-secondary: #b4b4b4;
+  --text-tertiary: #9b9b9b;
+  --border-hairline: #3d3d3d;
+  --border-subtle: #3a3a3a;
+  --border-color: #474747;
+  --border-highlight: transparent;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.16);
+  --shadow-window: 0 18px 56px rgb(0 0 0 / 0.42);
+  --shadow-floating: 0 14px 38px rgb(0 0 0 / 0.38);
+  --el-color-primary: var(--control-primary);
+  --el-color-primary-light-9: rgb(25 199 154 / 0.14);
   --el-bg-color: var(--surface-elevated);
   --el-bg-color-page: var(--surface-canvas);
   --el-fill-color-blank: var(--surface-elevated);
   --el-fill-color-light: var(--surface-sunken);
-  --el-fill-color-lighter: rgb(255 255 255 / 0.06);
+  --el-fill-color-lighter: #333333;
   --el-border-color: var(--border-hairline);
-  --el-border-color-light: rgb(255 255 255 / 0.1);
-  --el-border-color-lighter: rgb(255 255 255 / 0.07);
+  --el-border-color-light: #3d3d3d;
+  --el-border-color-lighter: #383838;
   --el-text-color-primary: var(--text-primary);
-  --el-text-color-regular: #d1d1d6;
+  --el-text-color-regular: #d1d1d1;
   --el-text-color-secondary: var(--text-secondary);
   --el-text-color-placeholder: var(--text-tertiary);
+}
+
+/* Element Plus lazy component styles also declare :root tokens. The app-scoped
+   selector keeps the workspace palette authoritative regardless of chunk order. */
+#app {
+  --el-color-primary: var(--control-primary);
+  --el-color-primary-light-3: #56a994;
+  --el-color-primary-light-5: #83bdad;
+  --el-color-primary-light-7: #b5d8cf;
+  --el-color-primary-light-9: #e6f2ef;
+  --el-color-primary-dark-2: var(--control-primary-hover);
+}
+
+#app.dark {
+  --el-color-primary-light-3: #3d9b82;
+  --el-color-primary-light-5: #70b6a3;
+  --el-color-primary-light-7: #a7d1c5;
+  --el-color-primary-light-9: rgb(25 199 154 / 0.14);
 }
 
 * {
@@ -108,7 +145,7 @@ body {
   min-height: 100dvh;
   color: var(--text-primary);
   background: var(--surface-canvas);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -160,35 +197,14 @@ a:hover {
 
 .apple-glass {
   border: 1px solid var(--border-hairline);
-  background: var(--surface-glass);
-  box-shadow: inset 0 1px 0 var(--border-highlight), var(--shadow-card);
-  -webkit-backdrop-filter: blur(28px) saturate(170%);
-  backdrop-filter: blur(28px) saturate(170%);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-card);
 }
-
-.window-controls {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.window-control {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.18);
-}
-
-.window-control--close { background: #ff5f57; }
-.window-control--minimize { background: #febc2e; }
-.window-control--expand { background: #28c840; }
 
 .page-stack {
   display: grid;
-  gap: 18px;
-  animation: page-enter 360ms var(--motion-spring) both;
+  gap: 20px;
+  animation: page-enter 220ms var(--motion-spring) both;
 }
 
 .page-heading {
@@ -196,15 +212,15 @@ a:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding: 4px 2px 2px;
+  padding: 2px 0 6px;
 }
 
 .page-heading h1 {
   margin: 0;
   color: var(--text-primary);
-  font-size: clamp(26px, 3vw, 34px);
-  font-weight: 680;
-  letter-spacing: -0.028em;
+  font-size: clamp(25px, 3vw, 32px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
   line-height: 1.12;
 }
 
@@ -216,12 +232,11 @@ a:hover {
 }
 
 .page-kicker {
-  margin: 0 0 5px;
+  margin: 0 0 6px;
   color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.035em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .el-card {
@@ -229,7 +244,7 @@ a:hover {
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-card);
   background: var(--surface-elevated);
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
 }
 
 .el-card__header {
@@ -254,15 +269,15 @@ a:hover {
 }
 
 .el-button--primary {
-  border-color: var(--apple-blue);
-  background: var(--apple-blue);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 1px 2px rgb(0 122 255 / 0.18);
+  border-color: var(--control-primary);
+  background: var(--control-primary);
+  box-shadow: none;
 }
 
 .el-button--primary:not(.is-disabled):hover,
 .el-button--primary:not(.is-disabled):focus {
-  border-color: var(--apple-blue-hover);
-  background: var(--apple-blue-hover);
+  border-color: var(--control-primary-hover);
+  background: var(--control-primary-hover);
 }
 
 .el-button.is-text,
@@ -275,7 +290,7 @@ a:hover {
 .el-textarea__inner,
 .el-input-number {
   border-radius: var(--radius-control);
-  background: var(--surface-sunken);
+  background: var(--surface-elevated);
   box-shadow: inset 0 0 0 1px var(--border-hairline);
   transition: box-shadow 180ms ease, background-color 180ms ease;
 }
@@ -327,10 +342,8 @@ a:hover {
 .el-message-box,
 .el-popper.is-light {
   border: 1px solid var(--border-hairline);
-  background: var(--surface-glass);
-  box-shadow: inset 0 1px 0 var(--border-highlight), var(--shadow-window);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  backdrop-filter: blur(30px) saturate(180%);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-window);
 }
 
 .el-dialog,
@@ -355,8 +368,8 @@ a:hover {
 
 .el-avatar {
   color: #fff;
-  background: var(--apple-blue);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24);
+  background: #5b5b5b;
+  box-shadow: none;
 }
 
 .el-alert {
@@ -407,7 +420,5 @@ a:hover {
   .el-message-box,
   .el-popper.is-light {
     background: var(--surface-elevated);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
 }

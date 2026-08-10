@@ -10,45 +10,46 @@ function source(relativePath) {
   return readFileSync(path.join(frontendDir, relativePath), 'utf8')
 }
 
-test('global tokens expose an Apple-native surface system in both themes', () => {
+test('global tokens expose a neutral AI workspace system in both themes', () => {
   const styles = source('src/styles/main.scss')
 
   for (const token of [
-    '--apple-blue',
+    '--brand-accent',
     '--surface-canvas',
-    '--surface-glass',
+    '--surface-sidebar',
     '--surface-elevated',
-    '--radius-window',
-    '--shadow-window',
+    '--surface-selected',
+    '--text-primary',
+    '--border-hairline',
   ]) {
     assert.match(styles, new RegExp(token))
   }
 
-  assert.match(styles, /backdrop-filter:\s*blur/)
-  assert.match(styles, /prefers-reduced-transparency:\s*reduce/)
+  assert.match(styles, /--brand-accent:\s*#10a37f/)
   assert.match(styles, /prefers-reduced-motion:\s*reduce/)
   assert.match(styles, /\.dark\s*\{/)
 })
 
-test('Element Plus primitives inherit the native control language', () => {
+test('Element Plus primitives inherit the neutral control language', () => {
   const styles = source('src/styles/main.scss')
 
   for (const selector of ['.el-button', '.el-input__wrapper', '.el-card', '.el-dialog', '.el-table']) {
     assert.match(styles, new RegExp(selector.replace('.', '\\.')))
   }
-  assert.match(styles, /cubic-bezier\(0\.16,\s*1,\s*0\.3,\s*1\)/)
+  assert.match(styles, /cubic-bezier\(0\.2,\s*0,\s*0,\s*1\)/)
   assert.doesNotMatch(styles, /lighten\(/)
 })
 
-test('application shell and login use macOS window conventions without legacy purple gradients', () => {
+test('application shell and login use the minimal AI workspace conventions', () => {
   const layout = source('src/layouts/MainLayout.vue')
   const login = source('src/views/Login.vue')
   const theme = source('src/stores/theme.ts')
 
-  assert.match(layout, /window-controls/)
-  assert.match(layout, /sidebar-material/)
-  assert.match(login, /login-window/)
-  assert.match(login, /window-controls/)
+  assert.match(layout, /new-chat-control/)
+  assert.match(layout, /background:\s*var\(--surface-sidebar\)/)
+  assert.match(login, /login-panel/)
+  assert.doesNotMatch(layout, /window-controls|sidebar-material/)
+  assert.doesNotMatch(login, /window-controls|login-window|login-ambient/)
   assert.match(login, /\.login-page\s*\{[^}]*width:\s*100%/)
   assert.doesNotMatch(login, /#667eea|#764ba2/)
   assert.match(theme, /localStorage\.setItem\('theme'/)
@@ -83,7 +84,7 @@ test('visible console copy contains no forbidden dash typography', () => {
   assert.doesNotMatch(combined, /[—–]/)
 })
 
-test('all primary work surfaces use the shared native page rhythm', () => {
+test('all primary work surfaces use the shared workspace page rhythm', () => {
   const views = [
     'Workflows.vue',
     'Customers.vue',

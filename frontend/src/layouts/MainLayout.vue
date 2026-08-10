@@ -11,31 +11,33 @@
       @click="mobileOpen = false"
     />
 
-    <aside class="console-sidebar sidebar-material apple-glass">
+    <aside class="console-sidebar">
       <div class="sidebar-titlebar">
-        <div
-          class="window-controls"
-          aria-hidden="true"
-        >
-          <span class="window-control window-control--close" />
-          <span class="window-control window-control--minimize" />
-          <span class="window-control window-control--expand" />
-        </div>
-        <div
-          v-if="!isCollapsed"
-          class="brand"
-        >
+        <div class="brand">
           <img
             class="brand-mark"
             src="/b-agent-logo.svg"
             alt=""
           >
-          <div class="brand-copy">
+          <div
+            v-if="!isCollapsed"
+            class="brand-copy"
+          >
             <strong>B-agent</strong>
             <span>{{ $t('Revenue operations') }}</span>
           </div>
         </div>
       </div>
+
+      <button
+        type="button"
+        class="new-chat-control"
+        :aria-label="$t('New chat')"
+        @click="router.push('/ai-chat')"
+      >
+        <el-icon><EditPen /></el-icon>
+        <span v-if="!isCollapsed">{{ $t('New chat') }}</span>
+      </button>
 
       <el-menu
         :default-active="activeMenu"
@@ -162,7 +164,6 @@
             <el-icon><Menu /></el-icon>
           </el-button>
           <div>
-            <span>{{ $t('Workspace') }}</span>
             <strong>{{ currentTitle }}</strong>
           </div>
         </div>
@@ -201,7 +202,7 @@
           <el-dropdown trigger="click">
             <button
               type="button"
-              class="user-control apple-glass"
+              class="user-control"
             >
               <el-avatar :size="32">
                 {{ userInitial }}
@@ -268,9 +269,7 @@ async function logout() {
 <style lang="scss" scoped>
 .console-shell {
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at 76% -10%, color-mix(in srgb, var(--apple-blue) 7%, transparent), transparent 34%),
-    var(--surface-canvas);
+  background: var(--surface-canvas);
 }
 
 .console-sidebar {
@@ -278,24 +277,18 @@ async function logout() {
   inset: 0 auto 0 0;
   z-index: 30;
   display: flex;
-  width: 248px;
+  width: 260px;
   flex-direction: column;
-  border-width: 0 1px 0 0;
-  border-radius: 0;
+  border-right: 1px solid var(--border-hairline);
   background: var(--surface-sidebar);
-  box-shadow: inset -1px 0 0 var(--border-highlight);
-  -webkit-backdrop-filter: blur(32px) saturate(170%);
-  backdrop-filter: blur(32px) saturate(170%);
-  transition: width 260ms var(--motion-spring), transform 260ms var(--motion-spring);
+  transition: width 200ms var(--motion-spring), transform 200ms var(--motion-spring);
 }
 
 .sidebar-titlebar {
   display: flex;
-  min-height: 68px;
+  min-height: 58px;
   align-items: center;
-  gap: 14px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--border-hairline);
+  padding: 8px 14px;
 }
 
 .brand {
@@ -306,11 +299,10 @@ async function logout() {
 }
 
 .brand-mark {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
-  border-radius: 8px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 2px 6px rgb(0 122 255 / 0.2);
+  border-radius: 9px;
 }
 
 .brand-copy {
@@ -321,7 +313,7 @@ async function logout() {
 
 .brand-copy strong {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.01em;
 }
 
@@ -333,11 +325,35 @@ async function logout() {
   white-space: nowrap;
 }
 
+.new-chat-control {
+  display: flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 11px;
+  margin: 2px 10px 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  color: var(--text-primary);
+  background: transparent;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.new-chat-control:hover,
+.new-chat-control:focus-visible {
+  border-color: var(--border-color);
+  background: var(--surface-hover);
+}
+
 .console-menu {
   flex: 1;
   overflow-y: auto;
   border-right: 0;
-  padding: 12px 10px;
+  padding: 4px 10px 12px;
   background: transparent;
 }
 
@@ -348,8 +364,8 @@ async function logout() {
 .console-menu :deep(.el-menu-item),
 .console-menu :deep(.el-sub-menu__title) {
   height: 38px;
-  margin: 2px 0;
-  border-radius: 9px;
+  margin: 1px 0;
+  border-radius: 8px;
   color: var(--text-secondary);
   line-height: 38px;
 }
@@ -363,28 +379,27 @@ async function logout() {
 .console-menu :deep(.el-menu-item.is-active) {
   color: var(--text-primary);
   background: var(--surface-selected);
-  font-weight: 590;
+  font-weight: 600;
 }
 
 .console-menu :deep(.el-menu-item.is-active .el-icon) {
-  color: var(--apple-blue);
+  color: var(--text-primary);
 }
 
 .console-menu :deep(.el-menu-item-group__title) {
-  padding: 16px 12px 5px;
+  padding: 15px 12px 5px;
   color: var(--text-tertiary);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .collapse-control {
   display: flex;
-  min-height: 52px;
+  min-height: 48px;
   align-items: center;
   gap: 10px;
-  padding: 0 20px;
+  padding: 0 18px;
   border: 0;
   border-top: 1px solid var(--border-hairline);
   color: var(--text-secondary);
@@ -394,15 +409,15 @@ async function logout() {
 
 .collapse-control:hover,
 .collapse-control:focus-visible {
-  color: var(--apple-blue);
+  color: var(--text-primary);
   background: var(--surface-hover);
   outline: none;
 }
 
 .console-content {
   min-width: 0;
-  margin-left: 248px;
-  transition: margin-left 260ms var(--motion-spring);
+  margin-left: 260px;
+  transition: margin-left 200ms var(--motion-spring);
 }
 
 .console-header {
@@ -410,16 +425,15 @@ async function logout() {
   top: 0;
   z-index: 20;
   display: flex;
-  min-height: 68px;
+  min-height: 58px;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 0 26px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--border-hairline);
-  background: color-mix(in srgb, var(--surface-glass) 90%, transparent);
-  box-shadow: inset 0 1px 0 var(--border-highlight);
-  -webkit-backdrop-filter: blur(28px) saturate(170%);
-  backdrop-filter: blur(28px) saturate(170%);
+  background: color-mix(in srgb, var(--surface-canvas) 94%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .header-title,
@@ -429,21 +443,15 @@ async function logout() {
   align-items: center;
 }
 
-.header-title > div {
-  display: grid;
-  gap: 2px;
-}
-
-.header-title span,
 .user-copy small {
   color: var(--text-secondary);
   font-size: 11px;
 }
 
 .header-title strong {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .header-actions {
@@ -454,7 +462,13 @@ async function logout() {
   width: 34px;
   height: 34px;
   color: var(--text-secondary);
-  background: var(--surface-sunken);
+  background: transparent;
+}
+
+.toolbar-button:hover,
+.toolbar-button:focus-visible {
+  color: var(--text-primary);
+  background: var(--surface-hover);
 }
 
 .locale-button {
@@ -468,14 +482,15 @@ async function logout() {
   padding: 3px 9px 3px 4px;
   border-radius: var(--radius-pill);
   color: var(--text-primary);
-  background: var(--surface-glass);
+  border: 0;
+  background: transparent;
   font: inherit;
   cursor: pointer;
 }
 
 .user-control:hover,
 .user-control:focus-visible {
-  background: color-mix(in srgb, var(--surface-glass) 68%, var(--surface-hover));
+  background: var(--surface-hover);
   outline: none;
 }
 
@@ -491,20 +506,25 @@ async function logout() {
 }
 
 .console-main {
-  width: min(100%, 1520px);
+  width: min(100%, 1480px);
   margin: 0 auto;
-  padding: 28px clamp(20px, 3vw, 40px) 44px;
+  padding: 26px clamp(20px, 3vw, 42px) 48px;
 }
 
 .is-collapsed .console-sidebar {
-  width: 82px;
+  width: 68px;
 }
 
 .is-collapsed .console-content {
-  margin-left: 82px;
+  margin-left: 68px;
 }
 
 .is-collapsed .sidebar-titlebar {
+  justify-content: center;
+  padding: 0;
+}
+
+.is-collapsed .new-chat-control {
   justify-content: center;
   padding: 0;
 }

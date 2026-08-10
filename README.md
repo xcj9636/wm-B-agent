@@ -10,6 +10,8 @@ B-agent 把企业调研、海外潜客发现、ICP 评分、AI 对话、知识�
 
 ## 产品界面
 
+当前前端采用 ChatGPT 式中性 AI 工作台语言：浅色与深色主题共享同一套语义令牌，侧栏提供快速新建对话入口，业务页面使用克制的边框、留白和扁平层级。下方截图重点展示业务信息架构；界面样式以当前分支运行结果为准。
+
 ### Agent 中心
 
 ![B-agent Agent 中心](docs/brand/b-agent-agent-center.png)
@@ -45,7 +47,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **可靠执行**：事务 Outbox、幂等键、Worker 租约、失败分类、死信队列和双管理员异常处置。
 - **邮箱连接**：Gmail 与 Microsoft OAuth，使用 PKCE 和一次性 state；令牌只保存在后端权限为 `0600` 的凭据文件中。
 - **投递验证**：Gmail 校验 `SENT` 标签；Microsoft 使用 Immutable ID 在 Sent Items 中验证同一封邮件。
-- **管理工作台**：Apple 原生风格的响应式界面，支持中文/英文、深浅主题、运行时后端地址和 Vite HMR。
+- **管理工作台**：ChatGPT 风格的中性响应式界面，支持中文/英文、深浅主题、运行时后端地址和 Vite HMR。
 
 ### 当前能力边界
 
@@ -56,6 +58,112 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 | 后续产品化重点 | 将记忆和知识检索按具体外贸业务流编排进 AI Chat、补充多语言路由评测集、真实 Provider 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
+
+## 项目架构图
+
+```mermaid
+flowchart TB
+    USER["外贸团队 / 管理员"]
+
+    subgraph EXPERIENCE["体验层"]
+        UI["Vue 3 工作台<br/>Agent / Chat / CRM / Operations"]
+        RUNTIME_URL["运行时 API 地址<br/>同源代理或管理员配置"]
+    end
+
+    subgraph CONTROL["API 与控制面"]
+        API["FastAPI API"]
+        AUTH["JWT / RBAC<br/>单组织信任边界"]
+        BUSINESS["客户 / 会话 / 获客<br/>调研 / ICP / 工作流"]
+        ADMIN["AI 配置 / 连接器<br/>可靠执行 / 死信处置"]
+    end
+
+    subgraph AGENT["Agent Runtime"]
+        RUN["Durable Run / Turn<br/>幂等键 + 租约 + Fencing"]
+        POLICY["DLP / fast-deep 路由<br/>Provider 白名单"]
+        CONTEXT["Prompt Registry<br/>上下文预算 / 不可信输入隔离"]
+        MEMORY["Working / Session / Long-term"]
+        RAG["Versioned RAG<br/>ACL / 敏感级别 / 证据快照"]
+        TOOLS["Durable Tool Runtime<br/>提案 / 审批 / 执行"]
+    end
+
+    subgraph MODEL["模型访问层"]
+        LLM["统一 LLM Service<br/>审计 / TTFT / E2E 指标"]
+        DIRECT["固定直连 Provider"]
+        OMNI["OmniRoute 内部网关<br/>固定别名 + 响应后复核"]
+    end
+
+    subgraph ASYNC["异步执行层"]
+        CELERY["Celery Worker / Beat"]
+        OUTBOX["Transactional Outbox"]
+        DELIVERY["审批投递 / Sent 验证<br/>失败分类 / Dead Letter"]
+    end
+
+    subgraph DATA["数据与协调层"]
+        PG[("PostgreSQL<br/>业务与持久事件")]
+        REDIS[("Redis<br/>队列 / 租约 / 协调")]
+        CACHE[("独立 Redis Cache<br/>无 AOF 的 RAG 候选缓存")]
+        SECRETS["后端凭据目录<br/>0600 文件权限"]
+    end
+
+    subgraph EXTERNAL["外部服务"]
+        HUNTER["Hunter / 数据连接器"]
+        GMAIL["Gmail API"]
+        OUTLOOK["Microsoft Graph"]
+        WHATSAPP["WhatsApp"]
+    end
+
+    USER --> UI
+    UI --> RUNTIME_URL -->|"REST + Durable SSE"| API
+    API --> AUTH
+    API --> BUSINESS
+    API --> ADMIN
+    API --> RUN
+
+    RUN --> POLICY --> CONTEXT --> LLM
+    CONTEXT -.->|"按业务策略读取"| MEMORY
+    CONTEXT -.->|"按业务策略检索"| RAG
+    RUN --> TOOLS
+
+    LLM --> DIRECT
+    LLM --> OMNI
+    TOOLS --> CELERY --> OUTBOX --> DELIVERY
+
+    BUSINESS --> PG
+    RUN --> PG
+    MEMORY --> PG
+    RAG --> PG
+    RUN --> REDIS
+    CELERY --> REDIS
+    RAG --> CACHE
+    SECRETS --> LLM
+    SECRETS --> CELERY
+
+    BUSINESS --> HUNTER
+    DELIVERY --> GMAIL
+    DELIVERY --> OUTLOOK
+    DELIVERY --> WHATSAPP
+```
+
+### 架构分层与职责
+
+| 分层 | 核心职责 | 关键实现 |
+|---|---|---|
+| 体验层 | 双语业务工作台、深浅主题、流式对话和运行时 API 切换 | Vue 3、TypeScript、Vite、Element Plus、Pinia |
+| API 控制面 | 身份认证、权限、输入校验、业务 API 与管理员控制面 | FastAPI、Pydantic、JWT、RBAC |
+| Agent Runtime | Run/Turn 状态机、Prompt、上下文、DLP、路由、记忆、RAG 和工具编排 | 持久事件、幂等键、租约、fencing token |
+| 模型访问层 | 统一模型契约、供应商选择、请求审计、真实模型与延迟记录 | Direct Provider、OmniRoute、固定 use-case 别名 |
+| 异步执行层 | 可恢复任务、定时任务、Outbox、投递和死信处理 | Celery Worker、Celery Beat、事务 Outbox |
+| 数据与协调层 | 业务主数据、Agent 事件、队列、并发协调和安全缓存 | PostgreSQL、Redis、独立 Redis Cache |
+| 外部连接层 | 获客数据、邮箱 OAuth、邮件与消息发送 | Hunter、Gmail API、Microsoft Graph、WhatsApp |
+
+### 核心设计原则
+
+1. **浏览器零供应商密钥**：前端只持有 B-agent 登录令牌和可公开的运行状态，不接触模型、Hunter 或邮箱服务端密钥。
+2. **所有外部副作用可追踪**：调研、草稿、审批、Tool Run、Outbox 和供应商确认都使用持久记录串联。
+3. **执行可以恢复，但不能越权恢复**：租约过期后任务可重新领取，旧 Worker 的 fencing token 不能提交结果。
+4. **路由默认收紧**：未知路由版本、策略异常、敏感数据或工具动作进入 deep 或 fail-closed，不自动放宽。
+5. **记忆和 RAG 不是隐式全开**：长期记忆需要可信来源和准入，RAG 结果需要版本、ACL、组织和敏感级别复核。
+6. **不可逆动作保留人工控制**：外发、审批和死信结论均有明确的人机边界。
 
 ## Agent Runtime 设计
 
@@ -131,6 +239,45 @@ flowchart LR
 
 当前 OmniRoute 集成固定在提交 `e0ce95c592c00f100f5141371dbda976d678ddee`。B-agent 禁止 `auto/*` 模型别名，并在网关响应后再次校验实际 Provider 是否属于管理员白名单，避免 PII 或企业数据被 fail-open 到未批准供应商。
 
+## 前端工作台与 API 对接
+
+| 页面 | 路由 | 主要后端接口 | 业务用途 |
+|---|---|---|---|
+| Agent 中心 | `/agent` | `/api/v1/agent` | 运行时总览、企业调研、证据复核、草稿审批和投递控制 |
+| AI 对话 | `/ai-chat` | `/api/v1/ai/chat`、`/api/v1/agent/runs/*/events` | 创建 detached run，使用 durable SSE 恢复消息 |
+| 经营总览 | `/dashboard` | `/api/v1/stats` | 客户、会话、转化和执行指标 |
+| 工作流与 Skill | `/workflows`、`/skills` | `/api/v1/workflows`、`/api/v1/skills` | 编排业务流程并查看已注册能力 |
+| 智能获客 | `/prospecting` | `/api/v1/prospecting` | 域名搜索、联系人查找、批量富化、ICP 评分与人工复核 |
+| 客户与会话 | `/customers`、`/conversations` | `/api/v1/customers`、`/api/v1/conversations` | 客户档案、沟通记录和详情追踪 |
+| 数据分析 | `/analytics` | `/api/v1/stats` | 渠道、客户和对话分析 |
+| 运营控制 | `/operations`、`/operations/dead-letters` | `/api/v1/admin` | 网关健康、可靠执行、死信分析与双管理员处置 |
+| 连接器 | `/connectors` | `/api/v1/connectors` | 管理员配置、测试和启停服务端连接器 |
+| 设置 | `/settings` | `/api/v1/ai/config`、`/api/v1/mailboxes` | AI 路由热更新、模型探测、邮箱 OAuth 和浏览器 API 地址 |
+
+### 前端热加载机制
+
+- **源码热更新**：开发容器使用 Vite HMR 和源码 bind mount，Vue、TypeScript 与 SCSS 修改后不需要重建镜像。
+- **后端地址热切换**：默认使用同源 `/api` 代理；管理员可在设置页保存 HTTP(S) Base URL，新的 Axios 和 SSE 请求立即使用该地址。
+- **AI 路由热更新**：管理员通过 `GET/PUT /api/v1/ai/config` 读取和更新 Direct/OmniRoute 模式、固定模型别名、Provider 白名单和超时；`POST /api/v1/ai/config/test` 用于连通性探测。
+- **密钥写入不回显**：前端可提交新的网关 API Key，但读取配置时只得到 `api_key_configured` 布尔值，不会获得密钥本身或服务端文件位置。
+- **权限边界不热降级**：浏览器 Base URL 和 AI 路由可热更新，JWT、RBAC、DLP、审批、Provider 白名单和 Tool 安全策略仍由后端强制执行。
+
+## Docker 服务拓扑
+
+| 服务 | 默认启动 | 职责 | 持久化 / 网络边界 |
+|---|---|---|---|
+| `db` | 是 | PostgreSQL 业务主库与持久 Agent 事件 | `postgres_data`，仅绑定宿主机 `127.0.0.1:5432` |
+| `migrate` | 是，一次性 | 唯一 schema owner，执行 `alembic upgrade head` | 完成后退出，API/Worker 等待迁移成功 |
+| `redis` | 是 | Celery Broker、结果、租约、并发协调与 OmniRoute Redis DB | AOF 持久化，`redis_data` |
+| `redis_cache` | 是 | RAG 候选短时缓存 | 无快照、无 AOF、不发布宿主机端口 |
+| `backend` | 是 | FastAPI、认证、业务控制面和 SSE | 访问业务网与 AI 网关网，发布 `8000` |
+| `celery_worker` | 是 | Agent Run、Tool Run、Outbox 和异步业务任务 | 与 API 共享数据库、队列和受控凭据目录 |
+| `celery_beat` | 是 | 周期调度、租约回收和后台维护 | 独立 Beat schedule volume |
+| `frontend` | 是 | Vite 开发工作台与 HMR | 发布 `3000`，浏览器只访问 B-agent API |
+| `flower` | 是 | Celery 任务监控 | 发布 `5555`，生产环境应增加访问控制 |
+| `omniroute` | 否，`gateway` profile | 固定版本的内部模型网关 | 不发布宿主机端口，单独 Provider egress 网络 |
+| `nginx` | 否，`production` profile | 生产入口与反向代理 | 只在生产 profile 启用 |
+
 ## 技术栈
 
 | 层级 | 主要技术 |
@@ -149,25 +296,36 @@ flowchart LR
 ├── backend/
 │   ├── alembic/             # 数据库迁移
 │   ├── app/
-│   │   ├── api/             # FastAPI 路由
-│   │   ├── core/            # Agent、Skill 与工作流核心
+│   │   ├── api/v1/          # Auth、Agent、AI、CRM、Admin 等 FastAPI 路由
+│   │   ├── core/            # Agent、Skill 注册表与工作流引擎
 │   │   ├── integrations/    # AI、邮件、WhatsApp 与数据集成
 │   │   ├── models/          # 数据库与 API 模型
-│   │   ├── services/        # 业务服务与可靠执行
+│   │   ├── services/
+│   │   │   ├── agent_runtime/ # Prompt、Context、Turn 与 Runtime
+│   │   │   ├── llm/         # 模型契约、Factory、审计与运行时池
+│   │   │   └── ...          # 记忆、RAG、工具、调研、投递和可靠执行
 │   │   ├── skills/          # 可插拔业务 Skill
 │   │   └── tasks/           # Celery Worker 与调度任务
-│   ├── scripts/             # 管理脚本
-│   └── tests/
+│   ├── scripts/             # 管理员、知识库、基准和负载测试脚本
+│   └── tests/               # API、服务、安全、并发和持久化测试
 ├── frontend/
 │   ├── src/
-│   │   ├── api/
-│   │   ├── components/
-│   │   ├── stores/
-│   │   └── views/
-│   └── tests/
-├── docs/                    # ADR 与运维 Runbook
+│   │   ├── api/             # 类型化 API Client 与运行时 Base URL
+│   │   ├── components/      # 工作流编辑器等复用组件
+│   │   ├── i18n/            # 中英文文案与语言切换
+│   │   ├── layouts/         # ChatGPT 风格工作台外壳
+│   │   ├── stores/          # Auth 与 Theme 状态
+│   │   ├── styles/          # 全局语义令牌和 Element Plus 主题
+│   │   └── views/           # Agent、Chat、CRM、Operations 等页面
+│   └── tests/               # 页面契约、安全边界与类型检查测试
+├── docs/
+│   ├── adr/                 # 架构决策记录
+│   ├── brand/               # README 产品截图与品牌资产
+│   └── runbooks/            # OmniRoute 与可靠执行运维手册
 ├── plans/                   # 架构与实施计划
 ├── docker-compose.yml
+├── docker-compose.gateway-production.yml
+├── THIRD_PARTY_NOTICES.md
 └── .env.example
 ```
 
@@ -344,7 +502,7 @@ npm run lint:check
 npm run build
 ```
 
-本 README 更新前的完整本地验证基线（2026-08-10，`codex/b-agent-enterprise-platform`）：后端 `327 passed, 1 skipped`；前端 `40 passed`。Python 编译、ESLint、Vue/TypeScript 类型检查、Vite 生产构建、Docker Compose 配置和 Alembic `0021` 全量升级均通过。这里的数量是该版本验证记录，不替代 GitHub Actions 或目标环境验收。
+最近的完整工程验证基线（2026-08-11，`b-agent-enterprise-platform`）：后端 `327 passed, 1 skipped`；前端 `40 passed`。本次 UI 与 README 更新另行通过 ESLint、Vue/TypeScript 类型检查、Vite 生产构建、前端 `40/40` 测试和 `docker compose config`。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider 压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
@@ -395,8 +553,11 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 ## 相关文档
 
 - [B-agent × OmniRoute 二次改造实施蓝图](plans/b-agent-omniroute-integration-blueprint.md)
+- [Agent Runtime 优化蓝图](plans/agent-runtime-optimization-blueprint.md)
+- [外贸 Agent API 蓝图](plans/foreign-trade-agent-api-blueprint.md)
 - [OmniRoute 生产部署与回滚 Runbook](docs/runbooks/omniroute-deployment.md)
 - [可靠执行与 Outbox 运维 Runbook](docs/runbooks/reliable-execution.md)
+- [共享网关架构 ADR](docs/adr/0001-omniroute-shared-gateway.md)
 - [单组织信任边界 ADR](docs/adr/0002-single-organization-trust-boundary.md)
 - [项目代码落实方案](项目代码落实.md)
 

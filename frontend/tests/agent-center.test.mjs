@@ -35,7 +35,7 @@ test('Agent Center renders real orchestration state and business pipelines', () 
   assert.doesNotMatch(view, /mock|coming soon|placeholder data/i)
 })
 
-test('Agent Center is bilingual and uses the shared Apple-native page system', () => {
+test('Agent Center is bilingual and uses the shared AI workspace page system', () => {
   const view = source('src/views/AgentCenter.vue')
   const messages = source('src/i18n/index.ts')
 
