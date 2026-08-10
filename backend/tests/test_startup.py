@@ -10,4 +10,6 @@ def test_full_application_startup_registers_skills():
 
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+    assert response.json()["environment"] == "development"
+    assert response.json()["deployment_id"] == "local"
     assert len(SkillRegistry.list_all()) == 13

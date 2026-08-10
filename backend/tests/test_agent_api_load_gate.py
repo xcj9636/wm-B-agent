@@ -8,6 +8,7 @@ from scripts.load_test_agent_chat import (
     AgentChatLoadConfig,
     AgentChatLoadRunner,
     evaluate_slos,
+    verify_target_identity,
     validate_target_environment,
     validate_target_url,
 )
@@ -180,6 +181,49 @@ def test_production_load_requires_an_explicit_confirmation():
 
     validate_target_environment("production", confirm_production=True)
     validate_target_environment("staging", confirm_production=False)
+
+
+@pytest.mark.asyncio
+async def test_server_identity_prevents_production_environment_mislabeling():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "authorization" not in request.headers
+        return httpx.Response(
+            200,
+            json={
+                "status": "healthy",
+                "app": "Trade AI Agent",
+                "version": "1.0.0",
+                "environment": "production",
+                "deployment_id": "prod-cn-primary",
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://agent.example",
+    ) as client:
+        with pytest.raises(ValueError, match="does not match"):
+            await verify_target_identity(
+                client,
+                expected_environment="staging",
+                confirm_production=False,
+            )
+        with pytest.raises(ValueError, match="production"):
+            await verify_target_identity(
+                client,
+                expected_environment="production",
+                confirm_production=False,
+            )
+        identity = await verify_target_identity(
+            client,
+            expected_environment="production",
+            confirm_production=True,
+        )
+
+    assert identity == {
+        "environment": "production",
+        "deployment_id": "prod-cn-primary",
+    }
 
 
 @pytest.mark.parametrize(
