@@ -3,7 +3,7 @@ Application configuration using Pydantic Settings
 """
 from typing import Dict, List, Literal
 from uuid import UUID
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     DEPLOYMENT_ENVIRONMENT: Literal[
         "development", "staging", "production"
     ] = "development"
+    DEPLOYMENT_TENANCY: Literal["single_organization"] = "single_organization"
     DEPLOYMENT_ID: str = Field(default="local", min_length=1, max_length=100)
     DEBUG: bool = False
     SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -173,6 +174,20 @@ class Settings(BaseSettings):
             "summarization": self.OMNIROUTE_MODEL_SUMMARIZATION,
         }
         return {use_case: alias for use_case, alias in aliases.items() if alias}
+
+    @model_validator(mode="after")
+    def validate_media_feature_dependencies(self) -> "Settings":
+        if not self.MEDIA_SUBMIT_ENABLED:
+            return self
+        if not self.MEDIA_UPLOAD_ENABLED or not self.MEDIA_PLANNING_ENABLED:
+            raise ValueError(
+                "media submission requires upload and planning to be enabled"
+            )
+        if len(self.MEDIA_POLICY_SIGNING_KEY) < 32:
+            raise ValueError(
+                "media submission requires a dedicated signing key of at least 32 characters"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",
