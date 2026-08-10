@@ -101,6 +101,8 @@ class MediaSubmissionPolicy:
         *,
         now: Optional[datetime] = None,
     ) -> None:
+        if not self._submission_enabled:
+            raise MediaFeatureDisabled("Media submission is disabled")
         checked_at = self._aware_now(now)
         if not decision.allowed:
             raise MediaPolicyInvalid("Policy decision is not an approval")
