@@ -100,6 +100,7 @@ class AgentResult(BaseModel):
 
 AgentEventType = Literal[
     "run.started",
+    "route.selected",
     "stream.reset",
     "context.ready",
     "message.delta",

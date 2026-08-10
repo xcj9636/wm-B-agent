@@ -57,6 +57,17 @@ interface PendingChatRun {
 
 export type AIStreamEvent =
   | { id?: number; event: 'run.started'; data: { run_id: string; turn_id?: string } }
+  | {
+      id?: number
+      event: 'route.selected'
+      data: {
+        path: 'fast' | 'deep'
+        reason_code: string
+        route_version: string
+        max_output_tokens: number
+        history_message_limit: number | null
+      }
+    }
   | { id?: number; event: 'stream.reset'; data: { content: string } }
   | { id?: number; event: 'message.delta'; data: { delta: string } }
   | { id?: number; event: 'run.completed'; data: AIChatMessage }

@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.database import AgentRun
+from app.services.agent_path_router import AgentExecutionProfile
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.idempotency import IdempotencyConflict, canonical_hash
 
@@ -56,6 +57,7 @@ class AgentRunCommand(BaseModel):
     sensitivity: Sensitivity
     generation_epoch: int = Field(ge=1)
     deadline_at: datetime
+    execution_profile: Optional[AgentExecutionProfile] = None
 
     @field_validator("deadline_at")
     @classmethod
@@ -103,7 +105,11 @@ class AgentRunService:
             status="queued",
             fencing_token=0,
             effect_state="none",
-            state_json={},
+            state_json=(
+                command.execution_profile.model_dump()
+                if command.execution_profile is not None
+                else {}
+            ),
             deadline_at=command.deadline_at,
         )
         try:
@@ -433,6 +439,11 @@ class AgentRunService:
                 "sensitivity": command.sensitivity.value,
                 "generation_epoch": command.generation_epoch,
                 "deadline_at": command.deadline_at.isoformat(),
+                "execution_profile": (
+                    command.execution_profile.model_dump()
+                    if command.execution_profile is not None
+                    else None
+                ),
             }
         )
 

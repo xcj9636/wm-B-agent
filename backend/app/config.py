@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     AGENT_CONCURRENCY_PROVIDER_LIMIT: int = Field(default=16, ge=1, le=10000)
     AGENT_CONCURRENCY_TOOL_LIMIT: int = Field(default=8, ge=1, le=10000)
     AGENT_CONCURRENCY_LEASE_SECONDS: int = Field(default=300, ge=1, le=3600)
+    AGENT_FAST_PATH_ENABLED: bool = True
+    AGENT_FAST_PATH_MAX_INPUT_CHARS: int = Field(default=240, ge=40, le=4000)
+    AGENT_FAST_PATH_MAX_HISTORY_MESSAGES: int = Field(default=6, ge=1, le=20)
+    AGENT_FAST_PATH_MAX_OUTPUT_TOKENS: int = Field(default=800, ge=256, le=1600)
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"

@@ -18,6 +18,7 @@ from app.models.database import (
     AgentTurn,
 )
 from app.services.ai_runtime import AIRuntimeService
+from app.services.agent_path_router import AgentExecutionProfile, AgentPathRouter
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.agent_runtime.context import (
     ContextAssembler,
@@ -187,12 +188,17 @@ class AIChatService:
     ) -> tuple[AIChatRunStartResponse, bool]:
         """Atomically persist a chat turn and return its detachable run handle."""
         content = self._normalize_content(content)
-        self._owned_session(session_id, user_id)
+        session = self._owned_session(session_id, user_id)
         classification = SensitiveDataClassifier().classify(
             content,
             intrinsic=Sensitivity.INTERNAL,
         )
         self._enforce_current_input_policy(classification.sensitivity)
+        execution_profile = self._routing_profile(
+            session,
+            content=content,
+            sensitivity=classification.sensitivity,
+        )
         coordinator = AgentTurnCoordinator(self._db)
         try:
             turn, created = coordinator.start(
@@ -223,10 +229,10 @@ class AIChatService:
                     user_id=user_id,
                     content=content,
                     sensitivity=classification.sensitivity,
+                    execution_profile=execution_profile,
                 ),
                 commit=False,
             )
-            session = self._owned_session(session_id, user_id)
             user_message = self._append_user_message(session, content)
             turn.user_message_id = user_message.id
             self._db.commit()
@@ -269,12 +275,18 @@ class AIChatService:
                 content,
                 intrinsic=Sensitivity.INTERNAL,
             )
+            execution_profile = self._routing_profile(
+                session,
+                content=content,
+                sensitivity=classification.sensitivity,
+            )
             run, _ = run_service.create(
                 self._run_command(
                     turn=turn,
                     user_id=user_id,
                     content=content,
                     sensitivity=classification.sensitivity,
+                    execution_profile=execution_profile,
                 )
             )
             run = run_service.claim_one(
@@ -313,14 +325,18 @@ class AIChatService:
                 redaction_vault,
                 rehydration_placeholders,
             ) = self._redact_model_messages(
-                self._messages_for_model(session, user_message),
+                self._messages_for_model(
+                    session,
+                    user_message,
+                    history_limit=execution_profile.history_message_limit,
+                ),
                 run_id=str(turn.id),
             )
             response = await service.complete(
                 LLMUseCase.LIVE_REPLY,
                 model_messages,
                 temperature=0.3,
-                max_output_tokens=1600,
+                max_output_tokens=execution_profile.max_output_tokens,
                 idempotency_key=f"ai-chat:{turn.id}:llm",
             )
             response_content = redaction_vault.rehydrate(
@@ -410,12 +426,18 @@ class AIChatService:
                 content,
                 intrinsic=Sensitivity.INTERNAL,
             )
+            execution_profile = self._routing_profile(
+                session,
+                content=content,
+                sensitivity=classification.sensitivity,
+            )
             run, _ = run_service.create(
                 self._run_command(
                     turn=turn,
                     user_id=user_id,
                     content=content,
                     sensitivity=classification.sensitivity,
+                    execution_profile=execution_profile,
                 )
             )
             run = run_service.claim_one(
@@ -451,6 +473,15 @@ class AIChatService:
                 now=datetime.utcnow(),
             )
             yield self._stream_item(started_event)
+            route_event = event_log.append(
+                run.id,
+                worker_id=run_worker_id,
+                fencing_token=run.fencing_token,
+                event_type="route.selected",
+                data=execution_profile.model_dump(),
+                now=datetime.utcnow(),
+            )
+            yield self._stream_item(route_event)
             runtime_config = self._runtime.get_config()
             backend = self._runtime.build_backend()
             service = LLMService(
@@ -467,14 +498,18 @@ class AIChatService:
                 redaction_vault,
                 rehydration_placeholders,
             ) = self._redact_model_messages(
-                self._messages_for_model(session, user_message),
+                self._messages_for_model(
+                    session,
+                    user_message,
+                    history_limit=execution_profile.history_message_limit,
+                ),
                 run_id=str(turn.id),
             )
             async for chunk in service.stream(
                 LLMUseCase.LIVE_REPLY,
                 model_messages,
                 temperature=0.3,
-                max_output_tokens=1600,
+                max_output_tokens=execution_profile.max_output_tokens,
                 idempotency_key=f"ai-chat:{turn.id}:llm",
             ):
                 if chunk.delta:
@@ -603,6 +638,7 @@ class AIChatService:
             lease_validated = True
             turn, session, user_message = self._recoverable_chat_context(run)
             self._enforce_current_input_policy(Sensitivity(run.sensitivity))
+            execution_profile = AgentExecutionProfile.from_state(run.state_json)
             concurrency_lease = await self._concurrency.acquire(
                 ConcurrencyRequest(
                     org_id=run.org_id,
@@ -627,7 +663,11 @@ class AIChatService:
                 redaction_vault,
                 rehydration_placeholders,
             ) = self._redact_model_messages(
-                self._messages_for_model(session, user_message),
+                self._messages_for_model(
+                    session,
+                    user_message,
+                    history_limit=execution_profile.history_message_limit,
+                ),
                 run_id=str(turn.id),
             )
             event_log = AgentRunEventService(self._db)
@@ -647,6 +687,24 @@ class AIChatService:
                     fencing_token=fencing_token,
                     event_type="run.started",
                     data={"run_id": str(run.id), "turn_id": str(turn.id)},
+                    now=datetime.utcnow(),
+                )
+            has_route = (
+                self._db.query(AgentRunEvent)
+                .filter(
+                    AgentRunEvent.run_id == run.id,
+                    AgentRunEvent.event_type == "route.selected",
+                )
+                .first()
+                is not None
+            )
+            if not has_route:
+                event_log.append(
+                    run.id,
+                    worker_id=worker_id,
+                    fencing_token=fencing_token,
+                    event_type="route.selected",
+                    data=execution_profile.model_dump(),
                     now=datetime.utcnow(),
                 )
             event_log.append(
@@ -674,7 +732,7 @@ class AIChatService:
                     LLMUseCase.LIVE_REPLY,
                     model_messages,
                     temperature=0.3,
-                    max_output_tokens=1600,
+                    max_output_tokens=execution_profile.max_output_tokens,
                     idempotency_key=f"ai-chat:{turn.id}:llm",
                 ):
                     if chunk.delta:
@@ -710,7 +768,7 @@ class AIChatService:
                     LLMUseCase.LIVE_REPLY,
                     model_messages,
                     temperature=0.3,
-                    max_output_tokens=1600,
+                    max_output_tokens=execution_profile.max_output_tokens,
                     idempotency_key=f"ai-chat:{turn.id}:llm",
                 )
                 raw_fragments.append(response.content)
@@ -937,6 +995,7 @@ class AIChatService:
         user_id: int,
         content: str,
         sensitivity: Sensitivity,
+        execution_profile: Optional[AgentExecutionProfile] = None,
     ) -> AgentRunCommand:
         deadline_seconds = max(
             int(settings.OMNIROUTE_TIMEOUT_SECONDS * 2),
@@ -953,6 +1012,31 @@ class AIChatService:
             sensitivity=sensitivity,
             generation_epoch=turn.generation_epoch,
             deadline_at=datetime.utcnow() + timedelta(seconds=deadline_seconds),
+            execution_profile=execution_profile,
+        )
+
+    @staticmethod
+    def _routing_profile(
+        session: AIChatSession,
+        *,
+        content: str,
+        sensitivity: Sensitivity,
+    ) -> AgentExecutionProfile:
+        prior_message_count = sum(
+            1
+            for message in session.messages
+            if message.role in {"user", "assistant"}
+        )
+        return AgentPathRouter(
+            enabled=settings.AGENT_FAST_PATH_ENABLED,
+            max_input_chars=settings.AGENT_FAST_PATH_MAX_INPUT_CHARS,
+            max_history_messages=settings.AGENT_FAST_PATH_MAX_HISTORY_MESSAGES,
+            fast_max_output_tokens=settings.AGENT_FAST_PATH_MAX_OUTPUT_TOKENS,
+            deep_max_output_tokens=AIChatService.RESERVED_OUTPUT_TOKENS,
+        ).route(
+            content=content,
+            sensitivity=sensitivity,
+            prior_message_count=prior_message_count,
         )
 
     @staticmethod
@@ -980,7 +1064,11 @@ class AIChatService:
             return False
 
     def _messages_for_model(
-        self, session: AIChatSession, current: AIChatMessage
+        self,
+        session: AIChatSession,
+        current: AIChatMessage,
+        *,
+        history_limit: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         history = [
             item
@@ -992,6 +1080,8 @@ class AIChatService:
             use_case=LLMUseCase.LIVE_REPLY.value,
         )
         eligible = [item for item in history if item.role in {"user", "assistant"}]
+        if history_limit is not None:
+            eligible = eligible[-history_limit:]
         sections = []
         total = max(len(eligible), 1)
         for index, item in enumerate(eligible):
