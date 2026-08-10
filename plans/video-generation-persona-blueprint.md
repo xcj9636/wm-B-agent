@@ -11,8 +11,9 @@
 - 上传、规划、外部提交三个开关默认关闭；提交开启时强制依赖上传、规划和独立签名密钥。
 - 当前部署只能声明 `single_organization`；错误的多租户配置在 Settings 校验阶段失败。
 - Worker 验证策略决策时再次检查实时提交开关，管理员 kill switch 会让已签发但尚未执行的决策立即失效。
-- 验证证据：媒体模块 17 tests passed、93% coverage；全量后端 343 passed、1 skipped。
-- **下一步**：Step 2 媒体资产事实表、quarantine 对象存储、上传意图与 consent/rights 持久化。
+- **Step 2 进行中（2026-08-11）**：已新增 `MediaAsset`、`MediaUploadIntent`、`MediaAssetRelation`、`MediaConsentRecord` 与 `0022_media_assets` 迁移；上传意图具有作用域幂等、服务端随机 quarantine key、过期和 metadata 复核；资产只有在扫描、rights、consent 满足后才可晋级。
+- 当前验证证据：媒体模块 22 tests passed、93% coverage；全量后端 349 passed、1 skipped；SQLite 从空库升级到 Alembic head 成功。
+- **Step 2 剩余**：S3-compatible 预签名 Adapter、隔离 bucket/prefix、下载 SSRF 防护、扫描/probe 沙箱、consent/rights 证据服务与上传 API。
 
 ## 1. 执行摘要
 
