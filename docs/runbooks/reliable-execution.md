@@ -105,3 +105,34 @@ docker compose stop celery_worker
 ```
 
 回滚应用镜像后，仅在数据模型兼容且旧版本不会直接发送同一业务动作时恢复 Worker。数据库 downgrade 是最后手段；执行前必须导出 `llm_invocations`、`llm_attempts`、`outbox_events` 并确认没有 PENDING、RETRY 或 PROCESSING 事件。
+
+## 8. Agent fast/deep 路由与负载门禁
+
+Agent Chat 在任务入队时把不含原始消息的执行档案固化到 `agent_runs.state_json`。
+只有短、低风险且对话历史较浅的请求会进入 fast；敏感信息、业务证据问题、工具动作、
+长输入或长会话全部进入 deep。Worker 重试和租约接管读取同一份档案，不重新判定。
+`route.selected` 事件暴露路径、稳定原因码和 token/历史上限，但不包含 prompt。
+
+紧急回滚 fast path 时设置 `AGENT_FAST_PATH_ENABLED=false` 并重启 API。已入队任务继续
+使用其固化档案，新任务全部 deep。此开关不修改 DLP、ACL、provider 白名单或 system
+prompt；任何未知、损坏或未来版本的持久档案也会自动 deep。
+
+发布候选版本应在预生产环境运行真实 API 负载门禁。令牌只能通过环境变量注入：
+
+```bash
+cd backend
+export B_AGENT_LOAD_TOKEN='<short-lived-preproduction-token>'
+PYTHONPATH=. python scripts/load_test_agent_chat.py \
+  --base-url https://preprod.example.com \
+  --requests 100 \
+  --concurrency 8 \
+  --max-error-rate 0.01 \
+  --max-p95-ttft-ms 3000 \
+  --max-p95-e2e-ms 15000 \
+  --output ../artifacts/agent-load.json
+```
+
+脚本使用固定的非敏感提示词，为每个并发请求创建隔离会话，依次验证 202 入队、durable
+SSE 回放、`route.selected`、首个 `message.delta`、完成事件和会话清理。报告只包含聚合
+延迟、吞吐、路径分布和稳定错误码；任一 SLO 超限、缺失路由/首 token 事件或清理失败
+都会返回非零退出码。不要在生产客户租户或含真实业务数据的会话中运行。
