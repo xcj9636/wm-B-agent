@@ -145,3 +145,23 @@ def test_deleting_chat_session_purges_derived_run_event_content(db_session):
     )
 
     assert db_session.query(AgentRunEvent).count() == 0
+
+
+def test_expired_stream_events_are_hidden_and_physically_purgeable(db_session):
+    run, now = _claimed_run(db_session)
+    events = AgentRunEventService(db_session)
+    events.append(
+        run.id,
+        worker_id="event-worker",
+        fencing_token=run.fencing_token,
+        event_type="message.delta",
+        data={"delta": "short-lived response"},
+        now=now,
+    )
+    row = db_session.query(AgentRunEvent).one()
+    row.expires_at = now - timedelta(seconds=1)
+    db_session.commit()
+
+    assert events.list_for_user(run.id, user_id=run.user_id) == []
+    assert events.purge_expired(now=now, limit=100) == 1
+    assert db_session.query(AgentRunEvent).count() == 0
