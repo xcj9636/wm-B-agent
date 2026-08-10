@@ -382,10 +382,12 @@ async def test_worker_stream_persists_replayable_batched_events(db_session):
     )
     assert [event.event_type for event in events] == [
         "run.started",
+        "stream.reset",
         "message.delta",
         "run.completed",
     ]
-    assert "[[EMAIL_1]]" in events[1].data_json["delta"]
+    assert events[1].data_json == {"content": ""}
+    assert "[[EMAIL_1]]" in events[2].data_json["delta"]
     assert response.content == "Contact buyer@example.com"
 
 

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -25,6 +26,7 @@ from app.services.llm.contracts import (
     GatewayErrorKind,
     LLMRequest,
     LLMResponse,
+    LLMStreamChunk,
     LLMUsage,
     LLMUseCase,
 )
@@ -127,6 +129,7 @@ async def test_agent_runtime_failure_event_does_not_expose_exception_text():
 
 class SuccessfulBackend:
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        await asyncio.sleep(0.01)
         return LLMResponse(
             request_id=request.request_id,
             content="audited response",
@@ -178,7 +181,40 @@ async def test_llm_service_centrally_audits_success_without_raw_prompt(db_sessio
     assert invocation.status == LLMInvocationStatus.SUCCEEDED
     assert attempt.status == LLMAttemptStatus.SUCCEEDED
     assert attempt.provider == "approved-provider"
+    assert attempt.latency_ms >= 5
+    assert attempt.ttft_ms is None
     assert "private buyer request" not in repr(invocation.__dict__)
+
+
+class SuccessfulStreamingBackend:
+    async def stream(self, request: LLMRequest):
+        await asyncio.sleep(0.01)
+        yield LLMStreamChunk(request_id=request.request_id, delta="first ")
+        await asyncio.sleep(0.01)
+        yield LLMStreamChunk(request_id=request.request_id, delta="second")
+
+
+@pytest.mark.asyncio
+async def test_llm_service_audits_stream_ttft_and_total_latency(db_session):
+    service = LLMService(
+        SuccessfulStreamingBackend(),
+        audit_sink=SessionInvocationAuditSink(db_session),
+        backend_name="omniroute",
+    )
+
+    chunks = [
+        chunk
+        async for chunk in service.stream(
+            LLMUseCase.LIVE_REPLY,
+            [{"role": "user", "content": "measure this response"}],
+            idempotency_key="conversation-1:turn-stream:reply",
+        )
+    ]
+
+    attempt = db_session.query(LLMAttempt).one()
+    assert "".join(chunk.delta for chunk in chunks) == "first second"
+    assert attempt.ttft_ms >= 5
+    assert attempt.latency_ms >= attempt.ttft_ms
 
 
 @pytest.mark.asyncio

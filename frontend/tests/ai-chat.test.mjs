@@ -49,10 +49,12 @@ test('AI chat streaming is idempotent and can resume from a durable event cursor
   assert.match(chatApi, /\/api\/v1\/agent\/runs\/\$\{runId\}\/events/)
   assert.match(chatApi, /line\.startsWith\('id:'\)/)
   assert.match(chatApi, /event === 'heartbeat'/)
+  assert.match(chatApi, /event === 'stream\.reset'/)
   assert.match(chatApi, /AbortSignal/)
   assert.match(chatApi, /reader\.releaseLock\(\)/)
   assert.match(view, /crypto\.randomUUID\(\)/)
   assert.match(view, /idempotencyKey/)
+  assert.match(view, /event\.event === 'stream\.reset'/)
 })
 
 test('AI chat and route configuration are bilingual', () => {

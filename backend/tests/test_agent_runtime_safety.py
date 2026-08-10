@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -135,3 +136,40 @@ async def test_rag_skill_returns_sanitized_query_errors(monkeypatch):
         "code": "RAG_QUERY_FAILED",
         "message": "Knowledge retrieval is temporarily unavailable",
     }
+
+
+@pytest.mark.asyncio
+async def test_rag_skill_runs_blocking_vector_search_off_event_loop(monkeypatch):
+    skill = RagSkill({"collection_name": "approved-org-scope"})
+    event_loop_thread = threading.get_ident()
+    observed_threads = []
+
+    class FakeVectorStore:
+        def similarity_search_with_score(self, query, *, k):
+            observed_threads.append(threading.get_ident())
+            return [
+                (
+                    SimpleNamespace(
+                        page_content="Verified MOQ is 500 units.",
+                        metadata={"source": "catalog.pdf"},
+                    ),
+                    0.25,
+                )
+            ]
+
+    def build_vectorstore(collection_name):
+        observed_threads.append(threading.get_ident())
+        return FakeVectorStore()
+
+    monkeypatch.setattr(skill, "_get_vectorstore", build_vectorstore)
+
+    result = await skill._query_documents(
+        "MOQ",
+        "approved-org-scope",
+        3,
+    )
+
+    assert result["success"] is True
+    assert result["documents"][0]["metadata"]["source"] == "catalog.pdf"
+    assert observed_threads
+    assert all(thread_id != event_loop_thread for thread_id in observed_threads)
