@@ -4,6 +4,8 @@ from uuid import uuid4
 import pytest
 
 from app.models.database import AgentRunEvent
+from app.models.database import AIChatSession, User
+from app.services.ai_chat import AIChatService
 from app.services.agent_run_events import AgentRunEventService
 from app.services.agent_runs import (
     AgentRunCommand,
@@ -108,3 +110,38 @@ def test_event_replay_is_user_isolated_and_payload_bounded(db_session):
             now=now + timedelta(seconds=1),
         )
 
+
+def test_deleting_chat_session_purges_derived_run_event_content(db_session):
+    user = User(
+        username="event-delete-user",
+        email="event-delete@example.com",
+        hashed_password="unused",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.flush()
+    chat = AIChatSession(
+        user_id=user.id,
+        title="Delete derived events",
+        use_case="live_reply",
+    )
+    db_session.add(chat)
+    db_session.commit()
+    run, now = _claimed_run(db_session, user_id=user.id)
+    run.session_id = chat.id
+    db_session.commit()
+    AgentRunEventService(db_session).append(
+        run.id,
+        worker_id="event-worker",
+        fencing_token=run.fencing_token,
+        event_type="message.delta",
+        data={"delta": "buyer@example.com"},
+        now=now,
+    )
+
+    AIChatService(db_session, None, concurrency=None).delete_session(
+        chat.id,
+        user.id,
+    )
+
+    assert db_session.query(AgentRunEvent).count() == 0
