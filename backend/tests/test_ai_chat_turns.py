@@ -7,6 +7,7 @@ from app.models.database import (
     AIChatMessage,
     AIChatSession,
     AgentRun,
+    AgentRunEvent,
     AgentTurn,
     LLMInvocation,
     User,
@@ -147,6 +148,36 @@ def user_and_session(db_session, backend, concurrency=None):
     )
     session = service.create_session(user.id, "Fenced chat")
     return user, session, service
+
+
+def test_start_chat_run_is_durable_and_idempotent_without_calling_provider(
+    db_session,
+):
+    backend = ChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+
+    first, created = service.start_run(
+        session.id,
+        user.id,
+        "Prepare a distributor answer",
+        idempotency_key="chat-two-phase-start-1",
+    )
+    replay, replay_created = service.start_run(
+        session.id,
+        user.id,
+        "Prepare a distributor answer",
+        idempotency_key="chat-two-phase-start-1",
+    )
+
+    assert created is True
+    assert replay_created is False
+    assert replay.run_id == first.run_id
+    assert first.status == "queued"
+    assert backend.requests == []
+    assert db_session.query(AgentTurn).one().status == "running"
+    assert db_session.query(AIChatMessage).one().content == (
+        "Prepare a distributor answer"
+    )
 
 
 @pytest.mark.asyncio
@@ -318,6 +349,44 @@ async def test_expired_chat_run_resumes_from_durable_user_message(db_session):
     assert invocation.status.value == "succeeded"
     assert len(service._concurrency.acquired) == 1
     assert len(service._concurrency.released) == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_stream_persists_replayable_batched_events(db_session):
+    backend = StreamingChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+    started, _ = service.start_run(
+        session.id,
+        user.id,
+        "Email buyer@example.com",
+        idempotency_key="chat-worker-stream-events",
+    )
+    run = AgentRunService(db_session).claim_one(
+        started.run_id,
+        worker_id="stream-worker",
+        now=datetime.utcnow(),
+        lease_seconds=60,
+    )
+
+    response = await service.resume_claimed(
+        run.id,
+        worker_id="stream-worker",
+        fencing_token=run.fencing_token,
+    )
+
+    events = (
+        db_session.query(AgentRunEvent)
+        .filter(AgentRunEvent.run_id == run.id)
+        .order_by(AgentRunEvent.sequence)
+        .all()
+    )
+    assert [event.event_type for event in events] == [
+        "run.started",
+        "message.delta",
+        "run.completed",
+    ]
+    assert "[[EMAIL_1]]" in events[1].data_json["delta"]
+    assert response.content == "Contact buyer@example.com"
 
 
 @pytest.mark.asyncio

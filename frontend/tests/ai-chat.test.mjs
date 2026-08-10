@@ -45,9 +45,12 @@ test('AI chat streaming is idempotent and can resume from a durable event cursor
 
   assert.match(chatApi, /idempotencyKey/)
   assert.match(chatApi, /Last-Event-ID/)
+  assert.match(chatApi, /messages\/runs/)
   assert.match(chatApi, /\/api\/v1\/agent\/runs\/\$\{runId\}\/events/)
   assert.match(chatApi, /line\.startsWith\('id:'\)/)
   assert.match(chatApi, /event === 'heartbeat'/)
+  assert.match(chatApi, /AbortSignal/)
+  assert.match(chatApi, /reader\.releaseLock\(\)/)
   assert.match(view, /crypto\.randomUUID\(\)/)
   assert.match(view, /idempotencyKey/)
 })

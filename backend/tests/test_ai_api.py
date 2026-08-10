@@ -85,6 +85,17 @@ class FakeChatService:
         yield {"id": 3, "event": "delta", "data": {"delta": "EU distributors."}}
         yield {"id": 4, "event": "done", "data": {"session_id": str(session_id)}}
 
+    def start_run(self, session_id, user_id, content, *, idempotency_key):
+        return (
+            {
+                "run_id": uuid4(),
+                "turn_id": uuid4(),
+                "session_id": session_id,
+                "status": "queued",
+            },
+            True,
+        )
+
 
 class FailingChatService(FakeChatService):
     def __init__(self, error):
@@ -220,6 +231,37 @@ def test_agent_run_event_endpoint_replays_only_after_last_event_id(api_context):
     assert "id: 2" in response.text
     assert "event: message.delta" in response.text
     assert "safe replay" in response.text
+
+
+def test_ai_chat_two_phase_start_returns_recoverable_run_handle(
+    api_context,
+    monkeypatch,
+):
+    client, _, _ = api_context
+    chat = FakeChatService()
+    scheduled = []
+    app.dependency_overrides[get_ai_chat_service] = lambda: chat
+    from app.api.v1 import ai as ai_api
+
+    monkeypatch.setattr(
+        ai_api,
+        "enqueue_agent_chat_runs",
+        lambda: scheduled.append(True),
+        raising=False,
+    )
+
+    response = client.post(
+        f"/api/v1/ai/chat/sessions/{chat.session_id}/messages/runs",
+        json={
+            "content": "Create a resumable answer",
+            "idempotency_key": "browser-generated-idempotency-key",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["run_id"]
+    assert scheduled == [True]
 
 
 def test_ai_chat_returns_retryable_429_when_concurrency_budget_is_full(api_context):
