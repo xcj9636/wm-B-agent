@@ -180,6 +180,28 @@ def test_start_chat_run_is_durable_and_idempotent_without_calling_provider(
     )
 
 
+def test_start_chat_run_persists_only_safe_execution_profile(db_session):
+    backend = ChatBackend()
+    user, session, service = user_and_session(db_session, backend)
+
+    started, _ = service.start_run(
+        session.id,
+        user.id,
+        "Hello, improve this sentence",
+        idempotency_key="chat-fast-path-profile",
+    )
+
+    run = db_session.get(AgentRun, started.run_id)
+    assert run.state_json == {
+        "path": "fast",
+        "reason_code": "short_simple_request",
+        "route_version": "v1",
+        "max_output_tokens": 800,
+        "history_message_limit": 6,
+    }
+    assert "Hello" not in repr(run.state_json)
+
+
 @pytest.mark.asyncio
 async def test_ai_chat_completion_atomically_completes_a_fenced_turn(db_session):
     backend = ChatBackend()
@@ -382,13 +404,61 @@ async def test_worker_stream_persists_replayable_batched_events(db_session):
     )
     assert [event.event_type for event in events] == [
         "run.started",
+        "route.selected",
         "stream.reset",
         "message.delta",
         "run.completed",
     ]
-    assert events[1].data_json == {"content": ""}
-    assert "[[EMAIL_1]]" in events[2].data_json["delta"]
+    assert events[1].data_json["path"] == "deep"
+    assert events[1].data_json["reason_code"] == "sensitive_input"
+    assert events[2].data_json == {"content": ""}
+    assert "[[EMAIL_1]]" in events[3].data_json["delta"]
     assert response.content == "Contact buyer@example.com"
+
+
+@pytest.mark.asyncio
+async def test_worker_uses_persisted_fast_path_budget_and_emits_route_event(
+    db_session,
+):
+    backend = ChatBackend(content="Short answer")
+    user, session, service = user_and_session(db_session, backend)
+    started, _ = service.start_run(
+        session.id,
+        user.id,
+        "Hello, improve this sentence",
+        idempotency_key="chat-fast-path-worker",
+    )
+    run = AgentRunService(db_session).claim_one(
+        started.run_id,
+        worker_id="fast-worker",
+        now=datetime.utcnow(),
+        lease_seconds=60,
+    )
+
+    response = await service.resume_claimed(
+        run.id,
+        worker_id="fast-worker",
+        fencing_token=run.fencing_token,
+    )
+
+    events = (
+        db_session.query(AgentRunEvent)
+        .filter(AgentRunEvent.run_id == run.id)
+        .order_by(AgentRunEvent.sequence)
+        .all()
+    )
+    route_event = next(
+        event for event in events if event.event_type == "route.selected"
+    )
+    assert route_event.data_json == {
+        "path": "fast",
+        "reason_code": "short_simple_request",
+        "route_version": "v1",
+        "max_output_tokens": 800,
+        "history_message_limit": 6,
+    }
+    assert backend.requests[0].max_output_tokens == 800
+    assert response.content == "Short answer"
 
 
 @pytest.mark.asyncio
