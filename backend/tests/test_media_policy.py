@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.services.agent_runtime.contracts import ExecutionPrincipal, Sensitivity
@@ -77,6 +78,44 @@ def test_media_features_are_default_off():
     assert config.MEDIA_UPLOAD_ENABLED is False
     assert config.MEDIA_PLANNING_ENABLED is False
     assert config.MEDIA_SUBMIT_ENABLED is False
+
+
+def test_settings_reject_multi_tenant_deployment_claim():
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            DEPLOYMENT_TENANCY="multi_tenant",
+        )
+
+
+def test_settings_reject_media_submission_without_prerequisites():
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_SUBMIT_ENABLED=True,
+        )
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_UPLOAD_ENABLED=True,
+            MEDIA_PLANNING_ENABLED=True,
+            MEDIA_SUBMIT_ENABLED=True,
+            MEDIA_POLICY_SIGNING_KEY="too-short",
+        )
+
+
+def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
+    config = Settings(
+        _env_file=None,
+        MEDIA_UPLOAD_ENABLED=True,
+        MEDIA_PLANNING_ENABLED=True,
+        MEDIA_SUBMIT_ENABLED=True,
+        MEDIA_POLICY_SIGNING_KEY="m" * 32,
+    )
+
+    assert config.DEPLOYMENT_TENANCY == "single_organization"
+    assert config.MEDIA_SUBMIT_ENABLED is True
 
 
 def test_submission_policy_fails_closed_when_feature_is_disabled():
