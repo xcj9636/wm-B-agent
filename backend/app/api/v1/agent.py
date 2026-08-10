@@ -1,9 +1,11 @@
 """Authenticated Agent Center APIs."""
 
-from typing import List
+import json
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_active_user
@@ -25,6 +27,7 @@ from app.services.agent_runs import (
     AgentRunSummary,
     RunNotFound,
 )
+from app.services.agent_run_events import AgentRunEventService
 from app.services.agent_research import (
     AgentResearchService,
     DraftCreate,
@@ -374,3 +377,60 @@ def get_agent_run(
         )
     except RunNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/runs/{run_id}/events")
+def replay_agent_run_events(
+    run_id: UUID,
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        cursor = int(last_event_id) if last_event_id is not None else 0
+        run_summary = AgentRunService(db).get_for_user(
+            run_id,
+            user_id=current_user.id,
+        )
+        events = AgentRunEventService(db).list_for_user(
+            run_id,
+            user_id=current_user.id,
+            after_sequence=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Last-Event-ID must be a non-negative integer",
+        ) from exc
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    def replay():
+        if not events:
+            payload = json.dumps(
+                {"status": run_summary.status},
+                separators=(",", ":"),
+            )
+            yield f"event: heartbeat\ndata: {payload}\n\n"
+            return
+        for event in events:
+            payload = json.dumps(
+                event.data,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            yield (
+                f"id: {event.sequence}\n"
+                f"event: {event.event_type}\n"
+                f"data: {payload}\n\n"
+            )
+
+    return StreamingResponse(
+        replay(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "X-Accel-Buffering": "no",
+            "X-Agent-Run-Status": run_summary.status,
+        },
+    )

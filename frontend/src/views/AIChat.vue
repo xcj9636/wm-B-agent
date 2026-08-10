@@ -178,10 +178,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
-import { chatApi, type AIChatMessage, type AIChatSession } from '@/api/ai'
+import { chatApi, type AIChatMessage, type AIChatSession, type AIStreamEvent } from '@/api/ai'
 import { useAuthStore } from '@/stores/auth'
 import { translate } from '@/i18n'
 
@@ -194,6 +194,7 @@ const sending = ref(false)
 const loadingSessions = ref(false)
 const sidebarOpen = ref(false)
 const messagePane = ref<HTMLElement | null>(null)
+let activeStreamController: AbortController | null = null
 
 const activeSessionId = computed(() => currentSession.value?.id)
 const userInitial = computed(() => authStore.user?.username?.charAt(0).toUpperCase() || 'U')
@@ -297,25 +298,79 @@ async function send() {
   }
   messages.value.push(streaming)
   await scrollToBottom()
+  const idempotencyKey = crypto.randomUUID()
+  activeStreamController?.abort()
+  const controller = new AbortController()
+  activeStreamController = controller
 
   try {
-    await chatApi.streamMessage(currentSession.value.id, content, (event) => {
-      if (event.event === 'delta') streaming.content += event.data.delta
-      if (event.event === 'done') Object.assign(streaming, event.data)
-      if (event.event === 'error') throw new Error(event.data.detail)
-      void scrollToBottom()
-    })
+    await chatApi.streamMessage(currentSession.value.id, content, idempotencyKey, (event) => {
+      applyStreamEvent(streaming, event)
+    }, controller.signal)
     const refreshed = await chatApi.listSessions()
     sessions.value = refreshed
   } catch {
     messages.value = messages.value.filter((item) => item.id !== 'streaming')
     ElMessage.error(translate('B-agent could not complete this response. Check the AI route configuration.'))
   } finally {
+    if (activeStreamController === controller) activeStreamController = null
     sending.value = false
   }
 }
 
-onMounted(loadSessions)
+function applyStreamEvent(streaming: AIChatMessage, event: AIStreamEvent) {
+  if ((event.event === 'delta' || event.event === 'message.delta') && streaming.id === 'streaming') {
+    streaming.content += event.data.delta
+  }
+  if (event.event === 'done' || event.event === 'run.completed') Object.assign(streaming, event.data)
+  if (event.event === 'error' || event.event === 'run.failed') {
+    throw new Error('detail' in event.data ? event.data.detail : event.data.error_code)
+  }
+  void scrollToBottom()
+}
+
+async function resumePendingRun() {
+  const pending = chatApi.pendingRun()
+  if (!pending) return
+  await selectSession(pending.sessionId)
+  if (!currentSession.value) return
+  let streaming = messages.value[messages.value.length - 1]
+  if (!streaming || streaming.role !== 'assistant') {
+    streaming = {
+      id: 'streaming',
+      session_id: pending.sessionId,
+      role: 'assistant',
+      content: '',
+      usage: {},
+      created_at: new Date().toISOString(),
+    }
+    messages.value.push(streaming)
+  }
+  sending.value = true
+  const controller = new AbortController()
+  activeStreamController = controller
+  try {
+    await chatApi.resumePendingMessage(
+      (event) => applyStreamEvent(streaming, event),
+      controller.signal,
+    )
+    await selectSession(pending.sessionId)
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      ElMessage.error(translate('B-agent could not resume the previous response.'))
+    }
+  } finally {
+    if (activeStreamController === controller) activeStreamController = null
+    sending.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadSessions()
+  await resumePendingRun()
+})
+
+onBeforeUnmount(() => activeStreamController?.abort())
 </script>
 
 <style scoped lang="scss">

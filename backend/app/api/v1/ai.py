@@ -1,16 +1,16 @@
 """AI runtime control plane and authenticated operator chat APIs."""
-import json
+import logging
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.v1.auth import get_current_active_user
 from app.models.database import User
 from app.services.ai_chat import (
     AIChatMessageResponse,
+    AIChatRunStartResponse,
     AIChatService,
     AIChatSessionResponse,
     get_ai_chat_service,
@@ -31,6 +31,7 @@ from app.services.idempotency import IdempotencyConflict
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class AIModelsResponse(BaseModel):
@@ -49,9 +50,22 @@ class AIChatMessageCreate(BaseModel):
     idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=255)
 
 
+class AIChatRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str = Field(min_length=1, max_length=30000)
+    idempotency_key: str = Field(min_length=8, max_length=255)
+
+
 def _require_admin(user: User) -> None:
     if not user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def enqueue_agent_chat_runs() -> None:
+    """Nudge the worker immediately; Celery beat remains the durable fallback."""
+    from app.tasks.task_functions import run_agent_chat_runs_task
+
+    run_agent_chat_runs_task.apply_async(countdown=0)
 
 
 @router.get("/config", response_model=AIRuntimeConfig)
@@ -196,35 +210,42 @@ async def stream_chat_message(
     current_user: User = Depends(get_current_active_user),
     chat: AIChatService = Depends(get_ai_chat_service),
 ):
-    async def events():
-        try:
-            stream = (
-                chat.stream(session_id, current_user.id, request.content)
-                if request.idempotency_key is None
-                else chat.stream(
-                    session_id,
-                    current_user.id,
-                    request.content,
-                    idempotency_key=request.idempotency_key,
-                )
-            )
-            async for item in stream:
-                data = json.dumps(item["data"], ensure_ascii=False, default=str)
-                yield f"event: {item['event']}\ndata: {data}\n\n"
-        except KeyError as exc:
-            data = json.dumps({"detail": str(exc)}, ensure_ascii=False)
-            yield f"event: error\ndata: {data}\n\n"
-        except Exception:
-            data = json.dumps(
-                {"detail": "AI stream failed"}, ensure_ascii=False
-            )
-            yield f"event: error\ndata: {data}\n\n"
-
-    return StreamingResponse(
-        events(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Use the detached chat run and agent event endpoints",
     )
+
+
+@router.post(
+    "/chat/sessions/{session_id}/messages/runs",
+    response_model=AIChatRunStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_chat_message_run(
+    session_id: UUID,
+    request: AIChatRunCreate,
+    current_user: User = Depends(get_current_active_user),
+    chat: AIChatService = Depends(get_ai_chat_service),
+):
+    try:
+        run, created = chat.start_run(
+            session_id,
+            current_user.id,
+            request.content,
+            idempotency_key=request.idempotency_key,
+        )
+        if created:
+            try:
+                enqueue_agent_chat_runs()
+            except Exception as exc:
+                logger.warning(
+                    "Immediate agent run enqueue failed; beat will recover it",
+                    extra={"error_type": type(exc).__name__},
+                )
+        return run
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (IdempotencyConflict, TurnBusy) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

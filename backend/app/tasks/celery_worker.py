@@ -43,6 +43,10 @@ celery.conf.update(
             "task": "app.tasks.task_functions.run_agent_chat_runs_task",
             "schedule": 5.0,
         },
+        "purge-agent-run-events": {
+            "task": "app.tasks.task_functions.purge_agent_run_events_task",
+            "schedule": 3600.0,
+        },
     },
 )
 

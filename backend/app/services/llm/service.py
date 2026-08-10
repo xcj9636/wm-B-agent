@@ -28,6 +28,9 @@ class DirectProviderAdapter:
 
     def __init__(self, provider: Any) -> None:
         self._provider = provider
+        self.supports_stream = callable(
+            getattr(provider, "chat_completion_with_stream", None)
+        )
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         messages = [

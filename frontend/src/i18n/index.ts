@@ -60,6 +60,7 @@ const zhMessages: Record<string, string> = {
   'Delete this AI conversation?': '确认删除这段 AI 对话吗？',
   'AI conversation could not be deleted.': '无法删除 AI 对话。',
   'B-agent could not complete this response. Check the AI route configuration.': 'B-agent 无法完成回复，请检查 AI 路由配置。',
+  'B-agent could not resume the previous response.': 'B-agent 无法恢复上一次回复。',
   'AI route configuration': 'AI 路由配置',
   'Hot-loaded by the backend for the next AI request': '由后端热加载，并在下一次 AI 请求生效',
   'Provider credentials stay in backend-only storage and are never returned to this browser.': '供应商凭据只保存在后端，不会返回到当前浏览器。',

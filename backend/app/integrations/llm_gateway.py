@@ -17,6 +17,7 @@ from app.services.llm.contracts import (
 
 
 class LLMGatewayClient:
+    supports_stream = True
     """Translate stable B-agent contracts to the gateway inference API."""
 
     def __init__(

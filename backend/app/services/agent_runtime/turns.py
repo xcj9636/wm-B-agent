@@ -31,6 +31,7 @@ class AgentTurnCoordinator:
         idempotency_key: str,
         input_hash: str | None = None,
         policy: Literal["queue", "cancel_previous"] = "queue",
+        commit: bool = True,
     ) -> Tuple[AgentTurn, bool]:
         chat = (
             self._db.query(AIChatSession)
@@ -90,8 +91,11 @@ class AgentTurnCoordinator:
             status="running",
         )
         self._db.add(turn)
-        self._db.commit()
-        self._db.refresh(turn)
+        if commit:
+            self._db.commit()
+            self._db.refresh(turn)
+        else:
+            self._db.flush()
         return turn, True
 
     def complete(

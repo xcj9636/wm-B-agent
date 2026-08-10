@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models.database import AIChatMessage, AIChatSession, AgentRun, AgentTurn
+from app.models.database import (
+    AIChatMessage,
+    AIChatSession,
+    AgentRun,
+    AgentRunEvent,
+    AgentTurn,
+)
 from app.services.ai_runtime import AIRuntimeService
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.agent_runtime.context import (
@@ -35,6 +41,10 @@ from app.services.agent_runs import (
     AgentRunCommand,
     AgentRunService,
     RunLeaseConflict,
+)
+from app.services.agent_run_events import (
+    AgentRunEventResponse,
+    AgentRunEventService,
 )
 from app.services.data_policy import (
     DataPolicyUnavailable,
@@ -72,6 +82,15 @@ class AIChatSessionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: List[AIChatMessageResponse] = Field(default_factory=list)
+
+
+class AIChatRunStartResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    turn_id: UUID
+    session_id: UUID
+    status: str
 
 
 class AIChatService:
@@ -118,9 +137,104 @@ class AIChatService:
         return self._session_response(self._owned_session(session_id, user_id))
 
     def delete_session(self, session_id: UUID, user_id: int) -> None:
-        row = self._owned_session(session_id, user_id)
+        row = (
+            self._db.query(AIChatSession)
+            .filter(
+                AIChatSession.id == session_id,
+                AIChatSession.user_id == user_id,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if row is None:
+            raise KeyError("AI chat session not found")
+        runs = (
+            self._db.query(AgentRun)
+            .filter(
+                AgentRun.session_id == session_id,
+                AgentRun.user_id == user_id,
+            )
+            .with_for_update()
+            .all()
+        )
+        now = datetime.utcnow()
+        for run in runs:
+            if run.status in {"queued", "running"}:
+                run.status = "cancelled"
+                run.error_code = "session_deleted"
+                run.completed_at = now
+                run.fencing_token += 1
+                run.leased_by = None
+                run.lease_until = None
+                run.heartbeat_at = None
+        run_ids = [run.id for run in runs]
+        if run_ids:
+            (
+                self._db.query(AgentRunEvent)
+                .filter(AgentRunEvent.run_id.in_(run_ids))
+                .delete(synchronize_session=False)
+            )
         self._db.delete(row)
         self._db.commit()
+
+    def start_run(
+        self,
+        session_id: UUID,
+        user_id: int,
+        content: str,
+        *,
+        idempotency_key: str,
+    ) -> tuple[AIChatRunStartResponse, bool]:
+        """Atomically persist a chat turn and return its detachable run handle."""
+        content = self._normalize_content(content)
+        self._owned_session(session_id, user_id)
+        classification = SensitiveDataClassifier().classify(
+            content,
+            intrinsic=Sensitivity.INTERNAL,
+        )
+        self._enforce_current_input_policy(classification.sensitivity)
+        coordinator = AgentTurnCoordinator(self._db)
+        try:
+            turn, created = coordinator.start(
+                session_id=session_id,
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                input_hash=canonical_hash({"content": content}),
+                commit=False,
+            )
+            if not created:
+                run = (
+                    self._db.query(AgentRun)
+                    .filter(
+                        AgentRun.turn_id == turn.id,
+                        AgentRun.user_id == user_id,
+                    )
+                    .one_or_none()
+                )
+                if run is None:
+                    raise IdempotencyConflict(
+                        "Agent turn does not have a recoverable run"
+                    )
+                return self._run_start_response(run), False
+
+            run, _ = AgentRunService(self._db).create(
+                self._run_command(
+                    turn=turn,
+                    user_id=user_id,
+                    content=content,
+                    sensitivity=classification.sensitivity,
+                ),
+                commit=False,
+            )
+            session = self._owned_session(session_id, user_id)
+            user_message = self._append_user_message(session, content)
+            turn.user_message_id = user_message.id
+            self._db.commit()
+            self._db.refresh(run)
+            return self._run_start_response(run), True
+        except BaseException:
+            self._db.rollback()
+            raise
 
     async def complete(
         self,
@@ -279,12 +393,8 @@ class AIChatService:
             input_hash=canonical_hash({"content": content.strip()}),
         )
         if not created:
-            replay = self._replay_completed_turn(turn)
-            yield {"event": "delta", "data": {"delta": replay.content}}
-            yield {
-                "event": "done",
-                "data": replay.model_dump(mode="json"),
-            }
+            for event in self._replay_turn_events(turn, user_id=user_id):
+                yield self._stream_item(event)
             return
         backend = None
         redaction_vault = None
@@ -328,6 +438,19 @@ class AIChatService:
             self._db.commit()
             self._db.refresh(turn)
             self._db.refresh(user_message)
+            event_log = AgentRunEventService(self._db)
+            started_event = event_log.append(
+                run.id,
+                worker_id=run_worker_id,
+                fencing_token=run.fencing_token,
+                event_type="run.started",
+                data={
+                    "run_id": str(run.id),
+                    "turn_id": str(turn.id),
+                },
+                now=datetime.utcnow(),
+            )
+            yield self._stream_item(started_event)
             runtime_config = self._runtime.get_config()
             backend = self._runtime.build_backend()
             service = LLMService(
@@ -356,7 +479,15 @@ class AIChatService:
             ):
                 if chunk.delta:
                     fragments.append(chunk.delta)
-                    yield {"event": "delta", "data": {"delta": chunk.delta}}
+                    delta_event = event_log.append(
+                        run.id,
+                        worker_id=run_worker_id,
+                        fencing_token=run.fencing_token,
+                        event_type="message.delta",
+                        data={"delta": chunk.delta},
+                        now=datetime.utcnow(),
+                    )
+                    yield self._stream_item(delta_event)
                 if chunk.resolved_model:
                     metadata["resolved_model"] = chunk.resolved_model
                 if chunk.resolved_provider:
@@ -380,6 +511,19 @@ class AIChatService:
                 gateway_request_id=metadata.get("gateway_request_id"),
                 usage_json=metadata.get("usage", {}),
             )
+            session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            self._db.add(assistant)
+            self._db.flush()
+            turn.assistant_message_id = assistant.id
+            completed_event = event_log.append(
+                run.id,
+                worker_id=run_worker_id,
+                fencing_token=run.fencing_token,
+                event_type="run.completed",
+                data=self._message_response(assistant).model_dump(mode="json"),
+                now=datetime.utcnow(),
+                commit=False,
+            )
             coordinator.complete(
                 turn.id,
                 generation_epoch=turn.generation_epoch,
@@ -392,9 +536,23 @@ class AIChatService:
                 now=datetime.utcnow(),
                 commit=False,
             )
-            self._finish_turn(session, assistant, turn=turn)
+            self._db.commit()
+            self._db.refresh(assistant)
         except BaseException:
             self._db.rollback()
+            if run is not None and run.status == "running":
+                try:
+                    AgentRunEventService(self._db).append(
+                        run.id,
+                        worker_id=run_worker_id,
+                        fencing_token=run.fencing_token,
+                        event_type="run.failed",
+                        data={"error_code": "agent_stream_failed"},
+                        now=datetime.utcnow(),
+                        commit=False,
+                    )
+                except RunLeaseConflict:
+                    self._db.rollback()
             may_fail_turn = self._fail_run(
                 run_service,
                 run,
@@ -413,10 +571,7 @@ class AIChatService:
                 await self._release_concurrency(concurrency_lease)
             if backend is not None:
                 await self._close_backend(backend)
-        yield {
-            "event": "done",
-            "data": self._message_response(assistant).model_dump(mode="json"),
-        }
+        yield self._stream_item(completed_event)
 
     async def resume_claimed(
         self,
@@ -475,15 +630,100 @@ class AIChatService:
                 self._messages_for_model(session, user_message),
                 run_id=str(turn.id),
             )
-            response = await service.complete(
-                LLMUseCase.LIVE_REPLY,
-                model_messages,
-                temperature=0.3,
-                max_output_tokens=1600,
-                idempotency_key=f"ai-chat:{turn.id}:llm",
+            event_log = AgentRunEventService(self._db)
+            has_started = (
+                self._db.query(AgentRunEvent)
+                .filter(
+                    AgentRunEvent.run_id == run.id,
+                    AgentRunEvent.event_type == "run.started",
+                )
+                .first()
+                is not None
             )
+            if not has_started:
+                event_log.append(
+                    run.id,
+                    worker_id=worker_id,
+                    fencing_token=fencing_token,
+                    event_type="run.started",
+                    data={"run_id": str(run.id), "turn_id": str(turn.id)},
+                    now=datetime.utcnow(),
+                )
+
+            raw_fragments: List[str] = []
+            pending_delta = ""
+            metadata: Dict[str, object] = {}
+            last_flush = datetime.now(timezone.utc)
+            supports_stream = bool(
+                getattr(
+                    backend,
+                    "supports_stream",
+                    callable(getattr(backend, "stream", None)),
+                )
+            )
+            if supports_stream:
+                async for chunk in service.stream(
+                    LLMUseCase.LIVE_REPLY,
+                    model_messages,
+                    temperature=0.3,
+                    max_output_tokens=1600,
+                    idempotency_key=f"ai-chat:{turn.id}:llm",
+                ):
+                    if chunk.delta:
+                        raw_fragments.append(chunk.delta)
+                        pending_delta += chunk.delta
+                    if chunk.resolved_model:
+                        metadata["resolved_model"] = chunk.resolved_model
+                    if chunk.resolved_provider:
+                        metadata["resolved_provider"] = chunk.resolved_provider
+                    if chunk.gateway_request_id:
+                        metadata["gateway_request_id"] = chunk.gateway_request_id
+                    if chunk.usage:
+                        metadata["usage"] = chunk.usage.model_dump()
+                    elapsed = (
+                        datetime.now(timezone.utc) - last_flush
+                    ).total_seconds()
+                    if pending_delta and (
+                        len(pending_delta.encode("utf-8")) >= 512
+                        or elapsed >= 0.1
+                    ):
+                        event_log.append(
+                            run.id,
+                            worker_id=worker_id,
+                            fencing_token=fencing_token,
+                            event_type="message.delta",
+                            data={"delta": pending_delta},
+                            now=datetime.utcnow(),
+                        )
+                        pending_delta = ""
+                        last_flush = datetime.now(timezone.utc)
+            else:
+                response = await service.complete(
+                    LLMUseCase.LIVE_REPLY,
+                    model_messages,
+                    temperature=0.3,
+                    max_output_tokens=1600,
+                    idempotency_key=f"ai-chat:{turn.id}:llm",
+                )
+                raw_fragments.append(response.content)
+                pending_delta = response.content
+                metadata = {
+                    "resolved_model": response.resolved_model,
+                    "resolved_provider": response.resolved_provider,
+                    "gateway_request_id": response.gateway_request_id,
+                    "usage": response.usage.model_dump(),
+                }
+            if pending_delta:
+                event_log.append(
+                    run.id,
+                    worker_id=worker_id,
+                    fencing_token=fencing_token,
+                    event_type="message.delta",
+                    data={"delta": pending_delta},
+                    now=datetime.utcnow(),
+                )
             response_content = redaction_vault.rehydrate(
-                response.content,
+                "".join(raw_fragments),
                 run_id=str(turn.id),
                 allowed_placeholders=rehydration_placeholders,
             )
@@ -491,10 +731,23 @@ class AIChatService:
                 session_id=session.id,
                 role="assistant",
                 content=response_content,
-                resolved_model=response.resolved_model,
-                resolved_provider=response.resolved_provider,
-                gateway_request_id=response.gateway_request_id,
-                usage_json=response.usage.model_dump(),
+                resolved_model=metadata.get("resolved_model"),
+                resolved_provider=metadata.get("resolved_provider"),
+                gateway_request_id=metadata.get("gateway_request_id"),
+                usage_json=metadata.get("usage", {}),
+            )
+            session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            self._db.add(assistant)
+            self._db.flush()
+            turn.assistant_message_id = assistant.id
+            event_log.append(
+                run.id,
+                worker_id=worker_id,
+                fencing_token=fencing_token,
+                event_type="run.completed",
+                data=self._message_response(assistant).model_dump(mode="json"),
+                now=datetime.utcnow(),
+                commit=False,
             )
             coordinator.complete(
                 turn.id,
@@ -508,7 +761,8 @@ class AIChatService:
                 now=datetime.utcnow(),
                 commit=False,
             )
-            self._finish_turn(session, assistant, turn=turn)
+            self._db.commit()
+            self._db.refresh(assistant)
             return self._message_response(assistant)
         except BaseException as exc:
             self._db.rollback()
@@ -533,6 +787,19 @@ class AIChatService:
                     except RunLeaseConflict:
                         run_service.recover_expired(now=datetime.utcnow())
                 else:
+                    if run is not None and run.status == "running":
+                        try:
+                            AgentRunEventService(self._db).append(
+                                run.id,
+                                worker_id=worker_id,
+                                fencing_token=fencing_token,
+                                event_type="run.failed",
+                                data={"error_code": "agent_execution_failed"},
+                                now=datetime.utcnow(),
+                                commit=False,
+                            )
+                        except RunLeaseConflict:
+                            self._db.rollback()
                     may_fail_turn = self._fail_run(
                         run_service,
                         run,
@@ -788,6 +1055,57 @@ class AIChatService:
             raise IdempotencyConflict("Agent turn response is unavailable")
         return self._message_response(assistant)
 
+    def _replay_turn_events(
+        self,
+        turn: AgentTurn,
+        *,
+        user_id: int,
+    ) -> List[AgentRunEventResponse]:
+        replay = self._replay_completed_turn(turn)
+        run = (
+            self._db.query(AgentRun)
+            .filter(AgentRun.turn_id == turn.id, AgentRun.user_id == user_id)
+            .one_or_none()
+        )
+        if run is not None:
+            events = AgentRunEventService(self._db).list_for_user(
+                run.id,
+                user_id=user_id,
+            )
+            if events:
+                return events
+        # Compatibility for turns completed before durable stream events existed.
+        now = datetime.now(timezone.utc)
+        fallback_run_id = run.id if run is not None else uuid4()
+        return [
+            AgentRunEventResponse(
+                run_id=fallback_run_id,
+                sequence=1,
+                event_type="message.delta",
+                data={"delta": replay.content},
+                occurred_at=now,
+            ),
+            AgentRunEventResponse(
+                run_id=fallback_run_id,
+                sequence=2,
+                event_type="run.completed",
+                data=replay.model_dump(mode="json"),
+                occurred_at=now,
+            ),
+        ]
+
+    @staticmethod
+    def _stream_item(event: AgentRunEventResponse) -> Dict[str, object]:
+        live_event_name = {
+            "message.delta": "delta",
+            "run.completed": "done",
+        }.get(event.event_type, event.event_type)
+        return {
+            "id": event.sequence,
+            "event": live_event_name,
+            "data": event.data,
+        }
+
     @staticmethod
     async def _close_backend(backend) -> None:
         close = getattr(backend, "aclose", None)
@@ -836,6 +1154,17 @@ class AIChatService:
             resolved_provider=row.resolved_provider,
             usage=dict(row.usage_json or {}),
             created_at=self._utc(row.created_at),
+        )
+
+    @staticmethod
+    def _run_start_response(run: AgentRun) -> AIChatRunStartResponse:
+        if run.session_id is None or run.turn_id is None:
+            raise ValueError("AI chat run is missing its session or turn identity")
+        return AIChatRunStartResponse(
+            run_id=run.id,
+            turn_id=run.turn_id,
+            session_id=run.session_id,
+            status=run.status,
         )
 
     @staticmethod

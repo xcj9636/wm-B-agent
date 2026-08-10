@@ -29,6 +29,7 @@ from app.services.agent_concurrency import (
     get_agent_concurrency_limiter,
 )
 from app.services.agent_runs import AgentRunService, RunLeaseConflict
+from app.services.agent_run_events import AgentRunEventService
 from app.services.ai_chat import AIChatService
 from app.services.ai_runtime import AIRuntimeService
 from app.services.llm.contracts import LLMUseCase
@@ -71,6 +72,24 @@ def sweep_agent_runs_task():
     except Exception:
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+@celery.task(
+    name="app.tasks.task_functions.purge_agent_run_events_task",
+    acks_late=True,
+)
+def purge_agent_run_events_task(limit: int = 5000):
+    """Delete expired replay fragments without touching durable final messages."""
+    db = SessionLocal()
+    try:
+        return {
+            "purged": AgentRunEventService(db).purge_expired(
+                now=datetime.utcnow(),
+                limit=limit,
+            )
+        }
     finally:
         db.close()
 

@@ -71,7 +71,12 @@ class AgentRunService:
     def __init__(self, session: Session) -> None:
         self._db = session
 
-    def create(self, command: AgentRunCommand) -> Tuple[AgentRun, bool]:
+    def create(
+        self,
+        command: AgentRunCommand,
+        *,
+        commit: bool = True,
+    ) -> Tuple[AgentRun, bool]:
         input_hash = self._command_hash(command)
         existing = (
             self._db.query(AgentRun)
@@ -103,8 +108,11 @@ class AgentRunService:
         )
         try:
             self._db.add(row)
-            self._db.commit()
-            self._db.refresh(row)
+            if commit:
+                self._db.commit()
+                self._db.refresh(row)
+            else:
+                self._db.flush()
         except Exception:
             self._db.rollback()
             raise

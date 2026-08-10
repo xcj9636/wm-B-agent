@@ -489,7 +489,7 @@
       <template #header>
         <div class="card-heading">
           <div>
-            <strong>{{ $t('Durable agent runs') }}</strong>
+            <strong>{{ $t('Live agent runs') }}</strong>
             <span>{{ $t('Database-backed execution, lease and recovery state') }}</span>
           </div>
           <el-tag effect="plain">

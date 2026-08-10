@@ -1635,6 +1635,8 @@ class AgentRun(Base):
     heartbeat_at = Column(DateTime)
     effect_state = Column(String(20), nullable=False, default="none")
     state_json = Column(JSON, nullable=False, default=dict)
+    event_sequence = Column(Integer, nullable=False, default=0)
+    event_bytes = Column(Integer, nullable=False, default=0)
     deadline_at = Column(DateTime, nullable=False)
     error_code = Column(String(100))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -1650,6 +1652,34 @@ class AgentRun(Base):
         Index("idx_agent_run_status_deadline", "status", "deadline_at"),
         Index("idx_agent_run_status_lease", "status", "lease_until"),
         Index("idx_agent_run_org_created", "org_id", "created_at"),
+    )
+
+
+class AgentRunEvent(Base):
+    """Durable, ordered user-visible event emitted by an agent run."""
+
+    __tablename__ = "agent_run_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence = Column(Integer, nullable=False)
+    event_type = Column(String(50), nullable=False)
+    data_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "sequence",
+            name="uq_agent_run_event_sequence",
+        ),
+        Index("idx_agent_run_event_replay", "run_id", "sequence"),
+        Index("idx_agent_run_event_expiry", "expires_at"),
     )
 
 
