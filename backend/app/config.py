@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     AGENT_FAST_PATH_MAX_HISTORY_MESSAGES: int = Field(default=6, ge=1, le=20)
     AGENT_FAST_PATH_MAX_OUTPUT_TOKENS: int = Field(default=800, ge=256, le=1600)
 
+    # Media production remains fail-closed until each plane is explicitly enabled.
+    MEDIA_UPLOAD_ENABLED: bool = False
+    MEDIA_PLANNING_ENABLED: bool = False
+    MEDIA_SUBMIT_ENABLED: bool = False
+    MEDIA_POLICY_VERSION: str = Field(default="media-policy-v1", min_length=1)
+    MEDIA_POLICY_SIGNING_KEY: str = ""
+    MEDIA_POLICY_DECISION_TTL_SECONDS: int = Field(default=120, ge=1, le=900)
+
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/3"
