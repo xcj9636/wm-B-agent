@@ -124,6 +124,7 @@ cd backend
 export B_AGENT_LOAD_TOKEN='<short-lived-preproduction-token>'
 PYTHONPATH=. python scripts/load_test_agent_chat.py \
   --base-url https://preprod.example.com \
+  --target-environment staging \
   --requests 100 \
   --concurrency 8 \
   --max-error-rate 0.01 \
@@ -136,3 +137,8 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 SSE 回放、`route.selected`、首个 `message.delta`、完成事件和会话清理。报告只包含聚合
 延迟、吞吐、路径分布和稳定错误码；任一 SLO 超限、缺失路由/首 token 事件或清理失败
 都会返回非零退出码。不要在生产客户租户或含真实业务数据的会话中运行。
+
+脚本拒绝远程明文 HTTP；仅本机开发可显式加 `--allow-insecure-localhost`。生产目标还
+必须同时传 `--target-environment production --confirm-production-load`。单次最多
+1000 个请求、64 并发，轮询间隔不得低于 50ms；生产演练仍应先通过变更审批，并使用
+专用测试主体和短期令牌。

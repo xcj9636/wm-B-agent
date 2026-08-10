@@ -11,10 +11,12 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import time
 from typing import Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
@@ -34,14 +36,14 @@ class AgentChatLoadConfig:
     run_timeout_seconds: float = 120.0
 
     def __post_init__(self) -> None:
-        if not 1 <= self.requests <= 10000:
-            raise ValueError("requests must be between 1 and 10000")
-        if not 1 <= self.concurrency <= self.requests:
-            raise ValueError("concurrency must be between 1 and requests")
-        if self.poll_interval_seconds < 0:
-            raise ValueError("poll interval cannot be negative")
-        if self.run_timeout_seconds <= 0:
-            raise ValueError("run timeout must be positive")
+        if not 1 <= self.requests <= 1000:
+            raise ValueError("requests must be between 1 and 1000")
+        if not 1 <= self.concurrency <= min(self.requests, 64):
+            raise ValueError("concurrency must be between 1 and min(requests, 64)")
+        if not 0.05 <= self.poll_interval_seconds <= 10:
+            raise ValueError("poll interval must be between 0.05 and 10 seconds")
+        if not 1 <= self.run_timeout_seconds <= 600:
+            raise ValueError("run timeout must be between 1 and 600 seconds")
 
 
 @dataclass(frozen=True)
@@ -146,8 +148,8 @@ class AgentChatLoadRunner:
 
     async def _run_one(self, index: int) -> _LoadSample:
         session_id: Optional[str] = None
-        started = time.perf_counter()
         sample: _LoadSample
+        cleanup_failed = False
         try:
             session_response = await self._client.post(
                 "/api/v1/ai/chat/sessions",
@@ -164,25 +166,35 @@ class AgentChatLoadRunner:
             )
             run_response.raise_for_status()
             run_id = str(run_response.json()["run_id"])
-            sample = await self._await_run(run_id, started=started)
+            accepted_at = time.perf_counter()
+            sample = await self._await_run(run_id, started=accepted_at)
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             sample = _LoadSample(
                 success=False,
                 error_code=self._safe_error_code(exc),
             )
-        if session_id is not None:
-            try:
-                cleanup = await self._client.delete(
+        finally:
+            if session_id is not None:
+                cleanup_failed = not await self._cleanup_session(session_id)
+        if cleanup_failed:
+            return _LoadSample(
+                success=False,
+                route_path=sample.route_path,
+                error_code="session_cleanup_failed",
+            )
+        return sample
+
+    async def _cleanup_session(self, session_id: str) -> bool:
+        try:
+            cleanup = await asyncio.shield(
+                self._client.delete(
                     f"/api/v1/ai/chat/sessions/{session_id}"
                 )
-                cleanup.raise_for_status()
-            except httpx.HTTPError:
-                return _LoadSample(
-                    success=False,
-                    route_path=sample.route_path,
-                    error_code="session_cleanup_failed",
-                )
-        return sample
+            )
+            cleanup.raise_for_status()
+        except httpx.HTTPError:
+            return False
+        return True
 
     async def _await_run(
         self,
@@ -262,6 +274,14 @@ def evaluate_slos(
     max_p95_ttft_ms: float,
     max_p95_e2e_ms: float,
 ) -> List[Dict[str, float | str]]:
+    if not math.isfinite(max_error_rate) or not 0 <= max_error_rate <= 1:
+        raise ValueError("max_error_rate must be finite and between 0 and 1")
+    for name, value in (
+        ("max_p95_ttft_ms", max_p95_ttft_ms),
+        ("max_p95_e2e_ms", max_p95_e2e_ms),
+    ):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
     limits = (
         ("error_rate", float(report.get("error_rate", 1.0)), max_error_rate),
     )
@@ -293,9 +313,53 @@ def evaluate_slos(
     return failures
 
 
+def validate_target_url(
+    value: str,
+    *,
+    allow_insecure_localhost: bool,
+) -> str:
+    parsed = urlsplit(value.strip())
+    local_hosts = {"localhost", "127.0.0.1", "::1"}
+    is_explicit_local_http = (
+        allow_insecure_localhost
+        and parsed.scheme == "http"
+        and parsed.hostname in local_hosts
+    )
+    if parsed.scheme != "https" and not is_explicit_local_http:
+        raise ValueError(
+            "Load-test Bearer tokens require HTTPS; localhost HTTP needs "
+            "--allow-insecure-localhost"
+        )
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("base URL must be an origin without embedded credentials")
+    if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+        raise ValueError("base URL must not include a path, query, or fragment")
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+
+def validate_target_environment(
+    environment: str,
+    *,
+    confirm_production: bool,
+) -> None:
+    if environment not in {"development", "staging", "production"}:
+        raise ValueError("target environment is invalid")
+    if environment == "production" and not confirm_production:
+        raise ValueError(
+            "production load requires --confirm-production-load"
+        )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://localhost:8000")
+    parser.add_argument(
+        "--target-environment",
+        choices=("development", "staging", "production"),
+        required=True,
+    )
+    parser.add_argument("--allow-insecure-localhost", action="store_true")
+    parser.add_argument("--confirm-production-load", action="store_true")
     parser.add_argument("--token-env", default="B_AGENT_LOAD_TOKEN")
     parser.add_argument("--requests", type=int, default=20)
     parser.add_argument("--concurrency", type=int, default=4)
@@ -308,7 +372,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _run_from_args(args: argparse.Namespace, token: str) -> Dict[str, object]:
+async def _run_from_args(
+    args: argparse.Namespace,
+    token: str,
+    *,
+    base_url: str,
+) -> Dict[str, object]:
     config = AgentChatLoadConfig(
         requests=args.requests,
         concurrency=args.concurrency,
@@ -317,7 +386,7 @@ async def _run_from_args(args: argparse.Namespace, token: str) -> Dict[str, obje
     )
     timeout = httpx.Timeout(args.run_timeout_seconds + 10)
     async with httpx.AsyncClient(
-        base_url=args.base_url.rstrip("/"),
+        base_url=base_url,
         headers={"Authorization": f"Bearer {token}"},
         timeout=timeout,
         follow_redirects=False,
@@ -327,10 +396,21 @@ async def _run_from_args(args: argparse.Namespace, token: str) -> Dict[str, obje
 
 def main() -> int:
     args = _parser().parse_args()
+    try:
+        base_url = validate_target_url(
+            args.base_url,
+            allow_insecure_localhost=args.allow_insecure_localhost,
+        )
+        validate_target_environment(
+            args.target_environment,
+            confirm_production=args.confirm_production_load,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     token = os.environ.get(args.token_env, "").strip()
     if not token:
         raise SystemExit(f"Missing authentication token in {args.token_env}")
-    report = asyncio.run(_run_from_args(args, token))
+    report = asyncio.run(_run_from_args(args, token, base_url=base_url))
     failures = evaluate_slos(
         report,
         max_error_rate=args.max_error_rate,

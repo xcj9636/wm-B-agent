@@ -72,7 +72,7 @@ async def test_load_runner_exercises_detached_api_and_reports_route_distribution
             AgentChatLoadConfig(
                 requests=4,
                 concurrency=2,
-                poll_interval_seconds=0,
+                poll_interval_seconds=0.05,
                 run_timeout_seconds=2,
             ),
         ).run()
