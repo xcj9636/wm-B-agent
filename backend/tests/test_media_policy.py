@@ -198,6 +198,29 @@ def test_policy_decision_is_signed_and_bound_to_attempt_and_input_hash():
         service.verify(decision, command, now=now + timedelta(seconds=121))
 
 
+def test_policy_kill_switch_invalidates_an_already_issued_decision():
+    actor = principal()
+    asset_id = uuid4()
+    command = intent(actor.org_id, asset_ids=[asset_id])
+    asset = ready_asset(asset_id, actor.org_id)
+    issued_at = datetime.now(timezone.utc)
+    enabled = policy(enabled=True)
+    decision = enabled.authorize(
+        actor,
+        command,
+        assets=[asset],
+        now=issued_at,
+    )
+
+    disabled = policy(enabled=False)
+    with pytest.raises(MediaFeatureDisabled):
+        disabled.verify(
+            decision,
+            command,
+            now=issued_at + timedelta(seconds=10),
+        )
+
+
 def test_policy_rejects_unapproved_persona_or_storyboard_and_identity_mismatch():
     actor = principal()
 
