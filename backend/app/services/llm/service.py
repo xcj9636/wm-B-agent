@@ -1,4 +1,6 @@
 """Business-facing LLM service and direct-provider compatibility adapter."""
+import math
+import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 
 from app.services.llm.contracts import (
@@ -102,14 +104,29 @@ class LLMService:
             request = request.model_copy(
                 update={"request_id": audit.request_id}
             )
+        provider_started = time.perf_counter()
         try:
             response = await self._backend.complete(request)
         except Exception as exc:
             if audit is not None:
-                self._audit_sink.fail(audit.invocation_id, exc)
+                elapsed_ms = self._elapsed_ms(provider_started)
+                self._audit_sink.fail(
+                    audit.invocation_id,
+                    exc,
+                    latency_ms=elapsed_ms,
+                    e2e_latency_ms=elapsed_ms,
+                    consumer_backpressure_ms=0,
+                )
             raise
         if audit is not None:
-            self._audit_sink.succeed(audit.invocation_id, response)
+            elapsed_ms = self._elapsed_ms(provider_started)
+            self._audit_sink.succeed(
+                audit.invocation_id,
+                response,
+                latency_ms=elapsed_ms,
+                e2e_latency_ms=elapsed_ms,
+                consumer_backpressure_ms=0,
+            )
         return response
 
     async def stream(
@@ -147,6 +164,9 @@ class LLMService:
 
         fragments: List[str] = []
         final_chunk: Optional[LLMStreamChunk] = None
+        ttft_ms: Optional[int] = None
+        provider_started = time.perf_counter()
+        consumer_backpressure_seconds = 0.0
         try:
             stream_method = getattr(self._backend, "stream", None)
             if stream_method is None:
@@ -156,11 +176,25 @@ class LLMService:
             async for chunk in stream_method(request):
                 final_chunk = chunk
                 if chunk.delta:
+                    if ttft_ms is None:
+                        ttft_ms = self._elapsed_ms(provider_started)
                     fragments.append(chunk.delta)
+                consumer_started = time.perf_counter()
                 yield chunk
+                consumer_backpressure_seconds += (
+                    time.perf_counter() - consumer_started
+                )
         except Exception as exc:
             if audit is not None:
-                self._audit_sink.fail(audit.invocation_id, exc)
+                timing = self._stream_timing(
+                    provider_started,
+                    consumer_backpressure_seconds,
+                )
+                self._audit_sink.fail(
+                    audit.invocation_id,
+                    exc,
+                    **timing,
+                )
             raise
 
         if audit is not None:
@@ -181,7 +215,16 @@ class LLMService:
                     final_chunk.resolved_provider if final_chunk else None
                 ),
             )
-            self._audit_sink.succeed(audit.invocation_id, response)
+            timing = self._stream_timing(
+                provider_started,
+                consumer_backpressure_seconds,
+            )
+            self._audit_sink.succeed(
+                audit.invocation_id,
+                response,
+                ttft_ms=ttft_ms,
+                **timing,
+            )
 
     def _start_audit(self, request: LLMRequest, idempotency_key: Optional[str]):
         if self._audit_sink is None:
@@ -196,3 +239,25 @@ class LLMService:
                 "LLM invocation with this idempotency key is already in progress"
             )
         return audit
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> int:
+        return max(0, math.ceil((time.perf_counter() - started) * 1000))
+
+    @staticmethod
+    def _stream_timing(
+        started: float,
+        consumer_backpressure_seconds: float,
+    ) -> Dict[str, int]:
+        e2e_seconds = max(0.0, time.perf_counter() - started)
+        provider_seconds = max(
+            0.0,
+            e2e_seconds - consumer_backpressure_seconds,
+        )
+        return {
+            "latency_ms": math.ceil(provider_seconds * 1000),
+            "e2e_latency_ms": math.ceil(e2e_seconds * 1000),
+            "consumer_backpressure_ms": math.ceil(
+                consumer_backpressure_seconds * 1000
+            ),
+        }

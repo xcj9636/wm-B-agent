@@ -57,6 +57,7 @@ interface PendingChatRun {
 
 export type AIStreamEvent =
   | { id?: number; event: 'run.started'; data: { run_id: string; turn_id?: string } }
+  | { id?: number; event: 'stream.reset'; data: { content: string } }
   | { id?: number; event: 'message.delta'; data: { delta: string } }
   | { id?: number; event: 'run.completed'; data: AIChatMessage }
   | { id?: number; event: 'run.failed'; data: { error_code?: string; detail?: string } }
@@ -188,7 +189,8 @@ async function consumeRunEvents(
     if (event.event === 'heartbeat' && event.data.status && failedRunStatuses.has(event.data.status)) {
       terminal = true
     }
-    if (event.event !== 'heartbeat') onEvent(event)
+    if (event.event === 'stream.reset') onEvent(event)
+    else if (event.event !== 'heartbeat') onEvent(event)
   }
 
   try {

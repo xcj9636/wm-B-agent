@@ -1,11 +1,13 @@
 """Authenticated Agent Center APIs."""
 
+from hashlib import sha256
 import json
 from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_active_user
@@ -28,6 +30,7 @@ from app.services.agent_runs import (
     RunNotFound,
 )
 from app.services.agent_run_events import AgentRunEventService
+from app.services.agent_runtime.contracts import ExecutionPrincipal, Sensitivity
 from app.services.agent_research import (
     AgentResearchService,
     DraftCreate,
@@ -42,10 +45,66 @@ from app.services.agent_research import (
     ResearchReview,
 )
 from app.services.ai_runtime import AIRuntimeService, get_ai_runtime_service
+from app.services.data_policy import SensitiveDataClassifier
+from app.services.knowledge import (
+    KnowledgeRetrievalService,
+    RetrievalResult,
+    SQLKnowledgeACL,
+    SQLKnowledgeSearchBackend,
+)
+from app.services.knowledge_cache import get_knowledge_retrieval_cache
 from app.services.llm.contracts import GatewayError
 
 
 router = APIRouter()
+
+
+class AgentKnowledgeSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=5000)
+    limit: int = Field(default=8, ge=1, le=20)
+
+
+def get_agent_knowledge_service(
+    db: Session = Depends(get_db),
+) -> KnowledgeRetrievalService:
+    return KnowledgeRetrievalService(
+        SQLKnowledgeSearchBackend(db),
+        SQLKnowledgeACL(db),
+        cache=(
+            get_knowledge_retrieval_cache()
+            if settings.AGENT_RETRIEVAL_CACHE_ENABLED
+            else None
+        ),
+    )
+
+
+def _knowledge_principal(user: User) -> ExecutionPrincipal:
+    normalized_role = str(user.role or "user").strip().lower() or "user"
+    roles = {normalized_role}
+    if user.is_superuser:
+        roles.add("admin")
+    entitlements = {
+        "org_id": str(settings.AGENT_ORG_ID),
+        "user_id": user.id,
+        "roles": sorted(roles),
+        "is_active": bool(user.is_active),
+        "is_superuser": bool(user.is_superuser),
+    }
+    return ExecutionPrincipal(
+        org_id=settings.AGENT_ORG_ID,
+        user_id=user.id,
+        roles=roles,
+        entitlements_hash=sha256(
+            json.dumps(
+                entitlements,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        authn_context="jwt",
+    )
 
 
 BUSINESS_PIPELINES = [
@@ -122,6 +181,29 @@ def _delivery_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, DeliveryConflict):
         return HTTPException(status_code=409, detail=str(exc))
     return HTTPException(status_code=503, detail="Delivery workflow is unavailable")
+
+
+@router.post("/knowledge/search", response_model=RetrievalResult)
+async def search_agent_knowledge(
+    request: AgentKnowledgeSearchRequest,
+    current_user: User = Depends(get_current_active_user),
+    knowledge: KnowledgeRetrievalService = Depends(
+        get_agent_knowledge_service
+    ),
+):
+    query = request.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="Knowledge query is empty")
+    classification = SensitiveDataClassifier().classify(
+        query,
+        intrinsic=Sensitivity.INTERNAL,
+    )
+    return await knowledge.retrieve(
+        principal=_knowledge_principal(current_user),
+        query=query,
+        sensitivity=classification.sensitivity,
+        limit=request.limit,
+    )
 
 
 @router.get("/overview")

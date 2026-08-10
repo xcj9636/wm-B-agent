@@ -33,10 +33,27 @@ class InvocationAuditSink(Protocol):
     ) -> InvocationAuditStart:
         ...
 
-    def succeed(self, invocation_id: UUID, response: LLMResponse) -> None:
+    def succeed(
+        self,
+        invocation_id: UUID,
+        response: LLMResponse,
+        *,
+        latency_ms: Optional[int] = None,
+        ttft_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
+    ) -> None:
         ...
 
-    def fail(self, invocation_id: UUID, error: Exception) -> None:
+    def fail(
+        self,
+        invocation_id: UUID,
+        error: Exception,
+        *,
+        latency_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
+    ) -> None:
         ...
 
 
@@ -75,6 +92,10 @@ def _succeed_with_session(
     *,
     run_id: Optional[UUID] = None,
     fencing_token: Optional[int] = None,
+    latency_ms: Optional[int] = None,
+    ttft_ms: Optional[int] = None,
+    e2e_latency_ms: Optional[int] = None,
+    consumer_backpressure_ms: Optional[int] = None,
 ) -> None:
     invocation = session.get(LLMInvocation, invocation_id)
     if invocation is None:
@@ -84,6 +105,10 @@ def _succeed_with_session(
         response,
         run_id=run_id,
         fencing_token=fencing_token,
+        latency_ms=latency_ms,
+        ttft_ms=ttft_ms,
+        e2e_latency_ms=e2e_latency_ms,
+        consumer_backpressure_ms=consumer_backpressure_ms,
     )
     session.commit()
 
@@ -95,6 +120,9 @@ def _fail_with_session(
     *,
     run_id: Optional[UUID] = None,
     fencing_token: Optional[int] = None,
+    latency_ms: Optional[int] = None,
+    e2e_latency_ms: Optional[int] = None,
+    consumer_backpressure_ms: Optional[int] = None,
 ) -> None:
     invocation = session.get(LLMInvocation, invocation_id)
     if invocation is None:
@@ -111,6 +139,9 @@ def _fail_with_session(
         retryable=retryable,
         run_id=run_id,
         fencing_token=fencing_token,
+        latency_ms=latency_ms,
+        e2e_latency_ms=e2e_latency_ms,
+        consumer_backpressure_ms=consumer_backpressure_ms,
     )
     session.commit()
 
@@ -137,22 +168,46 @@ class SessionInvocationAuditSink:
             fencing_token=self._fencing_token,
         )
 
-    def succeed(self, invocation_id: UUID, response: LLMResponse) -> None:
+    def succeed(
+        self,
+        invocation_id: UUID,
+        response: LLMResponse,
+        *,
+        latency_ms: Optional[int] = None,
+        ttft_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
+    ) -> None:
         _succeed_with_session(
             self._session,
             invocation_id,
             response,
             run_id=self._run_id,
             fencing_token=self._fencing_token,
+            latency_ms=latency_ms,
+            ttft_ms=ttft_ms,
+            e2e_latency_ms=e2e_latency_ms,
+            consumer_backpressure_ms=consumer_backpressure_ms,
         )
 
-    def fail(self, invocation_id: UUID, error: Exception) -> None:
+    def fail(
+        self,
+        invocation_id: UUID,
+        error: Exception,
+        *,
+        latency_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
+    ) -> None:
         _fail_with_session(
             self._session,
             invocation_id,
             error,
             run_id=self._run_id,
             fencing_token=self._fencing_token,
+            latency_ms=latency_ms,
+            e2e_latency_ms=e2e_latency_ms,
+            consumer_backpressure_ms=consumer_backpressure_ms,
         )
 
 
@@ -166,10 +221,42 @@ class SessionFactoryInvocationAuditSink:
         with self._session_factory() as session:
             return _start_with_session(session, **kwargs)
 
-    def succeed(self, invocation_id: UUID, response: LLMResponse) -> None:
+    def succeed(
+        self,
+        invocation_id: UUID,
+        response: LLMResponse,
+        *,
+        latency_ms: Optional[int] = None,
+        ttft_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
+    ) -> None:
         with self._session_factory() as session:
-            _succeed_with_session(session, invocation_id, response)
+            _succeed_with_session(
+                session,
+                invocation_id,
+                response,
+                latency_ms=latency_ms,
+                ttft_ms=ttft_ms,
+                e2e_latency_ms=e2e_latency_ms,
+                consumer_backpressure_ms=consumer_backpressure_ms,
+            )
 
-    def fail(self, invocation_id: UUID, error: Exception) -> None:
+    def fail(
+        self,
+        invocation_id: UUID,
+        error: Exception,
+        *,
+        latency_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
+    ) -> None:
         with self._session_factory() as session:
-            _fail_with_session(session, invocation_id, error)
+            _fail_with_session(
+                session,
+                invocation_id,
+                error,
+                latency_ms=latency_ms,
+                e2e_latency_ms=e2e_latency_ms,
+                consumer_backpressure_ms=consumer_backpressure_ms,
+            )

@@ -319,6 +319,7 @@ async function send() {
 }
 
 function applyStreamEvent(streaming: AIChatMessage, event: AIStreamEvent) {
+  if (event.event === 'stream.reset') streaming.content = event.data.content
   if ((event.event === 'delta' || event.event === 'message.delta') && streaming.id === 'streaming') {
     streaming.content += event.data.delta
   }

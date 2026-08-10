@@ -83,6 +83,10 @@ class InvocationAuditService:
         *,
         run_id: Optional[UUID] = None,
         fencing_token: Optional[int] = None,
+        latency_ms: Optional[int] = None,
+        ttft_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
     ) -> LLMAttempt:
         self._assert_current_fence(invocation, run_id, fencing_token)
         if response.request_id != invocation.request_id:
@@ -117,6 +121,10 @@ class InvocationAuditService:
             total_tokens=response.usage.total_tokens,
             cost=response.usage.cost,
             cost_status=response.usage.cost_status,
+            latency_ms=latency_ms,
+            ttft_ms=ttft_ms,
+            e2e_latency_ms=e2e_latency_ms,
+            consumer_backpressure_ms=consumer_backpressure_ms,
             completed_at=datetime.utcnow(),
         )
         self._session.add(attempt)
@@ -131,6 +139,9 @@ class InvocationAuditService:
         retryable: bool,
         run_id: Optional[UUID] = None,
         fencing_token: Optional[int] = None,
+        latency_ms: Optional[int] = None,
+        e2e_latency_ms: Optional[int] = None,
+        consumer_backpressure_ms: Optional[int] = None,
     ) -> LLMAttempt:
         """Record a normalized failure without persisting exception text."""
         self._assert_current_fence(invocation, run_id, fencing_token)
@@ -151,6 +162,9 @@ class InvocationAuditService:
             status=LLMAttemptStatus.FAILED,
             error_kind=error_kind,
             retryable=retryable,
+            latency_ms=latency_ms,
+            e2e_latency_ms=e2e_latency_ms,
+            consumer_backpressure_ms=consumer_backpressure_ms,
             completed_at=datetime.utcnow(),
         )
         self._session.add(attempt)

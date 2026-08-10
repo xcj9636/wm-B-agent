@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_CACHE_URL: str = "redis://localhost:6379/1"
+    AGENT_RETRIEVAL_CACHE_ENABLED: bool = True
+    AGENT_RETRIEVAL_CACHE_TTL_SECONDS: int = Field(default=60, ge=1, le=3600)
     AGENT_CONCURRENCY_GLOBAL_LIMIT: int = Field(default=32, ge=1, le=10000)
     AGENT_CONCURRENCY_ORG_LIMIT: int = Field(default=16, ge=1, le=10000)
     AGENT_CONCURRENCY_USER_LIMIT: int = Field(default=4, ge=1, le=10000)

@@ -1096,6 +1096,10 @@ class LLMAttempt(Base):
     cost = Column(Float)
     cost_status = Column(String(20), nullable=False, default="unknown")
     cache_hit = Column(Boolean, nullable=False, default=False)
+    latency_ms = Column(Integer)
+    ttft_ms = Column(Integer)
+    e2e_latency_ms = Column(Integer)
+    consumer_backpressure_ms = Column(Integer)
     fallback_reason = Column(String(255))
     error_kind = Column(String(50))
     retryable = Column(Boolean)
@@ -1109,6 +1113,22 @@ class LLMAttempt(Base):
             "invocation_id",
             "attempt_number",
             name="uq_llm_attempt_number",
+        ),
+        CheckConstraint(
+            "latency_ms IS NULL OR latency_ms >= 0",
+            name="ck_llm_attempt_latency_nonnegative",
+        ),
+        CheckConstraint(
+            "ttft_ms IS NULL OR ttft_ms >= 0",
+            name="ck_llm_attempt_ttft_nonnegative",
+        ),
+        CheckConstraint(
+            "e2e_latency_ms IS NULL OR e2e_latency_ms >= 0",
+            name="ck_llm_attempt_e2e_latency_nonnegative",
+        ),
+        CheckConstraint(
+            "consumer_backpressure_ms IS NULL OR consumer_backpressure_ms >= 0",
+            name="ck_llm_attempt_backpressure_nonnegative",
         ),
         Index("idx_llm_attempt_gateway_request", "gateway_request_id"),
         Index("idx_llm_attempt_provider_model", "provider", "model"),

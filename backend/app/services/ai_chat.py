@@ -649,6 +649,14 @@ class AIChatService:
                     data={"run_id": str(run.id), "turn_id": str(turn.id)},
                     now=datetime.utcnow(),
                 )
+            event_log.append(
+                run.id,
+                worker_id=worker_id,
+                fencing_token=fencing_token,
+                event_type="stream.reset",
+                data={"content": ""},
+                now=datetime.utcnow(),
+            )
 
             raw_fragments: List[str] = []
             pending_delta = ""

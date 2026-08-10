@@ -16,6 +16,12 @@ from app.models.database import (
     KnowledgeDocumentGrant,
 )
 from app.services.agent_runtime.contracts import ExecutionPrincipal, Sensitivity
+from app.services.knowledge_cache import (
+    KnowledgeCacheScope,
+    KnowledgeCacheUnavailable,
+    KnowledgeRetrievalCache,
+    KnowledgeRetrievalCacheKey,
+)
 
 
 class RawKnowledgeCandidate(BaseModel):
@@ -111,9 +117,21 @@ _SENSITIVITY_RANK = {
 
 
 class KnowledgeRetrievalService:
-    def __init__(self, backend: KnowledgeSearchBackend, acl: KnowledgeACL) -> None:
+    _CACHEABLE_SENSITIVITIES = {
+        Sensitivity.PUBLIC,
+        Sensitivity.INTERNAL,
+    }
+
+    def __init__(
+        self,
+        backend: KnowledgeSearchBackend,
+        acl: KnowledgeACL,
+        *,
+        cache: Optional[KnowledgeRetrievalCache] = None,
+    ) -> None:
         self._backend = backend
         self._acl = acl
+        self._cache = cache
 
     async def retrieve(
         self,
@@ -130,11 +148,14 @@ class KnowledgeRetrievalService:
             "max_sensitivity": sensitivity.value,
             "active_only": True,
         }
-        candidates = await self._backend.search(
-            namespace=namespace,
+        bounded_limit = min(max(limit, 1), 20)
+        candidates = await self._candidates(
+            principal=principal,
             query=query,
+            sensitivity=sensitivity,
+            namespace=namespace,
             filters=filters,
-            limit=min(max(limit, 1), 20),
+            limit=bounded_limit,
         )
         evidence: List[Evidence] = []
         for candidate in sorted(candidates, key=lambda item: -item.score):
@@ -205,6 +226,95 @@ class KnowledgeRetrievalService:
             authorized_at=authorized_at,
             namespace=namespace,
             evidence=evidence,
+        )
+
+    async def _candidates(
+        self,
+        *,
+        principal: ExecutionPrincipal,
+        query: str,
+        sensitivity: Sensitivity,
+        namespace: str,
+        filters: Dict[str, object],
+        limit: int,
+    ) -> List[RawKnowledgeCandidate]:
+        cache_key: Optional[KnowledgeRetrievalCacheKey] = None
+        if (
+            self._cache is not None
+            and sensitivity in self._CACHEABLE_SENSITIVITIES
+        ):
+            scope_method = getattr(self._backend, "cache_scope", None)
+            validator = getattr(
+                self._backend,
+                "validate_cached_candidate",
+                None,
+            )
+            if callable(scope_method) and callable(validator):
+                scope = await scope_method(org_id=principal.org_id)
+                cache_key = self._cache_key(
+                    principal=principal,
+                    query=query,
+                    sensitivity=sensitivity,
+                    scope=scope,
+                    limit=limit,
+                )
+                try:
+                    cached = await self._cache.get(cache_key)
+                except KnowledgeCacheUnavailable:
+                    cached = None
+                    cache_key = None
+                if cached:
+                    try:
+                        parsed = [
+                            RawKnowledgeCandidate.model_validate(item)
+                            for item in cached
+                        ]
+                    except (TypeError, ValueError):
+                        pass
+                    else:
+                        cache_is_authoritative = True
+                        for candidate in parsed:
+                            if not await validator(candidate):
+                                cache_is_authoritative = False
+                                break
+                        if cache_is_authoritative:
+                            return parsed
+
+        candidates = await self._backend.search(
+            namespace=namespace,
+            query=query,
+            filters=filters,
+            limit=limit,
+        )
+        if cache_key is not None and self._cache is not None:
+            try:
+                await self._cache.set(
+                    cache_key,
+                    [item.model_dump(mode="json") for item in candidates],
+                )
+            except KnowledgeCacheUnavailable:
+                pass
+        return candidates
+
+    @staticmethod
+    def _cache_key(
+        *,
+        principal: ExecutionPrincipal,
+        query: str,
+        sensitivity: Sensitivity,
+        scope: KnowledgeCacheScope,
+        limit: int,
+    ) -> KnowledgeRetrievalCacheKey:
+        normalized_query = " ".join(query.split()).casefold()
+        return KnowledgeRetrievalCacheKey(
+            org_id=principal.org_id,
+            principal_id=str(principal.user_id),
+            entitlements_hash=principal.entitlements_hash,
+            acl_policy_version=scope.acl_policy_version,
+            sensitivity=sensitivity,
+            query_hash=sha256(normalized_query.encode("utf-8")).hexdigest(),
+            index_version=scope.index_version,
+            limit=limit,
         )
 
 
@@ -372,6 +482,90 @@ class SQLKnowledgeSearchBackend:
 
     def __init__(self, session: Session) -> None:
         self._db = session
+
+    async def cache_scope(self, *, org_id: UUID) -> KnowledgeCacheScope:
+        versions = (
+            self._db.query(
+                KnowledgeDocument.acl_policy_version,
+                KnowledgeDocument.index_version,
+            )
+            .filter(
+                KnowledgeDocument.org_id == org_id,
+                KnowledgeDocument.status == "active",
+            )
+            .order_by(
+                KnowledgeDocument.document_id,
+                KnowledgeDocument.version,
+            )
+            .all()
+        )
+        acl_manifest = sorted({row.acl_policy_version for row in versions})
+        index_manifest = sorted({row.index_version for row in versions})
+        return KnowledgeCacheScope(
+            acl_policy_version=sha256(
+                json.dumps(
+                    acl_manifest,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+            index_version=sha256(
+                json.dumps(
+                    index_manifest,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+        )
+
+    async def validate_cached_candidate(
+        self,
+        candidate: RawKnowledgeCandidate,
+    ) -> bool:
+        """Rehydrate cache integrity from authoritative rows before ACL checks."""
+        if not all(
+            (
+                candidate.org_id,
+                candidate.document_id,
+                candidate.document_version,
+                candidate.acl_policy_version,
+                candidate.index_version,
+                candidate.chunk_id,
+            )
+        ):
+            return False
+        row = (
+            self._db.query(KnowledgeChunk, KnowledgeDocument)
+            .join(
+                KnowledgeDocument,
+                KnowledgeDocument.record_id
+                == KnowledgeChunk.document_record_id,
+            )
+            .filter(
+                KnowledgeDocument.org_id == candidate.org_id,
+                KnowledgeDocument.document_id == candidate.document_id,
+                KnowledgeDocument.version == candidate.document_version,
+                KnowledgeDocument.acl_policy_version
+                == candidate.acl_policy_version,
+                KnowledgeDocument.index_version == candidate.index_version,
+                KnowledgeDocument.status == "active",
+                KnowledgeChunk.chunk_id == candidate.chunk_id,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return False
+        chunk, document = row
+        return all(
+            (
+                candidate.candidate_id
+                == f"{document.record_id}:{chunk.chunk_id}",
+                candidate.content == chunk.content,
+                sha256(candidate.content.encode("utf-8")).hexdigest()
+                == chunk.content_hash,
+                candidate.source_ref == chunk.source_ref,
+                candidate.authority == document.authority,
+                candidate.sensitivity == Sensitivity(document.sensitivity),
+            )
+        )
 
     async def search(
         self,

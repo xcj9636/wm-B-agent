@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 import re
@@ -186,8 +187,27 @@ class RagSkill(BaseSkill):
                 "message": "Knowledge retrieval is temporarily unavailable",
             }
 
-    async def _add_document(self, text: str, collection_name: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    async def _add_document(
+        self,
+        text: str,
+        collection_name: str,
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """Add document to vector store"""
+        return await asyncio.to_thread(
+            self._add_document_blocking,
+            text,
+            collection_name,
+            metadata,
+        )
+
+    def _add_document_blocking(
+        self,
+        text: str,
+        collection_name: str,
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Run embedding and Chroma writes outside the event-loop thread."""
         # Split text
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -210,8 +230,27 @@ class RagSkill(BaseSkill):
             "count": len(docs)
         }
 
-    async def _query_documents(self, query: str, collection_name: str, top_k: int) -> Dict[str, Any]:
+    async def _query_documents(
+        self,
+        query: str,
+        collection_name: str,
+        top_k: int,
+    ) -> Dict[str, Any]:
         """Query vector store"""
+        return await asyncio.to_thread(
+            self._query_documents_blocking,
+            query,
+            collection_name,
+            top_k,
+        )
+
+    def _query_documents_blocking(
+        self,
+        query: str,
+        collection_name: str,
+        top_k: int,
+    ) -> Dict[str, Any]:
+        """Run embedding and Chroma similarity search off the event loop."""
         vectorstore = self._get_vectorstore(collection_name)
         
         # Similarity search
@@ -233,6 +272,13 @@ class RagSkill(BaseSkill):
 
     async def _clear_collection(self, collection_name: str) -> Dict[str, Any]:
         """Clear a collection"""
+        return await asyncio.to_thread(
+            self._clear_collection_blocking,
+            collection_name,
+        )
+
+    def _clear_collection_blocking(self, collection_name: str) -> Dict[str, Any]:
+        """Run destructive Chroma maintenance outside the event-loop thread."""
         vectorstore = self._get_vectorstore(collection_name)
         vectorstore.delete_collection()
         vectorstore.persist()
