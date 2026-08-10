@@ -218,6 +218,30 @@ async def test_llm_service_audits_stream_ttft_and_total_latency(db_session):
 
 
 @pytest.mark.asyncio
+async def test_stream_audit_splits_provider_latency_from_consumer_backpressure(
+    db_session,
+):
+    service = LLMService(
+        SuccessfulStreamingBackend(),
+        audit_sink=SessionInvocationAuditSink(db_session),
+        backend_name="omniroute",
+    )
+
+    async for _ in service.stream(
+        LLMUseCase.LIVE_REPLY,
+        [{"role": "user", "content": "measure downstream backpressure"}],
+        idempotency_key="conversation-1:turn-backpressure:reply",
+    ):
+        await asyncio.sleep(0.02)
+
+    attempt = db_session.query(LLMAttempt).one()
+    assert attempt.consumer_backpressure_ms >= 30
+    assert attempt.e2e_latency_ms > attempt.latency_ms
+    assert attempt.e2e_latency_ms >= attempt.consumer_backpressure_ms
+    assert attempt.latency_ms < 35
+
+
+@pytest.mark.asyncio
 async def test_llm_service_centrally_audits_normalized_failure(db_session):
     service = LLMService(
         FailingBackend(),
