@@ -554,6 +554,7 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 
 - [B-agent × OmniRoute 二次改造实施蓝图](plans/b-agent-omniroute-integration-blueprint.md)
 - [Agent Runtime 优化蓝图](plans/agent-runtime-optimization-blueprint.md)
+- [视频生成 Persona 与媒体生产链路蓝图](plans/video-generation-persona-blueprint.md)
 - [外贸 Agent API 蓝图](plans/foreign-trade-agent-api-blueprint.md)
 - [OmniRoute 生产部署与回滚 Runbook](docs/runbooks/omniroute-deployment.md)
 - [可靠执行与 Outbox 运维 Runbook](docs/runbooks/reliable-execution.md)
