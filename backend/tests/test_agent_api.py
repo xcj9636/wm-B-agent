@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+from app.main import app
 from app.core.workflow_engine import WorkflowDefinition, WorkflowExecution
 from app.models.database import User
+from app.api.v1.agent import get_agent_knowledge_service
 from app.services.agent_runs import AgentRunCommand, AgentRunService
-from app.services.agent_runtime.contracts import Sensitivity
+from app.services.agent_runtime.contracts import ExecutionPrincipal, Sensitivity
+from app.services.knowledge import RetrievalResult
 
 
 def test_agent_overview_exposes_real_business_pipelines(api_context):
@@ -35,6 +38,50 @@ def test_agent_runs_returns_live_execution_summaries(api_context):
 
     assert response.status_code == 200, response.text
     assert response.json() == []
+
+
+def test_agent_knowledge_search_derives_identity_and_policy_server_side(api_context):
+    client, _, user = api_context
+    captured = {}
+
+    class FakeKnowledgeService:
+        async def retrieve(self, *, principal, query, sensitivity, limit):
+            captured.update(
+                principal=principal,
+                query=query,
+                sensitivity=sensitivity,
+                limit=limit,
+            )
+            return RetrievalResult(
+                snapshot_id="snapshot-1",
+                principal_id=str(principal.user_id),
+                entitlements_hash=principal.entitlements_hash,
+                authorized_at=datetime.now().astimezone(),
+                namespace=f"org-{principal.org_id}",
+                evidence=[],
+            )
+
+    app.dependency_overrides[get_agent_knowledge_service] = (
+        lambda: FakeKnowledgeService()
+    )
+    try:
+        response = client.post(
+            "/api/v1/agent/knowledge/search",
+            json={"query": "verified MOQ", "limit": 5},
+        )
+    finally:
+        app.dependency_overrides.pop(get_agent_knowledge_service, None)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["evidence"] == []
+    assert captured["query"] == "verified MOQ"
+    assert captured["sensitivity"] == Sensitivity.INTERNAL
+    assert captured["limit"] == 5
+    principal = captured["principal"]
+    assert isinstance(principal, ExecutionPrincipal)
+    assert principal.user_id == user.id
+    assert principal.roles == {"user"}
+    assert len(principal.entitlements_hash) == 64
 
 
 def test_agent_runs_returns_user_owned_durable_safe_metadata(api_context):
