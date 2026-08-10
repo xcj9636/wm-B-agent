@@ -428,24 +428,20 @@ class AgentRunService:
 
     @staticmethod
     def _command_hash(command: AgentRunCommand) -> str:
-        return canonical_hash(
-            {
-                "org_id": str(command.org_id),
-                "user_id": command.user_id,
-                "session_id": str(command.session_id) if command.session_id else None,
-                "turn_id": str(command.turn_id) if command.turn_id else None,
-                "use_case": command.use_case,
-                "input": command.input,
-                "sensitivity": command.sensitivity.value,
-                "generation_epoch": command.generation_epoch,
-                "deadline_at": command.deadline_at.isoformat(),
-                "execution_profile": (
-                    command.execution_profile.model_dump()
-                    if command.execution_profile is not None
-                    else None
-                ),
-            }
-        )
+        payload = {
+            "org_id": str(command.org_id),
+            "user_id": command.user_id,
+            "session_id": str(command.session_id) if command.session_id else None,
+            "turn_id": str(command.turn_id) if command.turn_id else None,
+            "use_case": command.use_case,
+            "input": command.input,
+            "sensitivity": command.sensitivity.value,
+            "generation_epoch": command.generation_epoch,
+            "deadline_at": command.deadline_at.isoformat(),
+        }
+        if command.execution_profile is not None:
+            payload["execution_profile"] = command.execution_profile.model_dump()
+        return canonical_hash(payload)
 
     @staticmethod
     def _naive_utc(value: datetime) -> datetime:
