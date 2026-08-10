@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.coverage
+coverage.xml
+htmlcov/
 .env
 .venv
 env/
