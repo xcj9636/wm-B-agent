@@ -350,6 +350,41 @@ def validate_target_environment(
         )
 
 
+async def verify_target_identity(
+    client: httpx.AsyncClient,
+    *,
+    expected_environment: str,
+    expected_deployment_id: str,
+    confirm_production: bool,
+) -> Dict[str, str]:
+    response = await client.get("/health")
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("target health response is invalid")
+    environment = payload.get("environment")
+    deployment_id = payload.get("deployment_id")
+    if environment not in {"development", "staging", "production"}:
+        raise ValueError("target did not provide a trusted environment identity")
+    if not isinstance(deployment_id, str) or not deployment_id.strip():
+        raise ValueError("target did not provide a trusted deployment identity")
+    if environment != expected_environment:
+        raise ValueError(
+            f"target environment {environment!r} does not match expected "
+            f"{expected_environment!r}"
+        )
+    if deployment_id != expected_deployment_id:
+        raise ValueError("target deployment ID does not match expected identity")
+    validate_target_environment(
+        environment,
+        confirm_production=confirm_production,
+    )
+    return {
+        "environment": environment,
+        "deployment_id": deployment_id,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://localhost:8000")
@@ -358,6 +393,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=("development", "staging", "production"),
         required=True,
     )
+    parser.add_argument("--expected-deployment-id", required=True)
     parser.add_argument("--allow-insecure-localhost", action="store_true")
     parser.add_argument("--confirm-production-load", action="store_true")
     parser.add_argument("--token-env", default="B_AGENT_LOAD_TOKEN")
@@ -387,11 +423,24 @@ async def _run_from_args(
     timeout = httpx.Timeout(args.run_timeout_seconds + 10)
     async with httpx.AsyncClient(
         base_url=base_url,
+        timeout=timeout,
+        follow_redirects=False,
+    ) as identity_client:
+        identity = await verify_target_identity(
+            identity_client,
+            expected_environment=args.target_environment,
+            expected_deployment_id=args.expected_deployment_id,
+            confirm_production=args.confirm_production_load,
+        )
+    async with httpx.AsyncClient(
+        base_url=base_url,
         headers={"Authorization": f"Bearer {token}"},
         timeout=timeout,
         follow_redirects=False,
     ) as client:
-        return await AgentChatLoadRunner(client, config).run()
+        report = await AgentChatLoadRunner(client, config).run()
+    report["target"] = identity
+    return report
 
 
 def main() -> int:
@@ -410,7 +459,10 @@ def main() -> int:
     token = os.environ.get(args.token_env, "").strip()
     if not token:
         raise SystemExit(f"Missing authentication token in {args.token_env}")
-    report = asyncio.run(_run_from_args(args, token, base_url=base_url))
+    try:
+        report = asyncio.run(_run_from_args(args, token, base_url=base_url))
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"Target identity verification failed: {exc}") from exc
     failures = evaluate_slos(
         report,
         max_error_rate=args.max_error_rate,

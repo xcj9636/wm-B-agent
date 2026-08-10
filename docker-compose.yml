@@ -70,6 +70,8 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/3
       - SECRET_KEY=your-secret-key-change-in-production
       - AGENT_ORG_ID=${AGENT_ORG_ID:-ba6e0000-0000-0000-0000-000000000001}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:-local}
       - DEBUG=False
       - LLM_BACKEND=${LLM_BACKEND:-direct}
       - OMNIROUTE_BASE_URL=http://omniroute:20128

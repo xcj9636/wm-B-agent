@@ -125,6 +125,7 @@ export B_AGENT_LOAD_TOKEN='<short-lived-preproduction-token>'
 PYTHONPATH=. python scripts/load_test_agent_chat.py \
   --base-url https://preprod.example.com \
   --target-environment staging \
+  --expected-deployment-id preprod-primary \
   --requests 100 \
   --concurrency 8 \
   --max-error-rate 0.01 \
@@ -142,3 +143,8 @@ SSE 回放、`route.selected`、首个 `message.delta`、完成事件和会话�
 必须同时传 `--target-environment production --confirm-production-load`。单次最多
 1000 个请求、64 并发，轮询间隔不得低于 50ms；生产演练仍应先通过变更审批，并使用
 专用测试主体和短期令牌。
+
+脚本会在发送 Bearer Token 前，先用无认证请求读取 `/health` 的
+`DEPLOYMENT_ENVIRONMENT` 与 `DEPLOYMENT_ID`，两者必须与命令中的期望值完全一致。
+每个部署必须配置唯一且稳定的 deployment ID；复制 staging 命令并只替换生产 URL
+会在身份核验阶段停止，不能进入负载阶段。

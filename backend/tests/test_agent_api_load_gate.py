@@ -206,17 +206,20 @@ async def test_server_identity_prevents_production_environment_mislabeling():
             await verify_target_identity(
                 client,
                 expected_environment="staging",
+                expected_deployment_id="prod-cn-primary",
                 confirm_production=False,
             )
         with pytest.raises(ValueError, match="production"):
             await verify_target_identity(
                 client,
                 expected_environment="production",
+                expected_deployment_id="prod-cn-primary",
                 confirm_production=False,
             )
         identity = await verify_target_identity(
             client,
             expected_environment="production",
+            expected_deployment_id="prod-cn-primary",
             confirm_production=True,
         )
 

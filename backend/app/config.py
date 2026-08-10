@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Trade AI Agent"
     APP_VERSION: str = "1.0.0"
+    DEPLOYMENT_ENVIRONMENT: Literal[
+        "development", "staging", "production"
+    ] = "development"
+    DEPLOYMENT_ID: str = Field(default="local", min_length=1, max_length=100)
     DEBUG: bool = False
     SECRET_KEY: str = "your-secret-key-change-in-production"
     START_MINIMAL: bool = False
