@@ -8,6 +8,8 @@ from scripts.load_test_agent_chat import (
     AgentChatLoadConfig,
     AgentChatLoadRunner,
     evaluate_slos,
+    validate_target_environment,
+    validate_target_url,
 )
 
 
@@ -135,3 +137,70 @@ def test_slo_gate_rejects_reports_without_successful_latency_samples():
         "ttft_ms.samples",
         "e2e_ms.samples",
     }
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"requests": 1001},
+        {"requests": 100, "concurrency": 65},
+        {"poll_interval_seconds": 0.01},
+        {"run_timeout_seconds": 601},
+    ],
+)
+def test_load_config_enforces_safe_operational_limits(values):
+    with pytest.raises(ValueError):
+        AgentChatLoadConfig(**values)
+
+
+def test_remote_bearer_tokens_require_https():
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_target_url(
+            "http://agent.example",
+            allow_insecure_localhost=False,
+        )
+
+
+def test_plain_http_requires_explicit_localhost_override():
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_target_url(
+            "http://localhost:8000",
+            allow_insecure_localhost=False,
+        )
+
+    assert validate_target_url(
+        "http://localhost:8000/",
+        allow_insecure_localhost=True,
+    ) == "http://localhost:8000"
+
+
+def test_production_load_requires_an_explicit_confirmation():
+    with pytest.raises(ValueError, match="production"):
+        validate_target_environment("production", confirm_production=False)
+
+    validate_target_environment("production", confirm_production=True)
+    validate_target_environment("staging", confirm_production=False)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_error_rate", float("nan")),
+        ("max_error_rate", 1.1),
+        ("max_p95_ttft_ms", float("inf")),
+        ("max_p95_e2e_ms", 0),
+    ],
+)
+def test_slo_gate_rejects_non_finite_or_unsafe_limits(field, value):
+    limits = {
+        "max_error_rate": 0.01,
+        "max_p95_ttft_ms": 3000.0,
+        "max_p95_e2e_ms": 15000.0,
+    }
+    limits[field] = value
+
+    with pytest.raises(ValueError):
+        evaluate_slos(
+            {"error_rate": 0, "ttft_ms": {}, "e2e_ms": {}},
+            **limits,
+        )
