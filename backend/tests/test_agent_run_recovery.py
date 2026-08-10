@@ -11,6 +11,7 @@ from app.services.agent_runs import (
 )
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.idempotency import IdempotencyConflict
+from app.services.idempotency import canonical_hash
 
 
 def command(**overrides):
@@ -45,6 +46,25 @@ def test_create_is_idempotent_without_persisting_raw_input(db_session):
 
     with pytest.raises(IdempotencyConflict):
         service.create(requested.model_copy(update={"input": {"message": "changed"}}))
+
+
+def test_command_without_profile_preserves_pre_routing_idempotency_hash():
+    requested = command(execution_profile=None)
+    legacy_hash = canonical_hash(
+        {
+            "org_id": str(requested.org_id),
+            "user_id": requested.user_id,
+            "session_id": str(requested.session_id),
+            "turn_id": str(requested.turn_id),
+            "use_case": requested.use_case,
+            "input": requested.input,
+            "sensitivity": requested.sensitivity.value,
+            "generation_epoch": requested.generation_epoch,
+            "deadline_at": requested.deadline_at.isoformat(),
+        }
+    )
+
+    assert AgentRunService._command_hash(requested) == legacy_hash
 
 
 def test_only_one_worker_claims_and_heartbeat_requires_current_fence(db_session):
