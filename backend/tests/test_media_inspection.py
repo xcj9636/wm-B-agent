@@ -1,11 +1,15 @@
 import json
 from pathlib import Path
+import sys
+
+import pytest
 
 from app.services.media.contracts import AssetScanStatus, MediaAssetKind
 from app.services.media.inspection import (
     CommandExecution,
     MediaInspectionRunner,
     ProbeStatus,
+    run_bounded_command,
 )
 
 
@@ -212,3 +216,60 @@ def test_invalid_probe_json_and_dimension_limit_never_pass():
     assert oversized_result.probe_status == ProbeStatus.REJECTED
     assert oversized_result.reason_code == "probe_dimension_limit"
 
+
+def test_bounded_executor_handles_success_timeout_output_limit_and_missing_binary():
+    success = run_bounded_command(
+        [sys.executable, "-c", "print('inspection-ok')"],
+        timeout_seconds=2,
+        max_output_bytes=4096,
+    )
+    timeout = run_bounded_command(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        timeout_seconds=1,
+        max_output_bytes=4096,
+    )
+    truncated = run_bounded_command(
+        [sys.executable, "-c", "print('x' * 100000)"],
+        timeout_seconds=2,
+        max_output_bytes=1024,
+    )
+    missing = run_bounded_command(
+        ["/definitely-not-installed/b-agent-inspector"],
+        timeout_seconds=1,
+        max_output_bytes=1024,
+    )
+
+    assert success.returncode == 0
+    assert success.stdout.strip() == b"inspection-ok"
+    assert timeout.timed_out is True
+    assert truncated.output_truncated is True
+    assert len(truncated.stdout) + len(truncated.stderr) <= 1024
+    assert missing.returncode == 127
+
+    with pytest.raises(ValueError, match="absolute"):
+        run_bounded_command(
+            ["ffprobe", "input.mp4"],
+            timeout_seconds=1,
+            max_output_bytes=1024,
+        )
+
+
+def test_runner_rejects_unsafe_configuration_and_relative_media_paths():
+    with pytest.raises(ValueError, match="absolute"):
+        MediaInspectionRunner(
+            clamscan_path="clamscan",
+            ffprobe_path="/usr/bin/ffprobe",
+            timeout_seconds=10,
+            max_output_bytes=4096,
+            max_duration_seconds=600,
+            max_dimension_pixels=8192,
+        )
+
+    configured = runner(FakeExecutor([]))
+    with pytest.raises(ValueError, match="absolute"):
+        configured.inspect(
+            Path("relative/input.mp4"),
+            expected_kind=MediaAssetKind.VIDEO,
+            expected_mime_type="video/mp4",
+            expected_size_bytes=4096,
+        )
