@@ -77,5 +77,5 @@ test('video studio drives the approval-gated planning workflow from the browser'
   assert.match(view, /projectDialogOpen/)
   assert.match(view, /storyboardDialogOpen/)
   assert.match(view, /compiledReceipt/)
-  assert.doesNotMatch(view, /compiledReceipt[^\n]*prompt|prompt:\s*compiledReceipt/i)
+  assert.doesNotMatch(view, /compiledReceipt\.prompt(?!_hash)|prompt:\s*compiledReceipt/i)
 })

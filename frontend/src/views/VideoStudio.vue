@@ -8,9 +8,21 @@
         <h1>{{ $t('Video Studio') }}</h1>
         <p>{{ $t('Build approved personas, evidence-bound projects and production-ready storyboards.') }}</p>
       </div>
-      <el-button @click="loadWorkspace">
-        {{ $t('Refresh') }}
-      </el-button>
+      <div class="heading-actions">
+        <el-button @click="loadWorkspace">
+          {{ $t('Refresh') }}
+        </el-button>
+        <el-button @click="personaDialogOpen = true">
+          {{ $t('New persona') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :disabled="!approvedPersonas.length"
+          @click="openProjectDialog"
+        >
+          {{ $t('New video project') }}
+        </el-button>
+      </div>
     </div>
 
     <el-alert
@@ -146,12 +158,20 @@
               <h2>{{ selectedProject.brief.title }}</h2>
               <p>{{ selectedProject.brief.objective }}</p>
             </div>
-            <el-tag
-              effect="plain"
-              :type="statusType(selectedProject.status)"
-            >
-              {{ $t(selectedProject.status) }}
-            </el-tag>
+            <div class="detail-actions">
+              <el-button
+                size="small"
+                @click="storyboardDialogOpen = true"
+              >
+                {{ $t('New storyboard') }}
+              </el-button>
+              <el-tag
+                effect="plain"
+                :type="statusType(selectedProject.status)"
+              >
+                {{ $t(selectedProject.status) }}
+              </el-tag>
+            </div>
           </div>
 
           <dl class="brief-grid">
@@ -192,13 +212,22 @@
                     <strong>{{ storyboard.storyboard.title }}</strong>
                     <span>{{ $t('Revision') }} {{ storyboard.revision }}</span>
                   </div>
-                  <el-tag
-                    size="small"
-                    effect="plain"
-                    :type="statusType(storyboard.status)"
-                  >
-                    {{ $t(storyboard.status) }}
-                  </el-tag>
+                  <div class="revision-actions">
+                    <el-button
+                      v-if="authStore.isAdmin && storyboard.status === 'draft'"
+                      size="small"
+                      @click="approveStoryboard(storyboard.version_id)"
+                    >
+                      {{ $t('Approve') }}
+                    </el-button>
+                    <el-tag
+                      size="small"
+                      effect="plain"
+                      :type="statusType(storyboard.status)"
+                    >
+                      {{ $t(storyboard.status) }}
+                    </el-tag>
+                  </div>
                 </div>
                 <div class="shot-strip">
                   <div
@@ -211,6 +240,15 @@
                       <strong>{{ shot.purpose }}</strong>
                       <small>{{ $t(shot.workflow_mode) }} · {{ shot.duration_seconds }}s</small>
                     </div>
+                    <el-button
+                      v-if="storyboard.status === 'approved' && shot.shot_id"
+                      class="compile-button"
+                      size="small"
+                      text
+                      @click="compileShot(storyboard.version_id, shot.shot_id)"
+                    >
+                      {{ $t('Compile shot') }}
+                    </el-button>
                   </div>
                 </div>
               </article>
@@ -259,12 +297,21 @@
               <h2>{{ selectedPersona.spec.identity.name }}</h2>
               <p>{{ selectedPersona.spec.audience_segments.join(', ') }}</p>
             </div>
-            <el-tag
-              effect="plain"
-              :type="statusType(selectedPersona.status)"
-            >
-              {{ $t(selectedPersona.status) }}
-            </el-tag>
+            <div class="detail-actions">
+              <el-button
+                v-if="authStore.isAdmin && selectedPersona.status === 'draft'"
+                size="small"
+                @click="approvePersona(selectedPersona.version_id)"
+              >
+                {{ $t('Approve') }}
+              </el-button>
+              <el-tag
+                effect="plain"
+                :type="statusType(selectedPersona.status)"
+              >
+                {{ $t(selectedPersona.status) }}
+              </el-tag>
+            </div>
           </div>
 
           <dl class="brief-grid persona-grid">
@@ -334,16 +381,429 @@
         </div>
       </main>
     </section>
+
+    <el-dialog
+      v-model="personaDialogOpen"
+      :title="$t('New video persona')"
+      width="min(720px, 94vw)"
+    >
+      <el-form
+        label-position="top"
+        class="studio-form two-column-form"
+        @submit.prevent="submitPersona"
+      >
+        <el-form-item
+          :label="$t('Persona name')"
+          required
+        >
+          <el-input
+            v-model="personaForm.name"
+            maxlength="160"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Brand name')"
+          required
+        >
+          <el-input
+            v-model="personaForm.brandName"
+            maxlength="160"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Markets, comma separated')"
+          required
+        >
+          <el-input v-model="personaForm.markets" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Languages, comma separated')"
+          required
+        >
+          <el-input v-model="personaForm.languages" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Audience segments')"
+          required
+        >
+          <el-input v-model="personaForm.audiences" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Default workflow')"
+          required
+        >
+          <el-select v-model="personaForm.defaultWorkflow">
+            <el-option
+              v-for="option in workflowOptions"
+              :key="option"
+              :label="$t(option)"
+              :value="option"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          :label="$t('Value propositions')"
+          required
+        >
+          <el-input
+            v-model="personaForm.valuePropositions"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Calls to action')"
+          required
+        >
+          <el-input
+            v-model="personaForm.callsToAction"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Tone')"
+          required
+        >
+          <el-input v-model="personaForm.tone" />
+        </el-form-item>
+        <el-form-item :label="$t('Prohibited claims')">
+          <el-input v-model="personaForm.prohibitedClaims" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Visual style')"
+          required
+        >
+          <el-input v-model="personaForm.visualStyle" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Camera language')"
+          required
+        >
+          <el-input v-model="personaForm.cameraLanguage" />
+        </el-form-item>
+        <button
+          class="sr-only"
+          type="submit"
+        >
+          {{ $t('Create persona') }}
+        </button>
+      </el-form>
+      <template #footer>
+        <el-button @click="personaDialogOpen = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          @click="submitPersona"
+        >
+          {{ $t('Create persona') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="projectDialogOpen"
+      :title="$t('New video project')"
+      width="min(720px, 94vw)"
+    >
+      <el-form
+        label-position="top"
+        class="studio-form two-column-form"
+        @submit.prevent="submitProject"
+      >
+        <el-form-item
+          class="full-field"
+          :label="$t('Approved persona')"
+          required
+        >
+          <el-select v-model="projectForm.personaVersionId">
+            <el-option
+              v-for="persona in approvedPersonas"
+              :key="persona.version_id"
+              :label="persona.spec.identity.name"
+              :value="persona.version_id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          :label="$t('Project title')"
+          required
+        >
+          <el-input
+            v-model="projectForm.title"
+            maxlength="200"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Language')"
+          required
+        >
+          <el-input
+            v-model="projectForm.language"
+            maxlength="35"
+          />
+        </el-form-item>
+        <el-form-item
+          class="full-field"
+          :label="$t('Objective')"
+          required
+        >
+          <el-input
+            v-model="projectForm.objective"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item
+          class="full-field"
+          :label="$t('Product summary')"
+          required
+        >
+          <el-input
+            v-model="projectForm.productSummary"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Target audience')"
+          required
+        >
+          <el-input v-model="projectForm.targetAudience" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Target duration')"
+          required
+        >
+          <el-input-number
+            v-model="projectForm.duration"
+            :min="1"
+            :max="3600"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Markets, comma separated')"
+          required
+        >
+          <el-input v-model="projectForm.markets" />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Channels, comma separated')"
+          required
+        >
+          <el-input v-model="projectForm.channels" />
+        </el-form-item>
+        <el-form-item
+          class="full-field"
+          :label="$t('Knowledge record IDs')"
+        >
+          <el-input
+            v-model="projectForm.evidenceRecordIds"
+            type="textarea"
+            :rows="2"
+            :placeholder="$t('One approved knowledge record UUID per line')"
+          />
+        </el-form-item>
+        <button
+          class="sr-only"
+          type="submit"
+        >
+          {{ $t('Create project') }}
+        </button>
+      </el-form>
+      <template #footer>
+        <el-button @click="projectDialogOpen = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          @click="submitProject"
+        >
+          {{ $t('Create project') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="storyboardDialogOpen"
+      :title="$t('New storyboard revision')"
+      width="min(680px, 94vw)"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        :title="$t('This first production form creates one shot. Add later revisions for additional shots.')"
+        show-icon
+      />
+      <el-form
+        label-position="top"
+        class="studio-form two-column-form dialog-form-gap"
+        @submit.prevent="submitStoryboard"
+      >
+        <el-form-item
+          :label="$t('Storyboard title')"
+          required
+        >
+          <el-input
+            v-model="storyboardForm.title"
+            maxlength="200"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Shot purpose')"
+          required
+        >
+          <el-input
+            v-model="storyboardForm.purpose"
+            maxlength="160"
+          />
+        </el-form-item>
+        <el-form-item
+          :label="$t('Workflow')"
+          required
+        >
+          <el-select v-model="storyboardForm.workflowMode">
+            <el-option
+              v-for="option in textWorkflowOptions"
+              :key="option"
+              :label="$t(option)"
+              :value="option"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item
+          :label="$t('Duration seconds')"
+          required
+        >
+          <el-input-number
+            v-model="storyboardForm.duration"
+            :min="1"
+            :max="120"
+          />
+        </el-form-item>
+        <el-form-item
+          class="full-field"
+          :label="$t('Visual direction')"
+          required
+        >
+          <el-input
+            v-model="storyboardForm.visualPrompt"
+            type="textarea"
+            :rows="3"
+          />
+        </el-form-item>
+        <el-form-item
+          class="full-field"
+          :label="$t('Motion direction')"
+        >
+          <el-input
+            v-model="storyboardForm.motionPrompt"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item :label="$t('Spoken copy')">
+          <el-input
+            v-model="storyboardForm.spokenCopy"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item :label="$t('On-screen copy')">
+          <el-input
+            v-model="storyboardForm.onScreenCopy"
+            type="textarea"
+            :rows="2"
+          />
+        </el-form-item>
+        <el-form-item
+          class="full-field"
+          :label="$t('Business claim')"
+        >
+          <el-input v-model="storyboardForm.businessClaim" />
+        </el-form-item>
+        <el-form-item
+          v-if="storyboardForm.businessClaim.trim()"
+          class="full-field"
+          :label="$t('Claim evidence')"
+          required
+        >
+          <el-select
+            v-model="storyboardForm.claimEvidenceIds"
+            multiple
+          >
+            <el-option
+              v-for="evidence in selectedProject?.evidence || []"
+              :key="evidence.id"
+              :label="evidence.title"
+              :value="evidence.id"
+            />
+          </el-select>
+        </el-form-item>
+        <button
+          class="sr-only"
+          type="submit"
+        >
+          {{ $t('Create storyboard') }}
+        </button>
+      </el-form>
+      <template #footer>
+        <el-button @click="storyboardDialogOpen = false">
+          {{ $t('Cancel') }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          @click="submitStoryboard"
+        >
+          {{ $t('Create storyboard') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="receiptDialogOpen"
+      :title="$t('Compiled shot receipt')"
+      width="min(560px, 94vw)"
+    >
+      <div
+        v-if="compiledReceipt"
+        class="receipt-grid"
+      >
+        <div><span>{{ $t('Mode') }}</span><strong>{{ $t(compiledReceipt.mode) }}</strong></div>
+        <div><span>{{ $t('Sensitivity') }}</span><strong>{{ compiledReceipt.sensitivity }}</strong></div>
+        <div class="full-field">
+          <span>{{ $t('Prompt hash') }}</span><code>{{ compiledReceipt.prompt_hash }}</code>
+        </div>
+        <div class="full-field">
+          <span>{{ $t('Evidence snapshot hash') }}</span><code>{{ compiledReceipt.evidence_snapshot_hash }}</code>
+        </div>
+      </div>
+      <el-alert
+        type="success"
+        :closable="false"
+        :title="$t('The protected provider prompt remains on the backend.')"
+        show-icon
+      />
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { videoApi } from '@/api/video'
+import { translate } from '@/i18n'
+import { useAuthStore } from '@/stores/auth'
 import type {
+  CompiledShotReceipt,
   Paginated,
   VideoPersonaRevision,
+  VideoWorkflowMode,
   VideoProject,
   VideoProjectDetail,
 } from '@/types/video'
@@ -351,19 +811,81 @@ import type {
 type TagType = 'success' | 'warning' | 'info' | 'danger'
 
 const loading = ref(false)
+const submitting = ref(false)
 const loadError = ref(false)
 const activeSection = ref<'projects' | 'personas'>('projects')
+const personaDialogOpen = ref(false)
+const projectDialogOpen = ref(false)
+const storyboardDialogOpen = ref(false)
+const receiptDialogOpen = ref(false)
 const personaResult = ref<Paginated<VideoPersonaRevision>>({ items: [], total: 0, limit: 50, offset: 0 })
 const projectResult = ref<Paginated<VideoProject>>({ items: [], total: 0, limit: 50, offset: 0 })
 const selectedProject = ref<VideoProjectDetail | null>(null)
 const selectedPersona = ref<VideoPersonaRevision | null>(null)
 const personaVersions = ref<VideoPersonaRevision[]>([])
+const compiledReceipt = ref<CompiledShotReceipt | null>(null)
+const authStore = useAuthStore()
+
+const workflowOptions: VideoWorkflowMode[] = [
+  'auto',
+  'text_to_video',
+  'text_to_image_then_image_to_video',
+  'image_to_video',
+  'reference_to_video',
+]
+const textWorkflowOptions: VideoWorkflowMode[] = [
+  'auto',
+  'text_to_video',
+  'text_to_image_then_image_to_video',
+]
+
+const personaForm = reactive({
+  name: '',
+  brandName: '',
+  markets: '',
+  languages: '',
+  audiences: '',
+  defaultWorkflow: 'text_to_video' as VideoWorkflowMode,
+  valuePropositions: '',
+  callsToAction: '',
+  tone: '',
+  prohibitedClaims: '',
+  visualStyle: '',
+  cameraLanguage: '',
+})
+const projectForm = reactive({
+  personaVersionId: '',
+  title: '',
+  objective: '',
+  productSummary: '',
+  targetAudience: '',
+  markets: '',
+  channels: '',
+  language: 'en-US',
+  duration: 15,
+  evidenceRecordIds: '',
+})
+const storyboardForm = reactive({
+  title: '',
+  purpose: '',
+  workflowMode: 'text_to_video' as VideoWorkflowMode,
+  duration: 8,
+  visualPrompt: '',
+  motionPrompt: '',
+  spokenCopy: '',
+  onScreenCopy: '',
+  businessClaim: '',
+  claimEvidenceIds: [] as string[],
+})
 
 const approvedPersonaCount = computed(
   () => personaResult.value.items.filter((item) => item.status === 'approved').length,
 )
 const approvedStoryboardCount = computed(
   () => selectedProject.value?.storyboards.filter((item) => item.status === 'approved').length || 0,
+)
+const approvedPersonas = computed(
+  () => personaResult.value.items.filter((item) => item.status === 'approved'),
 )
 
 async function loadWorkspace() {
@@ -415,6 +937,224 @@ async function selectPersona(personaId: string) {
   }
 }
 
+function openProjectDialog() {
+  if (!projectForm.personaVersionId) {
+    projectForm.personaVersionId = approvedPersonas.value[0]?.version_id || ''
+  }
+  projectDialogOpen.value = true
+}
+
+async function submitPersona() {
+  const required = [
+    personaForm.name,
+    personaForm.brandName,
+    personaForm.markets,
+    personaForm.languages,
+    personaForm.audiences,
+    personaForm.valuePropositions,
+    personaForm.callsToAction,
+    personaForm.tone,
+    personaForm.visualStyle,
+    personaForm.cameraLanguage,
+  ]
+  if (required.some((value) => !value.trim())) {
+    ElMessage.warning(translate('Complete every required persona field.'))
+    return
+  }
+  submitting.value = true
+  try {
+    const created = await videoApi.createPersona({
+      idempotency_key: idempotencyKey('persona'),
+      spec: {
+        identity: {
+          name: personaForm.name.trim(),
+          brand_name: personaForm.brandName.trim(),
+          markets: splitValues(personaForm.markets),
+          languages: splitValues(personaForm.languages),
+        },
+        audience_segments: splitValues(personaForm.audiences),
+        narrative: {
+          tone: splitValues(personaForm.tone),
+          value_propositions: splitValues(personaForm.valuePropositions),
+          calls_to_action: splitValues(personaForm.callsToAction),
+          prohibited_claims: splitValues(personaForm.prohibitedClaims),
+        },
+        visual_bible: {
+          style: splitValues(personaForm.visualStyle),
+          palette: [],
+          camera_language: splitValues(personaForm.cameraLanguage),
+          forbidden_visuals: [],
+        },
+        reference_asset_ids: [],
+        default_workflow: personaForm.defaultWorkflow,
+      },
+    })
+    personaDialogOpen.value = false
+    await loadWorkspace()
+    activeSection.value = 'personas'
+    await selectPersona(created.persona_id)
+    ElMessage.success(translate('Video persona created for review.'))
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitProject() {
+  const required = [
+    projectForm.personaVersionId,
+    projectForm.title,
+    projectForm.objective,
+    projectForm.productSummary,
+    projectForm.targetAudience,
+    projectForm.markets,
+    projectForm.channels,
+    projectForm.language,
+  ]
+  if (required.some((value) => !value.trim())) {
+    ElMessage.warning(translate('Complete every required project field.'))
+    return
+  }
+  submitting.value = true
+  try {
+    const created = await videoApi.createProject({
+      idempotency_key: idempotencyKey('project'),
+      persona_version_id: projectForm.personaVersionId,
+      brief: {
+        title: projectForm.title.trim(),
+        objective: projectForm.objective.trim(),
+        product_summary: projectForm.productSummary.trim(),
+        target_audience: projectForm.targetAudience.trim(),
+        markets: splitValues(projectForm.markets),
+        channels: splitValues(projectForm.channels),
+        language: projectForm.language.trim(),
+        target_duration_seconds: projectForm.duration,
+      },
+      evidence_record_ids: splitValues(projectForm.evidenceRecordIds),
+    })
+    projectDialogOpen.value = false
+    activeSection.value = 'projects'
+    await loadWorkspace()
+    await selectProject(created.id)
+    ElMessage.success(translate('Video project created.'))
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitStoryboard() {
+  if (!selectedProject.value) return
+  const required = [
+    storyboardForm.title,
+    storyboardForm.purpose,
+    storyboardForm.visualPrompt,
+  ]
+  if (required.some((value) => !value.trim())) {
+    ElMessage.warning(translate('Complete every required storyboard field.'))
+    return
+  }
+  if (
+    storyboardForm.businessClaim.trim()
+    && !storyboardForm.claimEvidenceIds.length
+  ) {
+    ElMessage.warning(translate('Select approved evidence for every business claim.'))
+    return
+  }
+  submitting.value = true
+  try {
+    await videoApi.createStoryboard(selectedProject.value.id, {
+      idempotency_key: idempotencyKey('storyboard'),
+      storyboard: {
+        title: storyboardForm.title.trim(),
+        total_duration_seconds: storyboardForm.duration,
+        shots: [{
+          sequence: 1,
+          duration_seconds: storyboardForm.duration,
+          purpose: storyboardForm.purpose.trim(),
+          workflow_mode: storyboardForm.workflowMode,
+          visual_prompt: storyboardForm.visualPrompt.trim(),
+          motion_prompt: storyboardForm.motionPrompt.trim(),
+          spoken_copy: storyboardForm.spokenCopy.trim(),
+          on_screen_copy: storyboardForm.onScreenCopy.trim(),
+          reference_asset_ids: [],
+          business_claims: storyboardForm.businessClaim.trim()
+            ? [storyboardForm.businessClaim.trim()]
+            : [],
+          claim_evidence_ids: storyboardForm.claimEvidenceIds,
+          constraints: [],
+        }],
+      },
+    })
+    storyboardDialogOpen.value = false
+    await selectProject(selectedProject.value.id)
+    ElMessage.success(translate('Storyboard revision created for review.'))
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function approvePersona(versionId: string) {
+  const confirmed = await confirmAction(
+    translate('Approve this exact persona revision for video projects?'),
+    translate('Approve persona'),
+  )
+  if (!confirmed) return
+  await videoApi.approvePersona(versionId)
+  if (selectedPersona.value) await selectPersona(selectedPersona.value.persona_id)
+  personaResult.value = await videoApi.listPersonas()
+  ElMessage.success(translate('Persona revision approved.'))
+}
+
+async function approveStoryboard(versionId: string) {
+  if (!selectedProject.value) return
+  const confirmed = await confirmAction(
+    translate('Approve this exact storyboard revision for generation?'),
+    translate('Approve storyboard'),
+  )
+  if (!confirmed) return
+  await videoApi.approveStoryboard(versionId)
+  await selectProject(selectedProject.value.id)
+  ElMessage.success(translate('Storyboard revision approved.'))
+}
+
+async function compileShot(storyboardVersionId: string, shotId: string) {
+  if (!selectedProject.value) return
+  submitting.value = true
+  try {
+    compiledReceipt.value = await videoApi.compileShot(
+      selectedProject.value.id,
+      storyboardVersionId,
+      shotId,
+    )
+    receiptDialogOpen.value = true
+  } finally {
+    submitting.value = false
+  }
+}
+
+function splitValues(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function idempotencyKey(scope: string) {
+  return `video:${scope}:${crypto.randomUUID()}`
+}
+
+async function confirmAction(message: string, title: string) {
+  try {
+    await ElMessageBox.confirm(message, title, {
+      confirmButtonText: translate('Approve'),
+      cancelButtonText: translate('Cancel'),
+      type: 'warning',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function statusType(value: string): TagType {
   if (value === 'approved') return 'success'
   if (value === 'draft') return 'warning'
@@ -436,6 +1176,19 @@ onMounted(loadWorkspace)
 
 .studio-heading {
   align-items: flex-end;
+}
+
+.heading-actions,
+.detail-actions,
+.revision-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heading-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .studio-heading p {
@@ -667,7 +1420,7 @@ onMounted(loadWorkspace)
 
 .shot-item {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 }
@@ -778,6 +1531,72 @@ onMounted(loadWorkspace)
   min-height: 520px;
 }
 
+.studio-form {
+  margin-top: 8px;
+}
+
+.two-column-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.two-column-form .full-field {
+  grid-column: 1 / -1;
+}
+
+.receipt-grid .full-field {
+  grid-column: 1 / -1;
+}
+
+.studio-form :deep(.el-select),
+.studio-form :deep(.el-input-number) {
+  width: 100%;
+}
+
+.dialog-form-gap {
+  margin-top: 18px;
+}
+
+.receipt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.receipt-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+}
+
+.receipt-grid span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.receipt-grid strong,
+.receipt-grid code {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.receipt-grid code {
+  overflow-wrap: anywhere;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 @media (max-width: 980px) {
   .studio-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -817,6 +1636,10 @@ onMounted(loadWorkspace)
   }
 
   .studio-heading .el-button {
+    flex: 1;
+  }
+
+  .heading-actions {
     width: 100%;
   }
 
@@ -835,8 +1658,15 @@ onMounted(loadWorkspace)
 
   .brief-grid,
   .evidence-grid,
-  .persona-language {
+  .persona-language,
+  .two-column-form,
+  .receipt-grid {
     grid-template-columns: 1fr;
+  }
+
+  .two-column-form .full-field,
+  .receipt-grid .full-field {
+    grid-column: 1;
   }
 }
 </style>
