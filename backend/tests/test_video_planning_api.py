@@ -183,3 +183,82 @@ def test_planning_api_rejects_client_provider_and_approval_fields(api_context):
     )
 
     assert response.status_code == 422
+
+
+def test_planning_api_exposes_owner_scoped_paginated_read_models(api_context):
+    client, db, user = api_context
+    enable_planning_services(db)
+    created = client.post("/api/v1/video/personas", json=persona_payload())
+    assert created.status_code == 201
+    persona = created.json()
+
+    personas = client.get("/api/v1/video/personas?limit=20&offset=0")
+    assert personas.status_code == 200
+    assert personas.json()["total"] == 1
+    assert personas.json()["items"][0]["persona_id"] == persona["persona_id"]
+
+    versions = client.get(
+        f"/api/v1/video/personas/{persona['persona_id']}/versions"
+    )
+    assert versions.status_code == 200
+    assert versions.json()["items"][0]["version_id"] == persona["version_id"]
+
+    user.is_superuser = True
+    db.commit()
+    approved = client.post(
+        f"/api/v1/video/persona-versions/{persona['version_id']}/approve",
+        json={},
+    )
+    assert approved.status_code == 200
+    project_response = client.post(
+        "/api/v1/video/projects",
+        json={
+            "idempotency_key": "video-project:read-models",
+            "persona_version_id": persona["version_id"],
+            "brief": {
+                "title": "Read model project",
+                "objective": "Support the video studio UI",
+                "product_summary": "AX-7 industrial controller",
+                "target_audience": "Industrial distributors",
+                "markets": ["DE"],
+                "channels": ["website"],
+                "language": "de-DE",
+                "target_duration_seconds": 6,
+            },
+            "evidence_record_ids": [],
+        },
+    )
+    assert project_response.status_code == 201
+    project = project_response.json()
+    storyboard_response = client.post(
+        f"/api/v1/video/projects/{project['id']}/storyboards",
+        json={
+            "idempotency_key": "storyboard:read-models",
+            "storyboard": {
+                "title": "Read model storyboard",
+                "total_duration_seconds": 6,
+                "shots": [
+                    {
+                        "sequence": 1,
+                        "duration_seconds": 6,
+                        "purpose": "overview",
+                        "workflow_mode": "text_to_video",
+                        "visual_prompt": "Show the controller in a factory",
+                    }
+                ],
+            },
+        },
+    )
+    assert storyboard_response.status_code == 201
+
+    projects = client.get("/api/v1/video/projects?limit=20&offset=0")
+    assert projects.status_code == 200
+    assert projects.json()["total"] == 1
+    assert projects.json()["items"][0]["id"] == project["id"]
+
+    detail = client.get(f"/api/v1/video/projects/{project['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["id"] == project["id"]
+    assert detail.json()["storyboards"][0]["version_id"] == (
+        storyboard_response.json()["version_id"]
+    )
