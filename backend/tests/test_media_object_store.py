@@ -5,6 +5,7 @@ from app.config import Settings
 from app.integrations.object_store import (
     ObjectStoreConfigurationError,
     ObjectStoreIntegrityError,
+    PresignedDownload,
     PresignedUpload,
     S3CompatibleMediaObjectStore,
 )
@@ -29,6 +30,16 @@ class FakeS3Client:
             "url": "https://objects.example.test/quarantine",
             "fields": dict(kwargs["Fields"]),
         }
+
+    def generate_presigned_url(self, operation, Params, ExpiresIn):
+        self.presign_calls.append(
+            {
+                "operation": operation,
+                "Params": Params,
+                "ExpiresIn": ExpiresIn,
+            }
+        )
+        return "https://objects.example.test/signed-download"
 
     def head_object(self, **kwargs):
         self.head_calls.append(kwargs)
@@ -87,6 +98,58 @@ def test_presigned_upload_is_bound_to_quarantine_constraints():
     )
     assert {"content-length-range": [4096, 4096]} in call["Conditions"]
     assert "acl" not in {key.lower() for key in call["Fields"]}
+
+
+def test_presigned_download_is_short_lived_and_bound_to_asset_namespace():
+    client = FakeS3Client()
+    object_store = store(client)
+
+    result = object_store.create_download(
+        key="assets/ba6e/asset-id",
+        content_type="image/png",
+        download_name="asset-id.png",
+        expires_seconds=120,
+    )
+
+    assert result == PresignedDownload(
+        url="https://objects.example.test/signed-download",
+        expires_seconds=120,
+    )
+    assert client.presign_calls == [
+        {
+            "operation": "get_object",
+            "Params": {
+                "Bucket": "media-assets",
+                "Key": "tenant-media/assets/ba6e/asset-id",
+                "ResponseContentType": "image/png",
+                "ResponseContentDisposition": 'attachment; filename="asset-id.png"',
+            },
+            "ExpiresIn": 120,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "download_name", "expires_seconds"),
+    [
+        ("quarantine/ba6e/asset-id", "asset.png", 120),
+        ("assets/../asset-id", "asset.png", 120),
+        ("assets/ba6e/asset-id", "bad\r\nname.png", 120),
+        ("assets/ba6e/asset-id", "asset.png", 301),
+    ],
+)
+def test_presigned_download_rejects_unsafe_or_overlong_credentials(
+    key,
+    download_name,
+    expires_seconds,
+):
+    with pytest.raises(ObjectStoreConfigurationError):
+        store().create_download(
+            key=key,
+            content_type="image/png",
+            download_name=download_name,
+            expires_seconds=expires_seconds,
+        )
 
 
 def test_head_reads_only_the_quarantine_bucket_and_validates_checksum():

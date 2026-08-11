@@ -1,5 +1,13 @@
-from app.integrations.object_store import PresignedUpload, StoredObjectMetadata
+from uuid import uuid4
+
+from app.config import settings
+from app.integrations.object_store import (
+    PresignedDownload,
+    PresignedUpload,
+    StoredObjectMetadata,
+)
 from app.main import app
+from app.models.database import MediaAsset
 from app.services.media.assets import MediaAssetService
 from app.api.v1.video import get_media_asset_service, get_media_object_store
 
@@ -47,6 +55,13 @@ class FakeUploadStore:
 
     def head(self, key):
         return self.objects[key]
+
+    def create_download(self, **kwargs):
+        self.download = kwargs
+        return PresignedDownload(
+            url="https://objects.example.test/signed-download",
+            expires_seconds=kwargs["expires_seconds"],
+        )
 
 
 def payload(**overrides):
@@ -148,3 +163,69 @@ def test_upload_idempotency_conflict_maps_to_409(api_context):
     assert first.status_code == 201
     assert conflict.status_code == 409
     assert conflict.json()["detail"] == "Upload request conflicts with existing input"
+
+
+def test_download_api_returns_only_short_lived_credential(api_context):
+    client, db, user = api_context
+    store = FakeUploadStore()
+    asset = MediaAsset(
+        org_id=settings.AGENT_ORG_ID,
+        owner_user_id=user.id,
+        kind="image",
+        source="user_upload",
+        storage_backend="s3",
+        storage_key=f"assets/{settings.AGENT_ORG_ID}/download-target",
+        sha256="f" * 64,
+        mime_type="image/png",
+        size_bytes=2048,
+        sensitivity="internal",
+        quarantined=False,
+        scan_status="passed",
+        rights_status="verified",
+        consent_required=False,
+        consent_status="not_required",
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    app.dependency_overrides[get_media_object_store] = lambda: store
+
+    response = client.post(f"/api/v1/video/assets/{asset.id}/download")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "url": "https://objects.example.test/signed-download",
+        "expires_seconds": 120,
+    }
+    assert "storage_key" not in response.text
+    assert "bucket" not in response.text
+
+
+def test_download_api_hides_cross_tenant_asset_location(api_context):
+    client, db, user = api_context
+    asset = MediaAsset(
+        org_id=uuid4(),
+        owner_user_id=user.id,
+        kind="image",
+        source="user_upload",
+        storage_backend="s3",
+        storage_key=f"assets/{uuid4()}/cross-tenant",
+        sha256="f" * 64,
+        mime_type="image/png",
+        size_bytes=2048,
+        sensitivity="internal",
+        quarantined=False,
+        scan_status="passed",
+        rights_status="verified",
+        consent_required=False,
+        consent_status="not_required",
+    )
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    app.dependency_overrides[get_media_object_store] = FakeUploadStore
+
+    response = client.post(f"/api/v1/video/assets/{asset.id}/download")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Media asset not found"
