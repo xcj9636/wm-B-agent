@@ -4,7 +4,7 @@ from datetime import datetime
 from functools import lru_cache
 from hashlib import sha256
 import json
-from typing import Any, Optional
+from typing import Callable, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,7 +25,6 @@ from app.models.database import (
     MediaAsset,
     MediaConsentRecord,
     MediaRightsRecord,
-    MediaScanReport,
     User,
 )
 from app.services.agent_runtime.contracts import (
@@ -44,15 +43,14 @@ from app.services.media.assets import (
 from app.services.media.contracts import (
     AssetConsentStatus,
     AssetRightsStatus,
-    AssetScanStatus,
     MediaAssetKind,
 )
 from app.services.media.review import (
     ConsentEvidenceCommand,
     MediaReviewService,
     RightsEvidenceCommand,
-    ScanEvidenceCommand,
 )
+from app.tasks.media_tasks import inspect_media_asset_task
 
 
 router = APIRouter()
@@ -97,26 +95,16 @@ class MediaAssetResponse(BaseModel):
     created_at: datetime
 
 
-class ScanReviewRequest(BaseModel):
+class InspectionQueueRequest(BaseModel):
+    """Intentionally empty: inspection facts are owned by the worker."""
+
     model_config = ConfigDict(extra="forbid")
 
-    scanner: str = Field(min_length=1, max_length=100)
-    scanner_version: str = Field(min_length=1, max_length=100)
-    status: AssetScanStatus
-    asset_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    findings: dict[str, Any] = Field(default_factory=dict)
 
-
-class ScanReviewResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
+class InspectionQueueResponse(BaseModel):
     asset_id: UUID
-    scanner: str
-    scanner_version: str
+    task_id: str
     status: str
-    asset_sha256: str
-    created_at: datetime
 
 
 class RightsReviewRequest(BaseModel):
@@ -189,6 +177,21 @@ def get_media_asset_service(db: Session = Depends(get_db)) -> MediaAssetService:
 
 def get_media_review_service(db: Session = Depends(get_db)) -> MediaReviewService:
     return MediaReviewService(db)
+
+
+class MediaInspectionDispatchUnavailable(RuntimeError):
+    pass
+
+
+def dispatch_media_inspection(asset_id: UUID, requested_by_user_id: int) -> str:
+    if not settings.MEDIA_INSPECTION_ENABLED:
+        raise MediaInspectionDispatchUnavailable("Media inspection is disabled")
+    result = inspect_media_asset_task.delay(str(asset_id), requested_by_user_id)
+    return str(result.id)
+
+
+def get_media_inspection_dispatcher() -> Callable[[UUID, int], str]:
+    return dispatch_media_inspection
 
 
 @lru_cache(maxsize=1)
@@ -335,23 +338,37 @@ async def complete_upload(
 
 
 @router.post(
-    "/assets/{asset_id}/reviews/scan",
-    response_model=ScanReviewResponse,
-    status_code=status.HTTP_201_CREATED,
+    "/assets/{asset_id}/inspection",
+    response_model=InspectionQueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
-async def record_scan_review(
+async def queue_media_inspection(
     asset_id: UUID,
-    request: ScanReviewRequest,
+    request: InspectionQueueRequest,
     current_user: User = Depends(get_current_active_user),
-    review_service: MediaReviewService = Depends(get_media_review_service),
+    asset_service: MediaAssetService = Depends(get_media_asset_service),
+    dispatcher: Callable[[UUID, int], str] = Depends(
+        get_media_inspection_dispatcher
+    ),
 ):
     try:
-        report: MediaScanReport = review_service.record_scan(
-            asset_id,
-            ScanEvidenceCommand(**request.model_dump()),
-            _principal(current_user),
+        principal = _principal(current_user)
+        if "admin" not in principal.roles:
+            raise MediaAssetForbidden(
+                "Media inspection dispatch requires an administrator"
+            )
+        asset_service.policy_snapshot(asset_id, principal)
+        task_id = dispatcher(asset_id, current_user.id)
+        return InspectionQueueResponse(
+            asset_id=asset_id,
+            task_id=task_id,
+            status="queued",
         )
-        return ScanReviewResponse.model_validate(report)
+    except MediaInspectionDispatchUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Media inspection is unavailable",
+        ) from exc
     except Exception as exc:
         _raise_review_http_error(exc)
 
