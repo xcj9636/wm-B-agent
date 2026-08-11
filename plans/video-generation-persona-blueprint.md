@@ -1,6 +1,6 @@
 # B-agent 视频生成 Persona 与媒体生产链路蓝图
 
-> 状态：Reviewed — 3 Critical + 6 High + 1 Medium findings incorporated  
+> 状态：Step 1-3 核心链路已实现，Provider Runtime 与持久 Generation Job 待实施
 > 日期：2026-08-11  
 > 范围：视频 Persona、文生图、图生视频、文生视频、参考素材生成、媒体资产、异步任务、成本与并发、安全合规、前端视频工坊  
 > 实施原则：业务核心 provider-neutral；模型能力动态发现并固定快照；先建资产与安全边界，再开放生成；每一步可独立发布、灰度和回滚。
@@ -20,8 +20,13 @@
 - 已完成受控下载：只为晋级且证据完整的资产签发 30–300 秒读凭据；`confidential` 与 `restricted` 使用独立权限矩阵，越权与跨组织统一隐藏资产存在性，响应不返回独立 bucket/key 字段。
 - 已完成缩略图派生：API 只排队、不接收 FFmpeg 参数；Worker 使用固定、无 shell、禁网络协议的 FFmpeg 命令，派生 JPEG 经 hash/size/MIME/KMS 复核后写入资产桶，并记录 `thumbnail_of` 血缘和继承的敏感/版权/同意状态。
 - 已完成软删除与对象生命周期：数据库资产和血缘审计行永久保留；有效同意证据与存活派生引用阻断删除；超过保留期后由 Beat/Worker 在持久管理员身份下幂等删除对象并记录清理时间。
-- 当前验证证据：新增下载访问、缩略图和生命周期服务组合 89% coverage；全量后端 458 passed、1 skipped；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0023_media_review_evidence`，并通过 `0023 → 0022 → 0023` 往返。
-- **下一阶段**：Step 3 Persona 持久化、版本审批和项目绑定；真实 S3/FFmpeg 并发、故障注入与容量验收仍属于发布门禁，不以本地单元测试替代。
+- **Step 3 核心链路已完成（2026-08-11）**：新增不可变 Persona revision、独立 Persona/Storyboard 审批、固定 Persona 快照的 Video Project、RAG 证据白名单快照、确定性 Prompt 编译器和 provider-neutral `GenerationIntent`。
+- 编译器只从数据库中的已批准快照重建输入；Prompt injection 被固定系统约束包围；业务主张只能引用项目证据；每次编译前重新检查当前 RAG ACL、参考素材扫描、版权与同意状态。
+- 已提供认证创建、审批、分页列表、版本历史、项目详情和单 Shot 编译 API。浏览器只收到 mode、敏感级别、参考资产 ID 和哈希回执，不收到完整 provider prompt。
+- 已新增中英文 `Video Studio`：可创建 Persona/项目/单 Shot 分镜、执行管理员审批、查看证据与版本历史并编译安全回执；统一 API client 自动使用可热切换的后端 Base URL。
+- 部署已接入 `MEDIA_PLANNING_ENABLED` 与 `MEDIA_SUBMIT_ENABLED`，默认均为 `false`。规划开关只开放规划面，外部媒体提交仍保持关闭。
+- 当前验证证据：视频核心服务 86% coverage；全量后端 476 passed、1 skipped；前端 44 passed，Vue/TypeScript 与生产构建通过；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0024_video_personas`，并通过 `0024 → 0023 → 0024` 往返。
+- **下一阶段**：Step 4 媒体能力目录、secret-safe 热配置和 Provider Adapter；随后实现持久 Generation Job、回调收件箱、配额/成本与 SSE。字段级数据库加密、真实 S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
 
 ## 1. 执行摘要
 
@@ -369,18 +374,21 @@ pending
 
 ## 8. API 与前端视频工坊
 
-### 8.1 API 草案
+### 8.1 已实现规划 API 与后续运行 API
 
 | API | 用途 |
 | --- | --- |
-| `POST/GET/PATCH /api/v1/video/personas` | Persona 草稿与列表；PATCH 产生新 revision |
-| `POST /api/v1/video/personas/{id}/approve` | 审批并发布 Persona 版本 |
-| `POST/GET /api/v1/video/projects` | 创建/查看视频项目 |
-| `POST /api/v1/video/projects/{id}/plan` | 生成结构化 Brief/Storyboard 草稿 |
-| `POST /api/v1/video/projects/{id}/approve-storyboard` | 固定 Storyboard revision |
+| `POST/GET /api/v1/video/personas` | 创建 Persona revision；分页读取每个 Persona 的最新版本 |
+| `POST/GET /api/v1/video/personas/{id}/versions` | 创建新 revision；分页读取不可变版本历史 |
+| `POST /api/v1/video/persona-versions/{id}/approve` | reviewer/admin 审批精确 Persona revision |
+| `POST/GET /api/v1/video/projects` | 创建固定 Persona 与证据快照的项目；分页读取项目 |
+| `GET /api/v1/video/projects/{id}` | 读取项目、证据摘要和 Storyboard 版本历史 |
+| `POST /api/v1/video/projects/{id}/storyboards` | 创建不可变 Storyboard revision |
+| `POST /api/v1/video/storyboard-versions/{id}/approve` | reviewer/admin 审批精确 Storyboard revision |
+| `POST /api/v1/video/projects/{project_id}/storyboards/{version_id}/shots/{shot_id}/compile` | 服务端编译 GenerationIntent；响应不包含完整 Prompt |
 | `POST /api/v1/video/assets/uploads` | 创建预签名上传意图 |
 | `POST /api/v1/video/assets/uploads/{id}/complete` | 校验并登记资产 |
-| `POST /api/v1/video/shots/{id}/generations` | 创建 T2I/I2V/T2V generation；Reference 能力在 V1.1 才开放 |
+| `POST /api/v1/video/shots/{id}/generations` | **后续 Step 6/7**：创建 T2I/I2V/T2V generation；Reference 能力在 V1.1 才开放 |
 | `GET /api/v1/video/jobs/{id}` | 获取持久任务快照 |
 | `GET /api/v1/video/jobs/{id}/events` | SSE 回放，支持 `Last-Event-ID` |
 | `POST /api/v1/video/jobs/{id}/cancel` | 请求取消，返回实际取消语义 |
@@ -390,7 +398,7 @@ pending
 | `POST /api/v1/admin/media/probe` | 连通性与模型可用性探测 |
 | `POST /api/v1/webhooks/media/{provider}` | 回调收件箱；不直接信任完成状态 |
 
-所有创建/审批/取消 API 需要幂等键；身份、组织、敏感等级、模型 allowlist 和预算均由服务端派生。
+Persona、Project、Storyboard 和后续 Job 创建使用持久幂等键；当前审批接口对同一已批准 revision 状态幂等，后续外部提交/取消还必须携带独立幂等键。身份、组织、敏感等级、模型 allowlist 和预算均由服务端派生。
 
 ### 8.2 Video Studio 信息架构
 
@@ -449,6 +457,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 
 ### Step 3 — Persona、证据绑定与 Prompt 编译器
 
+- **状态**：核心实现已完成；字段级数据库加密与生产密钥轮换仍是发布门禁
 - **分支**：`feature/video-persona-compiler`
 - **依赖**：Step 2；可与 Step 4 并行开发，但迁移按序合并
 - **主要文件**：
@@ -527,6 +536,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 
 ### Step 8 — 前端视频工坊与管理员热配置
 
+- **状态**：规划工作区已提前完成；Provider 能力、Job/SSE、成本和管理员媒体运行时页面等待 Step 4-7
 - **分支**：`feature/video-studio-ui`
 - **依赖**：Step 7
 - **主要文件**：

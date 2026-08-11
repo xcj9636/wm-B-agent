@@ -49,14 +49,16 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **投递验证**：Gmail 校验 `SENT` 标签；Microsoft 使用 Immutable ID 在 Sent Items 中验证同一封邮件。
 - **管理工作台**：ChatGPT 风格的中性响应式界面，支持中文/英文、深浅主题、运行时后端地址和 Vite HMR。
 - **安全媒体资产面**：S3 隔离上传、ClamAV/FFprobe 自动检查、证据驱动晋级、敏感级别受控下载、异步安全缩略图、资产血缘、软删除和延迟对象清理。
+- **视频规划与 Persona**：不可变 Persona/Storyboard 版本、独立审批、固定项目快照、RAG 证据白名单、编译时 ACL 回查、注入隔离和安全 GenerationIntent 回执。
+- **Video Studio**：中英文创建 Persona、项目和单 Shot 分镜，查看版本与证据，执行管理员审批；所有请求自动使用设置页可热切换的后端地址。
 
 ### 当前能力边界
 
 | 状态 | 范围 |
 |---|---|
-| 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox 和死信处置 |
-| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁 |
-| 后续产品化重点 | 将记忆和知识检索按具体外贸业务流编排进 AI Chat、视频 Persona/项目/Provider Job、真实 Provider 与 S3 压测、开放多租户前的隔离改造 |
+| 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
+| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照 |
+| 后续产品化重点 | 媒体 Provider Runtime、持久 Generation Job、回调/成本/配额/SSE、数据库字段级加密、真实 Provider 与 S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -67,7 +69,7 @@ flowchart TB
     USER["外贸团队 / 管理员"]
 
     subgraph EXPERIENCE["体验层"]
-        UI["Vue 3 工作台<br/>Agent / Chat / CRM / Operations"]
+        UI["Vue 3 工作台<br/>Agent / Chat / Video / CRM / Operations"]
         RUNTIME_URL["运行时 API 地址<br/>同源代理或管理员配置"]
     end
 
