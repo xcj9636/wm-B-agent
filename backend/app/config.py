@@ -220,12 +220,20 @@ class Settings(BaseSettings):
             and self.MEDIA_OBJECT_STORE_BACKEND != "s3"
         ):
             raise ValueError("production media uploads require the S3 backend")
-        if self.MEDIA_UPLOAD_ENABLED and self.MEDIA_OBJECT_STORE_BACKEND == "s3":
+        media_storage_enabled = any(
+            (
+                self.MEDIA_UPLOAD_ENABLED,
+                self.MEDIA_INSPECTION_ENABLED,
+                self.MEDIA_THUMBNAIL_ENABLED,
+                self.MEDIA_LIFECYCLE_ENABLED,
+            )
+        )
+        if media_storage_enabled and self.MEDIA_OBJECT_STORE_BACKEND == "s3":
             if (
                 not self.MEDIA_S3_QUARANTINE_BUCKET
                 or not self.MEDIA_S3_ASSET_BUCKET
             ):
-                raise ValueError("S3 media uploads require both media buckets")
+                raise ValueError("S3 media processing requires both media buckets")
             if self.MEDIA_S3_QUARANTINE_BUCKET == self.MEDIA_S3_ASSET_BUCKET:
                 raise ValueError("S3 quarantine and asset buckets must differ")
         if self.MEDIA_INSPECTION_ENABLED:
