@@ -373,3 +373,20 @@ def test_production_media_upload_requires_configured_s3_backend():
         MEDIA_S3_ASSET_BUCKET="media-assets",
     )
     assert configured.MEDIA_OBJECT_STORE_BACKEND == "s3"
+
+
+@pytest.mark.parametrize(
+    "feature_flag",
+    [
+        "MEDIA_INSPECTION_ENABLED",
+        "MEDIA_THUMBNAIL_ENABLED",
+        "MEDIA_LIFECYCLE_ENABLED",
+    ],
+)
+def test_every_media_worker_feature_requires_configured_buckets(feature_flag):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_OBJECT_STORE_BACKEND="s3",
+            **{feature_flag: True},
+        )
