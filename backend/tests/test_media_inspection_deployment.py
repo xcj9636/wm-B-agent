@@ -55,3 +55,12 @@ def test_thumbnail_and_lifecycle_worker_configuration_is_deployable():
         assert f"{setting}=" in env_example
         assert setting in compose
     assert "cleanup_media_assets_task" in celery_worker
+
+
+def test_video_planning_and_submission_flags_are_deployable_and_fail_closed():
+    env_example = (REPOSITORY_ROOT / ".env.example").read_text()
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text()
+
+    for setting in ["MEDIA_PLANNING_ENABLED", "MEDIA_SUBMIT_ENABLED"]:
+        assert f"{setting}=false" in env_example
+        assert compose.count(f"{setting}=${{{setting}:-false}}") >= 2
