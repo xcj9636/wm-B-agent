@@ -17,6 +17,16 @@ class StoredObjectMetadata(BaseModel):
 class MediaObjectStore(Protocol):
     backend_name: str
 
+    def create_upload(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        size_bytes: int,
+        sha256: str,
+        expires_seconds: int = 900,
+    ) -> "PresignedUpload": ...
+
     def head(self, key: str) -> StoredObjectMetadata: ...
 
 

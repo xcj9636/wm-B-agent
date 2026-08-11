@@ -56,7 +56,7 @@ def payload(**overrides):
         "expected_mime_type": "image/png",
         "expected_size_bytes": 2048,
         "expected_sha256": "c" * 64,
-        "sensitivity": "internal",
+        "requested_sensitivity_floor": "internal",
         "consent_required": False,
     }
     values.update(overrides)
@@ -87,6 +87,15 @@ def test_upload_api_rejects_client_routing_fields(api_context):
     )
 
     assert response.status_code == 422
+
+    sensitivity = client.post(
+        "/api/v1/video/assets/uploads",
+        json={
+            **payload(),
+            "sensitivity": "public",
+        },
+    )
+    assert sensitivity.status_code == 422
 
 
 def test_create_and_complete_upload_stays_quarantined(api_context):
