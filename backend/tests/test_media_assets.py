@@ -149,7 +149,7 @@ def test_complete_creates_quarantined_asset_and_is_idempotent(db_session):
     assert asset.storage_key == upload.storage_key
 
 
-def test_asset_promotion_requires_admin_and_all_mandatory_checks(db_session):
+def test_quarantined_asset_policy_snapshot_exposes_pending_review(db_session):
     actor = principal()
     service = MediaAssetService(db_session, upload_enabled=True)
     upload = service.create_upload_intent(
@@ -169,39 +169,7 @@ def test_asset_promotion_requires_admin_and_all_mandatory_checks(db_session):
         ),
     )
 
-    with pytest.raises(MediaAssetForbidden):
-        service.promote_asset(
-            asset.id,
-            actor,
-            scan_status=AssetScanStatus.PASSED,
-            rights_status=AssetRightsStatus.VERIFIED,
-            consent_status=AssetConsentStatus.VALID,
-        )
-
-    admin = principal(
-        user_id=7,
-        org_id=actor.org_id,
-        roles={"admin"},
-    )
-    with pytest.raises(MediaAssetConflict):
-        service.promote_asset(
-            asset.id,
-            admin,
-            scan_status=AssetScanStatus.UNAVAILABLE,
-            rights_status=AssetRightsStatus.VERIFIED,
-            consent_status=AssetConsentStatus.VALID,
-        )
-
-    promoted = service.promote_asset(
-        asset.id,
-        admin,
-        scan_status=AssetScanStatus.PASSED,
-        rights_status=AssetRightsStatus.VERIFIED,
-        consent_status=AssetConsentStatus.VALID,
-    )
-
-    assert promoted.quarantined is False
-    snapshot = service.policy_snapshot(promoted.id, actor)
-    assert snapshot.scan_status == AssetScanStatus.PASSED
-    assert snapshot.rights_status == AssetRightsStatus.VERIFIED
-    assert snapshot.consent_status == AssetConsentStatus.VALID
+    snapshot = service.policy_snapshot(asset.id, actor)
+    assert snapshot.scan_status == AssetScanStatus.PENDING
+    assert snapshot.rights_status == AssetRightsStatus.UNKNOWN
+    assert snapshot.consent_status == AssetConsentStatus.UNKNOWN

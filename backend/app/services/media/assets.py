@@ -160,43 +160,6 @@ class MediaAssetService:
         self._db.refresh(asset)
         return asset
 
-    def promote_asset(
-        self,
-        asset_id: UUID,
-        principal: ExecutionPrincipal,
-        *,
-        scan_status: AssetScanStatus,
-        rights_status: AssetRightsStatus,
-        consent_status: AssetConsentStatus,
-        now: Optional[datetime] = None,
-    ) -> MediaAsset:
-        if "admin" not in principal.roles:
-            raise MediaAssetForbidden("Asset promotion requires an administrator")
-        asset = self._asset(asset_id)
-        if asset.org_id != principal.org_id:
-            raise MediaAssetForbidden("Asset is outside the current organization")
-        if scan_status != AssetScanStatus.PASSED:
-            raise MediaAssetConflict("Asset scan has not passed")
-        if rights_status != AssetRightsStatus.VERIFIED:
-            raise MediaAssetConflict("Asset rights have not been verified")
-        if asset.consent_required and consent_status != AssetConsentStatus.VALID:
-            raise MediaAssetConflict("Required consent is not valid")
-        if not asset.consent_required and consent_status not in {
-            AssetConsentStatus.NOT_REQUIRED,
-            AssetConsentStatus.VALID,
-        }:
-            raise MediaAssetConflict("Consent status is invalid")
-
-        asset.scan_status = scan_status.value
-        asset.rights_status = rights_status.value
-        asset.consent_status = consent_status.value
-        asset.quarantined = False
-        asset.reviewed_by_user_id = principal.user_id
-        asset.reviewed_at = self._naive_utc(now)
-        self._db.commit()
-        self._db.refresh(asset)
-        return asset
-
     def policy_snapshot(
         self,
         asset_id: UUID,
@@ -248,4 +211,3 @@ class MediaAssetService:
         if current.tzinfo is None:
             raise ValueError("media timestamps must be timezone-aware")
         return current.astimezone(timezone.utc).replace(tzinfo=None)
-

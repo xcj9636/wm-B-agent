@@ -1759,9 +1759,30 @@ class MediaAsset(Base):
     rights_status = Column(String(30), nullable=False, default="unknown")
     consent_required = Column(Boolean, nullable=False, default=False)
     consent_status = Column(String(30), nullable=False, default="unknown")
-    scan_report_id = Column(UUID(as_uuid=True), ForeignKey("media_scan_reports.id"))
-    rights_record_id = Column(UUID(as_uuid=True), ForeignKey("media_rights_records.id"))
-    consent_record_id = Column(UUID(as_uuid=True), ForeignKey("media_consent_records.id"))
+    scan_report_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "media_scan_reports.id",
+            name="fk_media_asset_scan_report",
+            use_alter=True,
+        ),
+    )
+    rights_record_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "media_rights_records.id",
+            name="fk_media_asset_rights_record",
+            use_alter=True,
+        ),
+    )
+    consent_record_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "media_consent_records.id",
+            name="fk_media_asset_consent_record",
+            use_alter=True,
+        ),
+    )
     metadata_json = Column(JSON, nullable=False, default=dict)
     reviewed_by_user_id = Column(Integer)
     reviewed_at = Column(DateTime)
