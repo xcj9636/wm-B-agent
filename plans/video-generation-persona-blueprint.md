@@ -11,14 +11,17 @@
 - 上传、规划、外部提交三个开关默认关闭；提交开启时强制依赖上传、规划和独立签名密钥。
 - 当前部署只能声明 `single_organization`；错误的多租户配置在 Settings 校验阶段失败。
 - Worker 验证策略决策时再次检查实时提交开关，管理员 kill switch 会让已签发但尚未执行的决策立即失效。
-- **Step 2 进行中（2026-08-11）**：已新增 `MediaAsset`、`MediaUploadIntent`、`MediaAssetRelation`、`MediaConsentRecord`、`MediaScanReport`、`MediaRightsRecord`，以及 `0022_media_assets`、`0023_media_review_evidence` 迁移。
+- **Step 2 已完成（2026-08-11）**：已新增 `MediaAsset`、`MediaUploadIntent`、`MediaAssetRelation`、`MediaConsentRecord`、`MediaScanReport`、`MediaRightsRecord`，以及 `0022_media_assets`、`0023_media_review_evidence` 迁移。
 - 已完成 S3-compatible 预签名上传、独立 quarantine/asset bucket、服务端 key、精确大小/MIME/hash/SSE 约束、生产配置 fail-closed、provider result URL SSRF/DNS-rebinding 防护，以及认证上传/完成 API。
 - 资产晋级改为证据 ID 驱动：扫描绑定资产哈希，版权和同意记录绑定组织、范围与有效期；对象先复制到 asset bucket 并复核 hash/size/MIME，再删除隔离副本和提交数据库，失败时保持 quarantine。
 - 已完成真实 ClamAV + FFprobe 自动检查链路：S3 隔离对象流式暂存到 0600 随机临时文件并重新计算 SHA-256；命令无 shell、限制超时和输出量；只持久化白名单技术元数据。扫描和 probe 任一 unavailable/rejected 都不能晋级。
 - 客户端提交扫描结论的 API 已移除，替换为只接收空请求体的 202 排队接口；Celery Worker 从数据库重新派生组织、对象 key、哈希、MIME 和大小。生产上传/提交未启用 inspection 时拒绝启动。
 - Worker 容器使用非 root、只读根文件系统、`cap_drop: ALL`、`no-new-privileges` 和 noexec/nosuid/nodev 临时目录；ClamAV 1.4 LTS 病毒库通过持久卷更新并只读挂入 Worker。
-- 当前验证证据：检查链路专项 17 passed、86% coverage；全量后端 409 passed、1 skipped；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0023_media_review_evidence`，并通过 `0023 → 0022 → 0023` 往返。
-- **Step 2 剩余**：受控下载/缩略图、软删保留与对象生命周期清理任务。
+- 已完成受控下载：只为晋级且证据完整的资产签发 30–300 秒读凭据；`confidential` 与 `restricted` 使用独立权限矩阵，越权与跨组织统一隐藏资产存在性，响应不返回独立 bucket/key 字段。
+- 已完成缩略图派生：API 只排队、不接收 FFmpeg 参数；Worker 使用固定、无 shell、禁网络协议的 FFmpeg 命令，派生 JPEG 经 hash/size/MIME/KMS 复核后写入资产桶，并记录 `thumbnail_of` 血缘和继承的敏感/版权/同意状态。
+- 已完成软删除与对象生命周期：数据库资产和血缘审计行永久保留；有效同意证据与存活派生引用阻断删除；超过保留期后由 Beat/Worker 在持久管理员身份下幂等删除对象并记录清理时间。
+- 当前验证证据：新增下载访问、缩略图和生命周期服务组合 89% coverage；全量后端 458 passed、1 skipped；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0023_media_review_evidence`，并通过 `0023 → 0022 → 0023` 往返。
+- **下一阶段**：Step 3 Persona 持久化、版本审批和项目绑定；真实 S3/FFmpeg 并发、故障注入与容量验收仍属于发布门禁，不以本地单元测试替代。
 
 ## 1. 执行摘要
 

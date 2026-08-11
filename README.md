@@ -48,14 +48,15 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **邮箱连接**：Gmail 与 Microsoft OAuth，使用 PKCE 和一次性 state；令牌只保存在后端权限为 `0600` 的凭据文件中。
 - **投递验证**：Gmail 校验 `SENT` 标签；Microsoft 使用 Immutable ID 在 Sent Items 中验证同一封邮件。
 - **管理工作台**：ChatGPT 风格的中性响应式界面，支持中文/英文、深浅主题、运行时后端地址和 Vite HMR。
+- **安全媒体资产面**：S3 隔离上传、ClamAV/FFprobe 自动检查、证据驱动晋级、敏感级别受控下载、异步安全缩略图、资产血缘、软删除和延迟对象清理。
 
 ### 当前能力边界
 
 | 状态 | 范围 |
 |---|---|
 | 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox 和死信处置 |
-| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt 版本与上下文预算 |
-| 后续产品化重点 | 将记忆和知识检索按具体外贸业务流编排进 AI Chat、补充多语言路由评测集、真实 Provider 压测、开放多租户前的隔离改造 |
+| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁 |
+| 后续产品化重点 | 将记忆和知识检索按具体外贸业务流编排进 AI Chat、视频 Persona/项目/Provider Job、真实 Provider 与 S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -96,6 +97,7 @@ flowchart TB
         CELERY["Celery Worker / Beat"]
         OUTBOX["Transactional Outbox"]
         DELIVERY["审批投递 / Sent 验证<br/>失败分类 / Dead Letter"]
+        MEDIA["媒体检查 / 缩略图 / 生命周期<br/>固定命令 + 证据门禁"]
     end
 
     subgraph DATA["数据与协调层"]
@@ -127,6 +129,7 @@ flowchart TB
     LLM --> DIRECT
     LLM --> OMNI
     TOOLS --> CELERY --> OUTBOX --> DELIVERY
+    CELERY --> MEDIA
 
     BUSINESS --> PG
     RUN --> PG
@@ -137,6 +140,7 @@ flowchart TB
     RAG --> CACHE
     SECRETS --> LLM
     SECRETS --> CELERY
+    MEDIA --> PG
 
     BUSINESS --> HUNTER
     DELIVERY --> GMAIL
@@ -502,7 +506,7 @@ npm run lint:check
 npm run build
 ```
 
-最近的完整工程验证基线（2026-08-11，`b-agent-enterprise-platform`）：后端 `327 passed, 1 skipped`；前端 `40 passed`。本次 UI 与 README 更新另行通过 ESLint、Vue/TypeScript 类型检查、Vite 生产构建、前端 `40/40` 测试和 `docker compose config`。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider 压测或目标环境验收。
+最近的完整工程验证基线（2026-08-11，`b-agent-enterprise-platform`）：后端 `458 passed, 1 skipped`；前端最近基线 `40 passed`；`docker compose config --quiet` 通过。新增媒体访问、缩略图与生命周期服务的组合覆盖率为 89%。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
@@ -548,6 +552,8 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - 发件动作由事务 Outbox 驱动，无法确认是否发送的结果不会自动重试。
 - 调研、文案和发送保留人工审批点；死信结论需要两名不同管理员批准。
 - 当前部署模型是单组织信任边界，不应在未完成租户隔离审计前作为开放式多租户 SaaS 运行。
+- 媒体下载只对已晋级且扫描、版权、同意证据完整的资产签发最长 300 秒凭据；隔离区、软删除和越权资产不会获得签名。
+- 缩略图参数完全由服务端固定，媒体二进制不进入 API/Celery payload；派生资产继承敏感级别并保存血缘。对象清理默认关闭，启用后仍需真实超级管理员维护身份与保留期。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档
