@@ -104,4 +104,3 @@ def test_staging_rejects_metadata_and_content_type_mismatch_before_reading():
             expected_content_type="video/mp4",
         ):
             pytest.fail("MIME mismatch must never reach the scanner")
-

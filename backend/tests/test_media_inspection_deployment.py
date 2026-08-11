@@ -35,4 +35,3 @@ def test_media_inspection_configuration_is_documented():
         "MEDIA_INSPECTION_TIMEOUT_SECONDS",
     ]:
         assert f"{setting}=" in env_example
-

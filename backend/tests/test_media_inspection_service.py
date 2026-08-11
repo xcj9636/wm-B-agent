@@ -171,4 +171,3 @@ def test_inspection_rejects_wrong_tenant_or_unprivileged_actor(db_session):
                 object_store=FakeStagingStore(),
                 runner=FakeInspectionRunner(clean_result()),
             )
-

@@ -82,4 +82,3 @@ def test_worker_derives_tenant_and_only_accepts_asset_and_requester_ids(db_sessi
     assert inspect_media_asset_task.name == (
         "app.tasks.media_tasks.inspect_media_asset_task"
     )
-
