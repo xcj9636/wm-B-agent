@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
 from app.config import settings
-from app.models.database import MediaAsset
+from app.models.database import MediaAsset, MediaScanReport
 from app.integrations.object_store import StoredObjectMetadata
 from app.main import app
-from app.api.v1.video import get_media_object_store
+from app.api.v1.video import (
+    get_media_inspection_dispatcher,
+    get_media_object_store,
+)
 
 
 class FakePromotionStore:
@@ -24,6 +27,15 @@ class FakePromotionStore:
             content_type=expected_content_type,
             sha256=expected_sha256,
         )
+
+
+class FakeInspectionDispatcher:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, asset_id, requested_by_user_id):
+        self.calls.append((asset_id, requested_by_user_id))
+        return "inspection-task-123"
 
 
 def create_asset(db, user, *, consent_required=False, suffix="review-target"):
@@ -53,20 +65,52 @@ def create_asset(db, user, *, consent_required=False, suffix="review-target"):
 def test_review_api_requires_privileged_server_side_identity(api_context):
     client, db, user = api_context
     target = create_asset(db, user)
+    dispatcher = FakeInspectionDispatcher()
+    app.dependency_overrides[get_media_inspection_dispatcher] = lambda: dispatcher
 
     response = client.post(
-        f"/api/v1/video/assets/{target.id}/reviews/scan",
-        json={
-            "scanner": "clamav",
-            "scanner_version": "1.4.2",
-            "status": "passed",
-            "asset_sha256": target.sha256,
-            "findings": {},
-        },
+        f"/api/v1/video/assets/{target.id}/inspection",
+        json={},
     )
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Media review forbidden"
+    assert dispatcher.calls == []
+
+
+def test_inspection_api_queues_server_side_job_and_rejects_claimed_results(
+    api_context,
+):
+    client, db, user = api_context
+    user.is_superuser = True
+    db.commit()
+    target = create_asset(db, user)
+    dispatcher = FakeInspectionDispatcher()
+    app.dependency_overrides[get_media_inspection_dispatcher] = lambda: dispatcher
+
+    queued = client.post(
+        f"/api/v1/video/assets/{target.id}/inspection",
+        json={},
+    )
+    spoofed = client.post(
+        f"/api/v1/video/assets/{target.id}/inspection",
+        json={"status": "passed", "scanner": "clamav"},
+    )
+
+    assert queued.status_code == 202
+    assert queued.json() == {
+        "asset_id": str(target.id),
+        "task_id": "inspection-task-123",
+        "status": "queued",
+    }
+    assert dispatcher.calls == [(target.id, user.id)]
+    assert spoofed.status_code == 422
+
+    removed = client.post(
+        f"/api/v1/video/assets/{target.id}/reviews/scan",
+        json={},
+    )
+    assert removed.status_code == 404
 
 
 def test_review_api_records_evidence_then_promotes(api_context):
@@ -77,19 +121,22 @@ def test_review_api_records_evidence_then_promotes(api_context):
     target = create_asset(db, user)
     now = datetime.now(timezone.utc)
 
-    scan = client.post(
-        f"/api/v1/video/assets/{target.id}/reviews/scan",
-        json={
-            "scanner": "clamav",
-            "scanner_version": "1.4.2",
-            "status": "passed",
-            "asset_sha256": target.sha256,
-            "findings": {
-                "signatures": [],
-                "probe": {"status": "passed", "metadata": {}},
-            },
+    scan = MediaScanReport(
+        org_id=target.org_id,
+        asset_id=target.id,
+        scanner="clamav",
+        scanner_version="1.4.2",
+        status="passed",
+        asset_sha256=target.sha256,
+        findings_json={
+            "signatures": [],
+            "probe": {"status": "passed", "metadata": {}},
         },
+        created_by_user_id=user.id,
     )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
     rights = client.post(
         f"/api/v1/video/assets/{target.id}/reviews/rights",
         json={
@@ -103,15 +150,13 @@ def test_review_api_records_evidence_then_promotes(api_context):
         },
     )
 
-    assert scan.status_code == 201
-    assert scan.json()["status"] == "passed"
     assert rights.status_code == 201
     assert rights.json()["status"] == "verified"
 
     promoted = client.post(
         f"/api/v1/video/assets/{target.id}/promote",
         json={
-            "scan_report_id": scan.json()["id"],
+            "scan_report_id": str(scan.id),
             "rights_record_id": rights.json()["id"],
             "consent_record_id": None,
         },
