@@ -271,6 +271,194 @@
           />
         </el-card>
 
+        <el-card
+          v-if="authStore.isAdmin"
+          v-loading="loadingMediaRuntime"
+          class="settings-card"
+        >
+          <template #header>
+            <div class="card-title">
+              <el-icon><VideoCamera /></el-icon>
+              <div>
+                <strong>{{ $t('Media generation runtime') }}</strong>
+                <span>{{ $t('Immutable provider revisions are activated only for new jobs') }}</span>
+              </div>
+              <el-tag
+                :type="activeMediaRevision ? 'success' : 'info'"
+                effect="plain"
+              >
+                {{ activeMediaRevision ? `v${activeMediaRevision.revision}` : $t('Not active') }}
+              </el-tag>
+            </div>
+          </template>
+
+          <el-alert
+            :title="$t('fal API key is write-only')"
+            :description="$t('The key is stored per immutable revision on the backend and is never returned to this browser.')"
+            type="info"
+            :closable="false"
+            show-icon
+            class="ai-security-note"
+          />
+
+          <el-descriptions
+            v-if="mediaCapabilities"
+            :column="3"
+            border
+            class="media-runtime-summary"
+          >
+            <el-descriptions-item :label="$t('Provider')">
+              fal
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('Capability catalog')">
+              {{ mediaCapabilities.schema_version }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('External submission')">
+              <el-tag
+                :type="mediaRuntimeState?.submission_enabled ? 'success' : 'warning'"
+                effect="plain"
+              >
+                {{ $t(mediaRuntimeState?.submission_enabled ? 'Enabled' : 'Fail closed') }}
+              </el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-form
+            class="media-runtime-form"
+            label-position="top"
+            @submit.prevent="createMediaRevision"
+          >
+            <el-form-item :label="$t('Enabled generation modes')">
+              <el-checkbox-group v-model="mediaRevisionForm.enabled_modes">
+                <el-checkbox
+                  v-for="mode in mediaModes"
+                  :key="mode"
+                  :label="mode"
+                >
+                  {{ $t(mode) }}
+                </el-checkbox>
+              </el-checkbox-group>
+            </el-form-item>
+
+            <div class="alias-grid">
+              <el-form-item
+                v-for="mode in mediaRevisionForm.enabled_modes"
+                :key="mode"
+                :label="$t(mode)"
+              >
+                <el-select
+                  v-model="mediaRevisionForm.model_aliases[mode]"
+                  filterable
+                  :placeholder="$t('Select an approved model')"
+                >
+                  <el-option
+                    v-for="model in mediaModelsForMode(mode)"
+                    :key="model.id"
+                    :label="model.display_name"
+                    :value="model.id"
+                  >
+                    <span>{{ model.display_name }}</span>
+                    <small class="model-id">{{ model.id }}</small>
+                  </el-option>
+                </el-select>
+              </el-form-item>
+            </div>
+
+            <el-form-item label="fal API key">
+              <el-input
+                v-model="mediaApiKey"
+                type="password"
+                show-password
+                autocomplete="new-password"
+                :placeholder="mediaRuntimeState?.api_key_configured ? $t('Configured, leave empty to keep') : $t('Enter a fal API key')"
+              />
+            </el-form-item>
+
+            <div class="form-actions">
+              <el-button
+                type="primary"
+                native-type="submit"
+                :loading="savingMediaRevision"
+              >
+                {{ $t('Create immutable revision') }}
+              </el-button>
+              <span class="field-help">{{ $t('Creating a revision does not activate it.') }}</span>
+            </div>
+          </el-form>
+
+          <el-table
+            :data="mediaRevisions"
+            class="media-revision-table"
+            stripe
+          >
+            <el-table-column
+              prop="revision"
+              :label="$t('Revision')"
+              width="90"
+            >
+              <template #default="{ row }">
+                <strong>v{{ row.revision }}</strong>
+              </template>
+            </el-table-column>
+            <el-table-column
+              :label="$t('Modes and models')"
+              min-width="260"
+            >
+              <template #default="{ row }">
+                <div class="media-alias-list">
+                  <span
+                    v-for="mode in row.enabled_modes"
+                    :key="mode"
+                  >
+                    {{ $t(mode) }} · <code>{{ row.model_aliases[mode] }}</code>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column
+              :label="$t('Probe')"
+              width="130"
+            >
+              <template #default="{ row }">
+                <el-tag
+                  :type="row.latest_probe?.ready ? 'success' : 'info'"
+                  effect="plain"
+                >
+                  {{ $t(row.latest_probe?.ready ? 'Ready' : 'Not tested') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column
+              :label="$t('Actions')"
+              width="230"
+              fixed="right"
+            >
+              <template #default="{ row }">
+                <el-button
+                  size="small"
+                  :loading="probingMediaRevisionId === row.id"
+                  @click="probeMediaRevision(row.id)"
+                >
+                  {{ $t('Test provider') }}
+                </el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :disabled="!row.latest_probe?.ready || activeMediaRevision?.id === row.id"
+                  :loading="activatingMediaRevisionId === row.id"
+                  @click="activateMediaRevision(row.id)"
+                >
+                  {{ $t('Activate for new jobs') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty
+            v-if="!loadingMediaRuntime && mediaRevisions.length === 0"
+            :description="$t('No media runtime revisions')"
+          />
+        </el-card>
+
         <el-card class="settings-card">
           <template #header>
             <div class="card-title">
@@ -443,6 +631,14 @@ import { ElMessage } from 'element-plus'
 import { api, updateBackendApiUrl } from '@/api'
 import { aiApi, type AIRuntimeConfigUpdate } from '@/api/ai'
 import {
+  mediaRuntimeApi,
+  type MediaCapabilityCatalog,
+  type MediaRuntimeRevision,
+  type MediaRuntimeRevisionCreate,
+  type MediaRuntimeState,
+  type MediaWorkflowMode,
+} from '@/api/mediaRuntime'
+import {
   mailboxApi,
   type MailboxAccount,
   type MailboxOAuthProvider,
@@ -490,10 +686,25 @@ const aiUseCases = [
   { key: 'rag_query_rewrite', label: 'Knowledge query model' },
   { key: 'summarization', label: 'Summarization model' },
 ]
+const loadingMediaRuntime = ref(false)
+const savingMediaRevision = ref(false)
+const probingMediaRevisionId = ref('')
+const activatingMediaRevisionId = ref('')
+const mediaRuntimeState = ref<MediaRuntimeState | null>(null)
+const mediaCapabilities = ref<MediaCapabilityCatalog | null>(null)
+const mediaRevisions = ref<MediaRuntimeRevision[]>([])
+const mediaApiKey = ref('')
+const mediaModes: MediaWorkflowMode[] = ['text_to_image', 'image_to_video', 'text_to_video']
+const mediaRevisionForm = ref<MediaRuntimeRevisionCreate>({
+  provider: 'fal',
+  enabled_modes: [...mediaModes],
+  model_aliases: {},
+})
 
 const userInitial = computed(() => (authStore.user?.username || '?').charAt(0).toUpperCase())
 const connectionLabel = computed(() => translate(({ idle: 'Not tested', healthy: 'Connected', failed: 'Unavailable' })[connectionState.value]))
 const connectionTagType = computed(() => connectionState.value === 'healthy' ? 'success' : connectionState.value === 'failed' ? 'danger' : 'info')
+const activeMediaRevision = computed(() => mediaRuntimeState.value?.active_revision)
 
 function saveBackendUrl() {
   try {
@@ -639,6 +850,112 @@ async function discoverAiModels() {
   }
 }
 
+function mediaModelsForMode(mode: MediaWorkflowMode) {
+  return mediaCapabilities.value?.models.filter((model) => model.modes.includes(mode)) || []
+}
+
+function initializeMediaRevisionForm() {
+  const active = mediaRuntimeState.value?.active_revision
+  if (active) {
+    mediaRevisionForm.value = {
+      provider: 'fal',
+      enabled_modes: [...active.enabled_modes],
+      model_aliases: { ...active.model_aliases },
+    }
+    return
+  }
+  const aliases: Partial<Record<MediaWorkflowMode, string>> = {}
+  for (const mode of mediaModes) {
+    const model = mediaModelsForMode(mode)[0]
+    if (model) aliases[mode] = model.id
+  }
+  mediaRevisionForm.value = {
+    provider: 'fal',
+    enabled_modes: mediaModes.filter((mode) => Boolean(aliases[mode])),
+    model_aliases: aliases,
+  }
+}
+
+async function loadMediaRuntime() {
+  if (!authStore.isAdmin) return
+  loadingMediaRuntime.value = true
+  try {
+    const [state, capabilities, revisions] = await Promise.all([
+      mediaRuntimeApi.getState(),
+      mediaRuntimeApi.getCapabilities(),
+      mediaRuntimeApi.listRevisions(),
+    ])
+    mediaRuntimeState.value = state
+    mediaCapabilities.value = capabilities
+    mediaRevisions.value = revisions
+    initializeMediaRevisionForm()
+  } catch {
+    ElMessage.error(translate('Media runtime configuration could not be loaded.'))
+  } finally {
+    loadingMediaRuntime.value = false
+  }
+}
+
+async function createMediaRevision() {
+  const modes = mediaRevisionForm.value.enabled_modes
+  const aliases = Object.fromEntries(
+    modes
+      .map((mode) => [mode, mediaRevisionForm.value.model_aliases[mode]?.trim()])
+      .filter((entry): entry is [MediaWorkflowMode, string] => Boolean(entry[1])),
+  )
+  if (!modes.length || Object.keys(aliases).length !== modes.length) {
+    ElMessage.warning(translate('Select one approved model for every enabled mode.'))
+    return
+  }
+  if (!mediaRuntimeState.value?.api_key_configured && !mediaApiKey.value.trim()) {
+    ElMessage.warning(translate('Enter a fal API key for the first revision.'))
+    return
+  }
+  savingMediaRevision.value = true
+  try {
+    const revision = await mediaRuntimeApi.createRevision({
+      provider: 'fal',
+      enabled_modes: [...modes],
+      model_aliases: aliases,
+      ...(mediaApiKey.value.trim() ? { api_key: mediaApiKey.value.trim() } : {}),
+    })
+    mediaApiKey.value = ''
+    mediaRevisions.value = [revision, ...mediaRevisions.value.filter((item) => item.id !== revision.id)]
+    ElMessage.success(translate('Immutable media revision created. Test it before activation.'))
+  } catch {
+    ElMessage.error(translate('Media runtime revision could not be created.'))
+  } finally {
+    savingMediaRevision.value = false
+  }
+}
+
+async function probeMediaRevision(revisionId: string) {
+  probingMediaRevisionId.value = revisionId
+  try {
+    const latestProbe = await mediaRuntimeApi.probeRevision(revisionId)
+    mediaRevisions.value = mediaRevisions.value.map((revision) => (
+      revision.id === revisionId ? { ...revision, latest_probe: latestProbe } : revision
+    ))
+    ElMessage.success(translate(latestProbe.ready ? 'Media provider is ready.' : 'Media provider is not ready.'))
+  } catch {
+    ElMessage.error(translate('Media provider test failed.'))
+  } finally {
+    probingMediaRevisionId.value = ''
+  }
+}
+
+async function activateMediaRevision(revisionId: string) {
+  activatingMediaRevisionId.value = revisionId
+  try {
+    mediaRuntimeState.value = await mediaRuntimeApi.activateRevision(revisionId)
+    ElMessage.success(translate('Media revision activated for new jobs.'))
+  } catch {
+    ElMessage.error(translate('Media runtime revision could not be activated.'))
+  } finally {
+    activatingMediaRevisionId.value = ''
+  }
+}
+
 function usagePercentage(account: MailboxAccount) {
   return Math.min(100, Math.round((account.today_sent / Math.max(account.daily_limit, 1)) * 100))
 }
@@ -647,6 +964,7 @@ onMounted(() => {
   void consumeMailboxOAuthResult()
   void loadAccounts()
   void loadAiConfig()
+  void loadMediaRuntime()
 })
 </script>
 
@@ -662,6 +980,10 @@ onMounted(() => {
 .ai-security-note { margin-bottom: 16px; }
 .alias-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
 .alias-grid :deep(.el-select), .settings-card :deep(.el-input-number) { width: 100%; }
+.media-runtime-summary, .media-runtime-form, .media-revision-table { margin-top: 16px; }
+.media-alias-list { display: grid; gap: 5px; font-size: 12px; }
+.media-alias-list code, .model-id { color: var(--el-text-color-secondary); }
+.model-id { float: right; margin-left: 14px; }
 .profile { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
 .profile > div, .account-name { display: grid; gap: 3px; }
 .mailbox-connect-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
