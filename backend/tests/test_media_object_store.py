@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 import pytest
 from pydantic import ValidationError
 
@@ -262,17 +264,18 @@ def test_derived_asset_is_encrypted_uploaded_and_integrity_checked(tmp_path):
     object_store = store(client)
     thumbnail = tmp_path / "thumbnail.jpg"
     thumbnail.write_bytes(b"generated-thumbnail")
+    digest = sha256(b"generated-thumbnail").hexdigest()
     client.head_response = {
         "ContentLength": len(b"generated-thumbnail"),
         "ContentType": "image/jpeg",
-        "Metadata": {"sha256": "9" * 64},
+        "Metadata": {"sha256": digest},
     }
 
     result = object_store.put_derived(
         key="assets/ba6e/derived/source-id/thumbnail.jpg",
         path=thumbnail,
         content_type="image/jpeg",
-        sha256="9" * 64,
+        sha256=digest,
     )
 
     call = client.put_calls[0]
@@ -281,7 +284,7 @@ def test_derived_asset_is_encrypted_uploaded_and_integrity_checked(tmp_path):
         "tenant-media/assets/ba6e/derived/source-id/thumbnail.jpg"
     )
     assert call["ContentType"] == "image/jpeg"
-    assert call["Metadata"] == {"sha256": "9" * 64}
+    assert call["Metadata"] == {"sha256": digest}
     assert call["ServerSideEncryption"] == "aws:kms"
     assert call["SSEKMSKeyId"] == "kms-key-1"
     assert call["Body"].closed

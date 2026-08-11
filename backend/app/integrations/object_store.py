@@ -52,6 +52,24 @@ class MediaObjectStore(Protocol):
         expected_content_type: str,
     ): ...
 
+    def stage_asset(
+        self,
+        key: str,
+        *,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
+    ): ...
+
+    def put_derived(
+        self,
+        *,
+        key: str,
+        path: Path,
+        content_type: str,
+        sha256: str,
+    ) -> StoredObjectMetadata: ...
+
     def create_download(
         self,
         *,
@@ -308,6 +326,67 @@ class S3CompatibleMediaObjectStore:
         )
         return metadata
 
+    def put_derived(
+        self,
+        *,
+        key: str,
+        path: Path,
+        content_type: str,
+        sha256: str,
+    ) -> StoredObjectMetadata:
+        """Upload a server-generated derivative, then verify it from storage."""
+        physical_key = self._physical_derived_key(key)
+        if not path.is_absolute() or not path.is_file():
+            raise ObjectStoreConfigurationError(
+                "Derived media path must be an absolute regular file"
+            )
+        normalized_type = content_type.strip().lower()
+        if normalized_type != "image/jpeg":
+            raise ObjectStoreConfigurationError(
+                "Derived thumbnail content type must be image/jpeg"
+            )
+        actual_sha256 = self._file_sha256(path)
+        if actual_sha256 != sha256:
+            raise ObjectStoreIntegrityError(
+                "Derived object checksum does not match generated output"
+            )
+        options = {
+            "Bucket": self._asset_bucket,
+            "Key": physical_key,
+            "ContentType": normalized_type,
+            "Metadata": {"sha256": sha256},
+        }
+        if self._kms_key_id:
+            options.update(
+                {
+                    "ServerSideEncryption": "aws:kms",
+                    "SSEKMSKeyId": self._kms_key_id,
+                }
+            )
+        else:
+            options["ServerSideEncryption"] = "AES256"
+        with path.open("rb") as body:
+            self._client.put_object(Body=body, **options)
+
+        metadata = self._metadata(
+            bucket=self._asset_bucket,
+            physical_key=physical_key,
+            logical_key=key,
+        )
+        if (
+            metadata.sha256 != sha256
+            or metadata.size_bytes != path.stat().st_size
+            or metadata.content_type.strip().lower() != normalized_type
+        ):
+            self._client.delete_object(
+                Bucket=self._asset_bucket,
+                Key=physical_key,
+            )
+            raise ObjectStoreIntegrityError(
+                "Stored derivative failed integrity validation"
+            )
+        return metadata
+
     @contextmanager
     def stage_quarantined(
         self,
@@ -319,8 +398,47 @@ class S3CompatibleMediaObjectStore:
     ) -> Iterator[Path]:
         """Stream a quarantine object to a private, integrity-checked file."""
         physical_key = self._physical_quarantine_key(key)
+        with self._stage_object(
+            bucket=self._quarantine_bucket,
+            physical_key=physical_key,
+            expected_sha256=expected_sha256,
+            expected_size_bytes=expected_size_bytes,
+            expected_content_type=expected_content_type,
+        ) as path:
+            yield path
+
+    @contextmanager
+    def stage_asset(
+        self,
+        key: str,
+        *,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
+    ) -> Iterator[Path]:
+        """Stream one promoted asset to a private integrity-checked file."""
+        physical_key = self._physical_asset_key(key)
+        with self._stage_object(
+            bucket=self._asset_bucket,
+            physical_key=physical_key,
+            expected_sha256=expected_sha256,
+            expected_size_bytes=expected_size_bytes,
+            expected_content_type=expected_content_type,
+        ) as path:
+            yield path
+
+    @contextmanager
+    def _stage_object(
+        self,
+        *,
+        bucket: str,
+        physical_key: str,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
+    ) -> Iterator[Path]:
         response = self._client.get_object(
-            Bucket=self._quarantine_bucket,
+            Bucket=bucket,
             Key=physical_key,
         )
         body = response.get("Body")
@@ -444,6 +562,22 @@ class S3CompatibleMediaObjectStore:
         if any(segment in {"", ".", ".."} for segment in segments):
             raise ObjectStoreConfigurationError("Object key is not canonical")
         return f"{self._key_prefix}/{key}" if self._key_prefix else key
+
+    def _physical_derived_key(self, key: str) -> str:
+        physical_key = self._physical_asset_key(key)
+        if "/derived/" not in key:
+            raise ObjectStoreConfigurationError(
+                "Object key is outside the derived asset namespace"
+            )
+        return physical_key
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = sha256()
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def _is_safe_download_name(value: str) -> bool:
