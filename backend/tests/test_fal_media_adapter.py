@@ -203,14 +203,14 @@ async def test_fal_adapter_rejects_redirects_and_oversized_responses():
     responses = iter(
         [
             httpx.Response(307, headers={"location": "http://127.0.0.1"}),
-            httpx.Response(200, content=b"{" + b"x" * 256 + b"}"),
+            httpx.Response(200, content=b"{" + b"x" * 2048 + b"}"),
         ]
     )
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return next(responses)
 
-    client = adapter(handler, max_response_bytes=64)
+    client = adapter(handler, max_response_bytes=1024)
     try:
         with pytest.raises(MediaProviderError) as redirected:
             await client.status(model_id=MODEL_ID, request_id="request-1")
@@ -272,3 +272,78 @@ async def test_fal_cancel_uses_documented_put_endpoint():
         "method": "PUT",
         "url": f"https://queue.fal.run/{MODEL_ID}/requests/request-1/cancel",
     }
+
+
+@pytest.mark.asyncio
+async def test_fal_completed_status_keeps_only_safe_metrics():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "COMPLETED",
+                "metrics": {"inference_time": 3.42, "private_metric": "drop"},
+                "logs": [{"message": "drop"}],
+            },
+        )
+
+    client = adapter(handler)
+    try:
+        status = await client.status(model_id=MODEL_ID, request_id="request-1")
+    finally:
+        await client.aclose()
+
+    assert status.state is MediaQueueState.COMPLETED
+    assert status.inference_seconds == 3.42
+    assert "private_metric" not in status.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_fal_probe_treats_documented_queue_404_as_authenticated_reachability():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"status": "NOT_FOUND"})
+
+    client = adapter(handler)
+    try:
+        discovered = await client.discover_capabilities("provider-secret")
+        probe = await client.probe(
+            api_key="provider-secret",
+            model_ids=[MODEL_ID],
+        )
+        denied = await client.probe(
+            api_key="different-secret",
+            model_ids=[MODEL_ID],
+        )
+    finally:
+        await client.aclose()
+
+    assert discovered == capability_catalog()
+    assert probe.ready is True
+    assert probe.reachable is True
+    assert denied.ready is False
+    assert denied.issues == ["provider_authentication_failed"]
+
+
+@pytest.mark.asyncio
+async def test_fal_invalid_json_and_rate_limit_are_normalized():
+    responses = iter(
+        [
+            httpx.Response(200, content=b"not-json"),
+            httpx.Response(429, json={"detail": "account and request details"}),
+        ]
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return next(responses)
+
+    client = adapter(handler)
+    try:
+        with pytest.raises(MediaProviderError) as invalid:
+            await client.status(model_id=MODEL_ID, request_id="request-1")
+        with pytest.raises(MediaProviderError) as limited:
+            await client.status(model_id=MODEL_ID, request_id="request-1")
+    finally:
+        await client.aclose()
+
+    assert invalid.value.error_code == "invalid_provider_response"
+    assert limited.value.error_code == "provider_rate_limited"
+    assert limited.value.retryable is True
