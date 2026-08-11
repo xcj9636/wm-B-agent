@@ -63,6 +63,21 @@ services:
     networks:
       - trade_ai_network
 
+  # Signature updater/source for the worker's read-only ClamAV database.
+  # ClamAV recommends a persistent /var/lib/clamav volume for *_base images.
+  clamav:
+    image: clamav/clamav:1.4_base
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks:
+      - trade_ai_network
+
   # Backend API
   backend:
     build:
@@ -103,6 +118,15 @@ services:
       - OMNIROUTE_MODEL_LIVE_REPLY=${OMNIROUTE_MODEL_LIVE_REPLY:-}
       - OMNIROUTE_MODEL_RAG_QUERY_REWRITE=${OMNIROUTE_MODEL_RAG_QUERY_REWRITE:-}
       - OMNIROUTE_MODEL_SUMMARIZATION=${OMNIROUTE_MODEL_SUMMARIZATION:-}
+      - MEDIA_UPLOAD_ENABLED=${MEDIA_UPLOAD_ENABLED:-false}
+      - MEDIA_INSPECTION_ENABLED=${MEDIA_INSPECTION_ENABLED:-false}
+      - MEDIA_OBJECT_STORE_BACKEND=${MEDIA_OBJECT_STORE_BACKEND:-local}
+      - MEDIA_S3_ENDPOINT_URL=${MEDIA_S3_ENDPOINT_URL:-}
+      - MEDIA_S3_REGION=${MEDIA_S3_REGION:-us-east-1}
+      - MEDIA_S3_QUARANTINE_BUCKET=${MEDIA_S3_QUARANTINE_BUCKET:-}
+      - MEDIA_S3_ASSET_BUCKET=${MEDIA_S3_ASSET_BUCKET:-}
+      - MEDIA_S3_KEY_PREFIX=${MEDIA_S3_KEY_PREFIX:-}
+      - MEDIA_S3_KMS_KEY_ID=${MEDIA_S3_KMS_KEY_ID:-}
     ports:
       - "8000:8000"
     volumes:
@@ -161,10 +185,33 @@ services:
       - OMNIROUTE_MODEL_LIVE_REPLY=${OMNIROUTE_MODEL_LIVE_REPLY:-}
       - OMNIROUTE_MODEL_RAG_QUERY_REWRITE=${OMNIROUTE_MODEL_RAG_QUERY_REWRITE:-}
       - OMNIROUTE_MODEL_SUMMARIZATION=${OMNIROUTE_MODEL_SUMMARIZATION:-}
+      - MEDIA_UPLOAD_ENABLED=${MEDIA_UPLOAD_ENABLED:-false}
+      - MEDIA_INSPECTION_ENABLED=${MEDIA_INSPECTION_ENABLED:-false}
+      - MEDIA_OBJECT_STORE_BACKEND=${MEDIA_OBJECT_STORE_BACKEND:-local}
+      - MEDIA_S3_ENDPOINT_URL=${MEDIA_S3_ENDPOINT_URL:-}
+      - MEDIA_S3_REGION=${MEDIA_S3_REGION:-us-east-1}
+      - MEDIA_S3_QUARANTINE_BUCKET=${MEDIA_S3_QUARANTINE_BUCKET:-}
+      - MEDIA_S3_ASSET_BUCKET=${MEDIA_S3_ASSET_BUCKET:-}
+      - MEDIA_S3_KEY_PREFIX=${MEDIA_S3_KEY_PREFIX:-}
+      - MEDIA_S3_KMS_KEY_ID=${MEDIA_S3_KMS_KEY_ID:-}
+      - MEDIA_CLAMSCAN_PATH=/usr/bin/clamscan
+      - MEDIA_FFPROBE_PATH=/usr/bin/ffprobe
+      - MEDIA_INSPECTION_TIMEOUT_SECONDS=${MEDIA_INSPECTION_TIMEOUT_SECONDS:-30}
+      - MEDIA_INSPECTION_MAX_OUTPUT_BYTES=${MEDIA_INSPECTION_MAX_OUTPUT_BYTES:-1048576}
+      - MEDIA_MAX_DURATION_SECONDS=${MEDIA_MAX_DURATION_SECONDS:-600}
+      - MEDIA_MAX_DIMENSION_PIXELS=${MEDIA_MAX_DIMENSION_PIXELS:-8192}
     volumes:
-      - ./backend:/app
+      - ./backend:/app:ro
       - uploads:/app/uploads
       - exports:/app/exports
+      - clamav_data:/var/lib/clamav:ro
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,size=2147483648,mode=0700,noexec,nosuid,nodev
     depends_on:
       db:
         condition: service_healthy
@@ -173,6 +220,8 @@ services:
       redis:
         condition: service_healthy
       redis_cache:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
       backend:
         condition: service_started
@@ -313,6 +362,7 @@ volumes:
   celery_beat_data:
   omniroute_data:
   frontend_node_modules:
+  clamav_data:
 
 networks:
   trade_ai_network:

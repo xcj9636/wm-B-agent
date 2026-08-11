@@ -8,6 +8,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    clamav \
+    ffmpeg \
     gcc \
     g++ \
     libpq-dev \
@@ -21,11 +23,19 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
+# Create an unprivileged runtime identity. The clamav supplementary group can
+# read the signature database mounted read-only by the media worker.
+RUN groupadd --system app && \
+    useradd --system --gid app --groups clamav --create-home app
+
 # Copy application code
-COPY . .
+COPY --chown=app:app . .
 
 # Create necessary directories
-RUN mkdir -p uploads exports logs checkpoints
+RUN mkdir -p uploads exports logs checkpoints && \
+    chown -R app:app uploads exports logs checkpoints
+
+USER app
 
 # Expose port
 EXPOSE 8000
