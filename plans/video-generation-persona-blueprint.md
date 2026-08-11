@@ -1,6 +1,6 @@
 # B-agent 视频生成 Persona 与媒体生产链路蓝图
 
-> 状态：Step 1-3 核心链路已实现，Provider Runtime 与持久 Generation Job 待实施
+> 状态：Step 1-4 核心链路已实现，持久 Generation Job 与成本/恢复链路待实施
 > 日期：2026-08-11  
 > 范围：视频 Persona、文生图、图生视频、文生视频、参考素材生成、媒体资产、异步任务、成本与并发、安全合规、前端视频工坊  
 > 实施原则：业务核心 provider-neutral；模型能力动态发现并固定快照；先建资产与安全边界，再开放生成；每一步可独立发布、灰度和回滚。
@@ -25,8 +25,8 @@
 - 已提供认证创建、审批、分页列表、版本历史、项目详情和单 Shot 编译 API。浏览器只收到 mode、敏感级别、参考资产 ID 和哈希回执，不收到完整 provider prompt。
 - 已新增中英文 `Video Studio`：可创建 Persona/项目/单 Shot 分镜、执行管理员审批、查看证据与版本历史并编译安全回执；统一 API client 自动使用可热切换的后端 Base URL。
 - 部署已接入 `MEDIA_PLANNING_ENABLED` 与 `MEDIA_SUBMIT_ENABLED`，默认均为 `false`。规划开关只开放规划面，外部媒体提交仍保持关闭。
-- 当前验证证据：视频核心服务 86% coverage；全量后端 476 passed、1 skipped；前端 44 passed，Vue/TypeScript 与生产构建通过；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0024_video_personas`，并通过 `0024 → 0023 → 0024` 往返。
-- **下一阶段**：Step 4 媒体能力目录、secret-safe 热配置和 Provider Adapter；随后实现持久 Generation Job、回调收件箱、配额/成本与 SSE。字段级数据库加密、真实 S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
+- 当前验证证据：视频规划核心服务 86% coverage、媒体运行时 91%、fal Adapter 83%；全量后端 495 passed、1 skipped；前端 47 passed，Vue/TypeScript 与生产构建通过；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0025_media_runtime`，并通过 `0025 → 0024 → 0025` 往返。
+- **下一阶段**：Step 5 持久 Generation Job、提交不确定态、回调收件箱、配额/成本与恢复；随后接入单 Shot 生成编排和 SSE。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
 
 ## 1. 执行摘要
 
@@ -474,6 +474,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 
 ### Step 4 — 媒体能力目录、热配置与 fal Adapter
 
+- **状态**：已完成。实际文件按仓库现有分层落在 `integrations/fal_media.py`、`services/media/runtime.py`、独立管理员 API 与 Settings 热配置卡片。
 - **分支**：`feature/media-provider-runtime`
 - **依赖**：Step 1；可与 Step 2 并行开发，Step 3 在 Step 2 后开始
 - **主要文件**：
@@ -536,7 +537,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 
 ### Step 8 — 前端视频工坊与管理员热配置
 
-- **状态**：规划工作区已提前完成；Provider 能力、Job/SSE、成本和管理员媒体运行时页面等待 Step 4-7
+- **状态**：规划工作区与管理员媒体运行时页面已提前完成；Job/SSE、成本和真实生成状态等待 Step 5-7
 - **分支**：`feature/video-studio-ui`
 - **依赖**：Step 7
 - **主要文件**：

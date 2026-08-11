@@ -50,6 +50,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **管理工作台**：ChatGPT 风格的中性响应式界面，支持中文/英文、深浅主题、运行时后端地址和 Vite HMR。
 - **安全媒体资产面**：S3 隔离上传、ClamAV/FFprobe 自动检查、证据驱动晋级、敏感级别受控下载、异步安全缩略图、资产血缘、软删除和延迟对象清理。
 - **视频规划与 Persona**：不可变 Persona/Storyboard 版本、独立审批、固定项目快照、RAG 证据白名单、编译时 ACL 回查、注入隔离和安全 GenerationIntent 回执。
+- **媒体 Provider Runtime**：fal 能力白名单、不可变运行时 revision、逐版本 `0600` 密钥、健康探测与显式激活；队列适配器支持 submit/status/result/cancel，拒绝重定向、未知模型、超限响应和非批准媒体域名。
 - **Video Studio**：中英文创建 Persona、项目和单 Shot 分镜，查看版本与证据，执行管理员审批；所有请求自动使用设置页可热切换的后端地址。
 
 ### 当前能力边界
@@ -57,8 +58,8 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 | 状态 | 范围 |
 |---|---|
 | 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
-| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照 |
-| 后续产品化重点 | 媒体 Provider Runtime、持久 Generation Job、回调/成本/配额/SSE、数据库字段级加密、真实 Provider 与 S3 压测、开放多租户前的隔离改造 |
+| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime 与 fal 异步队列适配器 |
+| 后续产品化重点 | 持久 Generation Job、提交不确定态恢复、回调/成本/配额/SSE、数据库字段级加密、真实 Provider 与 S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -77,7 +78,7 @@ flowchart TB
         API["FastAPI API"]
         AUTH["JWT / RBAC<br/>单组织信任边界"]
         BUSINESS["客户 / 会话 / 获客<br/>调研 / ICP / 工作流"]
-        ADMIN["AI 配置 / 连接器<br/>可靠执行 / 死信处置"]
+        ADMIN["AI / Media Runtime 配置<br/>连接器 / 可靠执行 / 死信处置"]
     end
 
     subgraph AGENT["Agent Runtime"]
@@ -100,6 +101,7 @@ flowchart TB
         OUTBOX["Transactional Outbox"]
         DELIVERY["审批投递 / Sent 验证<br/>失败分类 / Dead Letter"]
         MEDIA["媒体检查 / 缩略图 / 生命周期<br/>固定命令 + 证据门禁"]
+        MEDIA_RUNTIME["Media Runtime Revision<br/>能力快照 / 探测 / 激活"]
     end
 
     subgraph DATA["数据与协调层"]
@@ -114,6 +116,7 @@ flowchart TB
         GMAIL["Gmail API"]
         OUTLOOK["Microsoft Graph"]
         WHATSAPP["WhatsApp"]
+        FAL["fal Queue API<br/>submit / status / result / cancel"]
     end
 
     USER --> UI
@@ -132,6 +135,8 @@ flowchart TB
     LLM --> OMNI
     TOOLS --> CELERY --> OUTBOX --> DELIVERY
     CELERY --> MEDIA
+    ADMIN --> MEDIA_RUNTIME
+    MEDIA_RUNTIME -.->|"仅供后续新 Job 固定"| CELERY
 
     BUSINESS --> PG
     RUN --> PG
@@ -143,11 +148,14 @@ flowchart TB
     SECRETS --> LLM
     SECRETS --> CELERY
     MEDIA --> PG
+    MEDIA_RUNTIME --> PG
+    SECRETS --> MEDIA_RUNTIME
 
     BUSINESS --> HUNTER
     DELIVERY --> GMAIL
     DELIVERY --> OUTLOOK
     DELIVERY --> WHATSAPP
+    MEDIA_RUNTIME --> FAL
 ```
 
 ### 架构分层与职责
@@ -258,13 +266,14 @@ flowchart LR
 | 数据分析 | `/analytics` | `/api/v1/stats` | 渠道、客户和对话分析 |
 | 运营控制 | `/operations`、`/operations/dead-letters` | `/api/v1/admin` | 网关健康、可靠执行、死信分析与双管理员处置 |
 | 连接器 | `/connectors` | `/api/v1/connectors` | 管理员配置、测试和启停服务端连接器 |
-| 设置 | `/settings` | `/api/v1/ai/config`、`/api/v1/mailboxes` | AI 路由热更新、模型探测、邮箱 OAuth 和浏览器 API 地址 |
+| 设置 | `/settings` | `/api/v1/ai/config`、`/api/v1/admin/media/runtime`、`/api/v1/mailboxes` | AI 路由与媒体 Provider 热配置、模型探测、邮箱 OAuth 和浏览器 API 地址 |
 
 ### 前端热加载机制
 
 - **源码热更新**：开发容器使用 Vite HMR 和源码 bind mount，Vue、TypeScript 与 SCSS 修改后不需要重建镜像。
 - **后端地址热切换**：默认使用同源 `/api` 代理；管理员可在设置页保存 HTTP(S) Base URL，新的 Axios 和 SSE 请求立即使用该地址。
 - **AI 路由热更新**：管理员通过 `GET/PUT /api/v1/ai/config` 读取和更新 Direct/OmniRoute 模式、固定模型别名、Provider 白名单和超时；`POST /api/v1/ai/config/test` 用于连通性探测。
+- **媒体运行时热更新**：设置页从服务端能力白名单选择 T2I/I2V/T2V 模型，创建不可变 revision；只有健康探测成功的 revision 才能显式激活，且激活指针只供后续新 Job 固定使用。
 - **密钥写入不回显**：前端可提交新的网关 API Key，但读取配置时只得到 `api_key_configured` 布尔值，不会获得密钥本身或服务端文件位置。
 - **权限边界不热降级**：浏览器 Base URL 和 AI 路由可热更新，JWT、RBAC、DLP、审批、Provider 白名单和 Tool 安全策略仍由后端强制执行。
 
@@ -458,6 +467,7 @@ alembic current
 | AI 策略 | `OMNIROUTE_ALLOWED_PROVIDERS`、`OMNIROUTE_MODEL_*` | OmniRoute 模式 | 固定供应商白名单和业务模型别名 |
 | AI 密钥 | `OMNIROUTE_API_KEY` 或 `OMNIROUTE_API_KEY_FILE` | 网关启用鉴权时 | 推荐生产环境使用挂载文件 |
 | 连接器 | `CONNECTOR_SECRET_DIR` | 使用 Hunter 等连接器时 | 后端连接器凭据目录 |
+| 媒体密钥 | `MEDIA_RUNTIME_SECRET_DIR` | 配置媒体 Provider 时 | 每个不可变 runtime revision 的后端凭据目录 |
 | 邮箱 | `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET` | 连接 Gmail 时 | Google OAuth 客户端 |
 | 邮箱 | `OUTLOOK_CLIENT_ID`、`OUTLOOK_CLIENT_SECRET`、`OUTLOOK_TENANT_ID` | 连接 Microsoft 时 | Microsoft OAuth 客户端与租户 |
 | 邮箱 | `GMAIL_REDIRECT_URI`、`OUTLOOK_REDIRECT_URI`、`FRONTEND_BASE_URL` | 使用邮箱 OAuth 时 | 服务端回调和完成后的前端地址 |
@@ -493,6 +503,7 @@ http://localhost:8000/api/v1/mailboxes/oauth/callback/outlook
 | 邮箱 | `/api/v1/mailboxes` | OAuth 供应商、授权回调和账号状态 |
 | 连接器 | `/api/v1/connectors` | 管理员连接器目录、测试和启停 |
 | 运维 | `/api/v1/admin` | 网关状态、可靠执行、死信与双人审批 |
+| 媒体运行时 | `/api/v1/admin/media/runtime` | 管理员查看能力目录、创建 revision、探测并对新任务激活 |
 
 接口字段和当前响应模型以运行中的 <http://localhost:8000/docs> 为准。
 
@@ -508,7 +519,7 @@ npm run lint:check
 npm run build
 ```
 
-最近的完整工程验证基线（2026-08-11，`b-agent-enterprise-platform`）：后端 `458 passed, 1 skipped`；前端最近基线 `40 passed`；`docker compose config --quiet` 通过。新增媒体访问、缩略图与生命周期服务的组合覆盖率为 89%。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
+最近的完整工程验证基线（2026-08-11，`b-agent-enterprise-platform`）：后端 `495 passed, 1 skipped`；前端 `47 passed`；`docker compose config --quiet` 通过。媒体运行时服务覆盖率为 91%，fal Adapter 覆盖率为 83%。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
@@ -556,6 +567,8 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - 当前部署模型是单组织信任边界，不应在未完成租户隔离审计前作为开放式多租户 SaaS 运行。
 - 媒体下载只对已晋级且扫描、版权、同意证据完整的资产签发最长 300 秒凭据；隔离区、软删除和越权资产不会获得签名。
 - 缩略图参数完全由服务端固定，媒体二进制不进入 API/Celery payload；派生资产继承敏感级别并保存血缘。对象清理默认关闭，启用后仍需真实超级管理员维护身份与保留期。
+- fal API Key 按 runtime revision 写入后端 `0600` 文件，数据库与 API 只保存配置和 `api_key_configured`；Provider 返回的控制 URL 不被信任，队列 URL 始终由固定 origin 与已批准模型 ID 构造。
+- `MEDIA_SUBMIT_ENABLED` 仍默认关闭；当前 Provider Runtime 不等于持久 Generation Job 已上线，外部提交必须等待 Job/Attempt、预算、租约、提交不确定态与结果隔离摄取完成。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档
