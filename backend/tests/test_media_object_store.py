@@ -305,6 +305,22 @@ def test_derived_asset_write_rejects_noncanonical_or_non_derived_keys(tmp_path):
             )
 
 
+def test_asset_delete_is_idempotent_and_cannot_target_quarantine():
+    client = FakeS3Client()
+    object_store = store(client)
+
+    object_store.delete_asset("assets/ba6e/old-asset")
+
+    assert client.delete_calls == [
+        {
+            "Bucket": "media-assets",
+            "Key": "tenant-media/assets/ba6e/old-asset",
+        }
+    ]
+    with pytest.raises(ObjectStoreConfigurationError):
+        object_store.delete_asset("quarantine/ba6e/unsafe")
+
+
 @pytest.mark.parametrize(
     "key",
     [
