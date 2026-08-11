@@ -65,6 +65,27 @@ def test_quarantined_object_is_streamed_to_private_ephemeral_file():
     ]
 
 
+def test_promoted_asset_is_staged_from_asset_bucket_with_same_integrity_guards():
+    payload = b"approved-media-payload"
+    client = FakeS3Client(payload)
+    object_store = store(client)
+
+    with object_store.stage_asset(
+        "assets/ba6e/source-id",
+        expected_sha256=sha256(payload).hexdigest(),
+        expected_size_bytes=len(payload),
+        expected_content_type="video/mp4",
+    ) as path:
+        assert path.read_bytes() == payload
+
+    assert client.get_calls == [
+        {
+            "Bucket": "media-assets",
+            "Key": "tenant-media/assets/ba6e/source-id",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("payload", "expected_size", "expected_sha", "expected_message"),
     [

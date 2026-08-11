@@ -17,6 +17,7 @@ class FakeS3Client:
         self.head_calls = []
         self.copy_calls = []
         self.delete_calls = []
+        self.put_calls = []
         self.asset_exists = False
         self.head_response = {
             "ContentLength": 4096,
@@ -53,6 +54,10 @@ class FakeS3Client:
 
     def delete_object(self, **kwargs):
         self.delete_calls.append(kwargs)
+
+    def put_object(self, **kwargs):
+        self.put_calls.append(kwargs)
+        self.asset_exists = True
 
 
 class FakeS3NotFound(RuntimeError):
@@ -250,6 +255,51 @@ def test_promotion_keeps_quarantine_when_destination_size_is_wrong():
         )
 
     assert client.delete_calls == []
+
+
+def test_derived_asset_is_encrypted_uploaded_and_integrity_checked(tmp_path):
+    client = FakeS3Client()
+    object_store = store(client)
+    thumbnail = tmp_path / "thumbnail.jpg"
+    thumbnail.write_bytes(b"generated-thumbnail")
+    client.head_response = {
+        "ContentLength": len(b"generated-thumbnail"),
+        "ContentType": "image/jpeg",
+        "Metadata": {"sha256": "9" * 64},
+    }
+
+    result = object_store.put_derived(
+        key="assets/ba6e/derived/source-id/thumbnail.jpg",
+        path=thumbnail,
+        content_type="image/jpeg",
+        sha256="9" * 64,
+    )
+
+    call = client.put_calls[0]
+    assert call["Bucket"] == "media-assets"
+    assert call["Key"] == (
+        "tenant-media/assets/ba6e/derived/source-id/thumbnail.jpg"
+    )
+    assert call["ContentType"] == "image/jpeg"
+    assert call["Metadata"] == {"sha256": "9" * 64}
+    assert call["ServerSideEncryption"] == "aws:kms"
+    assert call["SSEKMSKeyId"] == "kms-key-1"
+    assert call["Body"].closed
+    assert result.key == "assets/ba6e/derived/source-id/thumbnail.jpg"
+
+
+def test_derived_asset_write_rejects_noncanonical_or_non_derived_keys(tmp_path):
+    thumbnail = tmp_path / "thumbnail.jpg"
+    thumbnail.write_bytes(b"generated-thumbnail")
+
+    for key in ["assets/ba6e/plain.jpg", "assets/../derived/thumb.jpg"]:
+        with pytest.raises(ObjectStoreConfigurationError):
+            store().put_derived(
+                key=key,
+                path=thumbnail,
+                content_type="image/jpeg",
+                sha256="9" * 64,
+            )
 
 
 @pytest.mark.parametrize(
