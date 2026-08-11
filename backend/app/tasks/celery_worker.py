@@ -47,6 +47,10 @@ celery.conf.update(
             "task": "app.tasks.task_functions.purge_agent_run_events_task",
             "schedule": 3600.0,
         },
+        "cleanup-expired-media-assets": {
+            "task": "app.tasks.media_tasks.cleanup_media_assets_task",
+            "schedule": 3600.0,
+        },
     },
 )
 

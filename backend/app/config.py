@@ -75,6 +75,10 @@ class Settings(BaseSettings):
         ge=1024,
         le=52_428_800,
     )
+    MEDIA_LIFECYCLE_ENABLED: bool = False
+    MEDIA_RETENTION_DAYS: int = Field(default=30, ge=1, le=3650)
+    MEDIA_CLEANUP_BATCH_SIZE: int = Field(default=100, ge=1, le=1000)
+    MEDIA_MAINTENANCE_USER_ID: int = Field(default=1, ge=1)
     MEDIA_INSPECTION_ENABLED: bool = False
     MEDIA_CLAMSCAN_PATH: str = "/usr/bin/clamscan"
     MEDIA_FFPROBE_PATH: str = "/usr/bin/ffprobe"
@@ -236,6 +240,11 @@ class Settings(BaseSettings):
                 raise ValueError("media thumbnails require the S3 backend")
             if not Path(self.MEDIA_FFMPEG_PATH).is_absolute():
                 raise ValueError("MEDIA_FFMPEG_PATH must be absolute")
+        if (
+            self.MEDIA_LIFECYCLE_ENABLED
+            and self.MEDIA_OBJECT_STORE_BACKEND != "s3"
+        ):
+            raise ValueError("media lifecycle cleanup requires the S3 backend")
         if (
             self.DEPLOYMENT_ENVIRONMENT == "production"
             and self.MEDIA_UPLOAD_ENABLED

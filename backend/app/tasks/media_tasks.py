@@ -1,6 +1,8 @@
 """Celery entry points for server-derived media inspection."""
 
 from hashlib import sha256
+from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -17,6 +19,7 @@ from app.services.agent_runtime.contracts import ExecutionPrincipal
 from app.services.media.assets import MediaAssetForbidden
 from app.services.media.inspection import MediaInspectionRunner
 from app.services.media.inspection_service import MediaInspectionService
+from app.services.media.lifecycle import MediaAssetLifecycleService
 from app.services.media.thumbnail import MediaThumbnailRunner, MediaThumbnailService
 from app.tasks.celery_worker import celery
 
@@ -143,6 +146,69 @@ def generate_media_thumbnail_task(asset_id: str, requested_by_user_id: int):
             requested_by_user_id=requested_by_user_id,
             object_store=_object_store(),
             runner=_thumbnail_runner(),
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def run_media_cleanup(
+    db: Session,
+    *,
+    org_id: UUID,
+    maintenance_user_id: int,
+    object_store: MediaObjectStore,
+    retention_days: int,
+    batch_size: int,
+    now: Optional[datetime] = None,
+) -> dict[str, int | str]:
+    """Clean one configured organization under a durable admin identity."""
+    maintainer = db.get(User, maintenance_user_id)
+    if (
+        maintainer is None
+        or not maintainer.is_active
+        or not maintainer.is_superuser
+    ):
+        raise MediaAssetForbidden("Media maintenance identity is not authorized")
+    principal = ExecutionPrincipal(
+        org_id=org_id,
+        user_id=maintainer.id,
+        roles={"media_maintainer"},
+        entitlements_hash=sha256(
+            f"media-cleanup:{org_id}:{maintainer.id}".encode()
+        ).hexdigest(),
+        authn_context="worker:celery-beat",
+    )
+    cleaned = MediaAssetLifecycleService(db).cleanup_expired(
+        principal,
+        object_store=object_store,
+        retention_days=retention_days,
+        batch_size=batch_size,
+        now=now,
+    )
+    return {"cleaned": len(cleaned), "status": "completed"}
+
+
+@celery.task(
+    name="app.tasks.media_tasks.cleanup_media_assets_task",
+    acks_late=True,
+    soft_time_limit=600,
+    time_limit=660,
+)
+def cleanup_media_assets_task():
+    if not settings.MEDIA_LIFECYCLE_ENABLED:
+        return {"cleaned": 0, "status": "disabled"}
+    db = SessionLocal()
+    try:
+        return run_media_cleanup(
+            db,
+            org_id=settings.AGENT_ORG_ID,
+            maintenance_user_id=settings.MEDIA_MAINTENANCE_USER_ID,
+            object_store=_object_store(),
+            retention_days=settings.MEDIA_RETENTION_DAYS,
+            batch_size=settings.MEDIA_CLEANUP_BATCH_SIZE,
         )
     except Exception:
         db.rollback()
