@@ -11,9 +11,11 @@
 - 上传、规划、外部提交三个开关默认关闭；提交开启时强制依赖上传、规划和独立签名密钥。
 - 当前部署只能声明 `single_organization`；错误的多租户配置在 Settings 校验阶段失败。
 - Worker 验证策略决策时再次检查实时提交开关，管理员 kill switch 会让已签发但尚未执行的决策立即失效。
-- **Step 2 进行中（2026-08-11）**：已新增 `MediaAsset`、`MediaUploadIntent`、`MediaAssetRelation`、`MediaConsentRecord` 与 `0022_media_assets` 迁移；上传意图具有作用域幂等、服务端随机 quarantine key、过期和 metadata 复核；资产只有在扫描、rights、consent 满足后才可晋级。
-- 当前验证证据：媒体模块 22 tests passed、93% coverage；全量后端 349 passed、1 skipped；SQLite 从空库升级到 Alembic head 成功。
-- **Step 2 剩余**：S3-compatible 预签名 Adapter、隔离 bucket/prefix、下载 SSRF 防护、扫描/probe 沙箱、consent/rights 证据服务与上传 API。
+- **Step 2 进行中（2026-08-11）**：已新增 `MediaAsset`、`MediaUploadIntent`、`MediaAssetRelation`、`MediaConsentRecord`、`MediaScanReport`、`MediaRightsRecord`，以及 `0022_media_assets`、`0023_media_review_evidence` 迁移。
+- 已完成 S3-compatible 预签名上传、独立 quarantine/asset bucket、服务端 key、精确大小/MIME/hash/SSE 约束、生产配置 fail-closed、provider result URL SSRF/DNS-rebinding 防护，以及认证上传/完成 API。
+- 资产晋级改为证据 ID 驱动：扫描绑定资产哈希，版权和同意记录绑定组织、范围与有效期；对象先复制到 asset bucket 并复核 hash/size/MIME，再删除隔离副本和提交数据库，失败时保持 quarantine。
+- 当前验证证据：媒体专项测试 57 passed、88% coverage；全量后端 389 passed、1 skipped；SQLite 可从空库升级到 `0023_media_review_evidence`，并通过 `0023 → 0022 → 0023` 往返。
+- **Step 2 剩余**：真实恶意文件扫描与媒体 probe 沙箱、受控下载/缩略图、软删保留与对象生命周期清理任务。
 
 ## 1. 执行摘要
 
@@ -426,7 +428,9 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 - **主要文件**：
   - `backend/app/models/database.py`
   - `backend/alembic/versions/0022_media_assets.py`
+  - `backend/alembic/versions/0023_media_review_evidence.py`
   - `backend/app/services/media/assets.py`
+  - `backend/app/services/media/review.py`
   - `backend/app/integrations/object_store.py`
   - `backend/app/api/v1/video.py`
   - `backend/tests/test_media_assets.py`
@@ -440,7 +444,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 - **依赖**：Step 2；可与 Step 4 并行开发，但迁移按序合并
 - **主要文件**：
   - `backend/app/models/database.py`
-  - `backend/alembic/versions/0023_video_personas.py`
+  - `backend/alembic/versions/0024_video_personas.py`
   - `backend/app/services/media/personas.py`
   - `backend/app/services/media/planning.py`
   - `backend/app/services/media/prompts.py`
@@ -456,7 +460,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 - **依赖**：Step 1；可与 Step 2 并行开发，Step 3 在 Step 2 后开始
 - **主要文件**：
   - `backend/app/models/database.py`
-  - `backend/alembic/versions/0024_media_runtime.py`
+  - `backend/alembic/versions/0025_media_runtime.py`
   - `backend/app/integrations/media/base.py`
   - `backend/app/integrations/media/fal.py`
   - `backend/app/services/media/runtime_config.py`
@@ -473,7 +477,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 - **依赖**：Step 2 + Step 4
 - **主要文件**：
   - `backend/app/models/database.py`
-  - `backend/alembic/versions/0025_media_jobs.py`
+  - `backend/alembic/versions/0026_media_jobs.py`
   - `backend/app/services/media/jobs.py`
   - `backend/app/services/media/events.py`
   - `backend/app/services/media/budgets.py`
@@ -580,7 +584,7 @@ flowchart LR
     S9 --> S10
 ```
 
-核心实现最大建议并行度为 2：Step 1 完成后 Step 2 与 Step 4 并行；二者完成后 Step 3 与 Step 5 可并行。若计入独立的 Step 9 fixture/评测建设，团队峰值并行度为 3，但发布门禁必须等待 Step 8。Step 2/3/4 都修改模型与 migration，分支可并行开发但必须按 `0022 → 0023 → 0024` 顺序 rebase/合并。
+核心实现最大建议并行度为 2：Step 1 完成后 Step 2 与 Step 4 并行；二者完成后 Step 3 与 Step 5 可并行。若计入独立的 Step 9 fixture/评测建设，团队峰值并行度为 3，但发布门禁必须等待 Step 8。Step 2/3/4 都修改模型与 migration，分支可并行开发但必须按 `0022 assets → 0023 evidence → 0024 personas → 0025 runtime → 0026 jobs` 顺序 rebase/合并。
 
 ## 10. 测试矩阵与非功能指标
 
