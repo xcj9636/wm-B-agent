@@ -5,7 +5,6 @@ from app.main import app
 from app.services.media.runtime import (
     MediaCapabilityCatalog,
     MediaModelCapability,
-    MediaProviderProbe,
     MediaRuntimeProbeResponse,
     MediaRuntimeRevisionResponse,
     MediaRuntimeState,

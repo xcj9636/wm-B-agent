@@ -12,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.integrations.provider_media import SafeProviderMediaURLPolicy
 from app.services.media.runtime import (
     MediaCapabilityCatalog,
+    MediaModelCapability,
     MediaProviderProbe,
+    MediaWorkflowMode,
 )
 
 
@@ -460,3 +462,58 @@ class FalMediaAdapter:
             error_code="invalid_provider_response",
             retryable=False,
         )
+
+
+def curated_fal_catalog() -> MediaCapabilityCatalog:
+    """Small server-owned allowlist verified against fal docs on 2026-08-11."""
+    return MediaCapabilityCatalog(
+        provider="fal",
+        schema_version="curated-2026-08-11",
+        models=[
+            MediaModelCapability(
+                id="fal-ai/flux/schnell",
+                display_name="FLUX.1 schnell",
+                modes=[MediaWorkflowMode.TEXT_TO_IMAGE],
+            ),
+            MediaModelCapability(
+                id="fal-ai/kling-video/v2/master/image-to-video",
+                display_name="Kling Video V2 Master · Image to Video",
+                modes=[MediaWorkflowMode.IMAGE_TO_VIDEO],
+            ),
+            MediaModelCapability(
+                id="fal-ai/kling-video/v2/master/text-to-video",
+                display_name="Kling Video V2 Master · Text to Video",
+                modes=[MediaWorkflowMode.TEXT_TO_VIDEO],
+            ),
+        ],
+    )
+
+
+class FalMediaProviderControl:
+    """Construct key-scoped adapters without retaining a secret on the service."""
+
+    def __init__(
+        self,
+        catalog: Optional[MediaCapabilityCatalog] = None,
+    ) -> None:
+        self._catalog = catalog or curated_fal_catalog()
+
+    def get_capabilities(self) -> MediaCapabilityCatalog:
+        return self._catalog.model_copy(deep=True)
+
+    async def discover_capabilities(self, api_key: str) -> MediaCapabilityCatalog:
+        if not api_key.strip():
+            raise ValueError("fal API key is required")
+        return self.get_capabilities()
+
+    async def probe(
+        self,
+        *,
+        api_key: str,
+        model_ids: List[str],
+    ) -> MediaProviderProbe:
+        adapter = FalMediaAdapter(api_key, catalog=self._catalog)
+        try:
+            return await adapter.probe(api_key=api_key, model_ids=model_ids)
+        finally:
+            await adapter.aclose()

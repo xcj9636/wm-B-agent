@@ -72,6 +72,8 @@ class MediaProviderProbe(BaseModel):
 
 
 class MediaProviderControl(Protocol):
+    def get_capabilities(self) -> MediaCapabilityCatalog: ...
+
     async def discover_capabilities(self, api_key: str) -> MediaCapabilityCatalog: ...
 
     async def probe(
@@ -84,6 +86,9 @@ class MediaProviderControl(Protocol):
 
 class UnavailableMediaProviderControl:
     """Fail-closed default until the concrete provider adapter is wired."""
+
+    def get_capabilities(self) -> MediaCapabilityCatalog:
+        raise RuntimeError("media_provider_adapter_unavailable")
 
     async def discover_capabilities(self, api_key: str) -> MediaCapabilityCatalog:
         raise RuntimeError("media_provider_adapter_unavailable")
@@ -178,6 +183,9 @@ class MediaRuntimeService:
             ),
             api_key_configured=configured,
         )
+
+    def get_capabilities(self) -> MediaCapabilityCatalog:
+        return self._provider_control.get_capabilities()
 
     def list_revisions(self) -> List[MediaRuntimeRevisionResponse]:
         rows = (
@@ -451,4 +459,8 @@ class MediaRuntimeService:
 def get_media_runtime_service(
     db: Session = Depends(get_db),
 ) -> MediaRuntimeService:
-    return MediaRuntimeService(db)
+    from app.integrations.fal_media import FalMediaProviderControl
+
+    return MediaRuntimeService(db, provider_control=FalMediaProviderControl())
+    def get_capabilities(self) -> MediaCapabilityCatalog:
+        raise RuntimeError("media_provider_adapter_unavailable")
