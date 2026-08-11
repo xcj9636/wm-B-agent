@@ -229,3 +229,20 @@ def test_compiler_rejects_unapproved_storyboard_and_cross_tenant_actor(db_sessio
             shot.shot_id,
             principal(uuid4()),
         )
+
+
+def test_compiler_rechecks_current_evidence_acl_before_reading_chunks(db_session):
+    actor, project, storyboard_version, shot = setup_project(db_session)
+    actor_without_sales_access = principal(
+        actor.org_id,
+        user_id=actor.user_id,
+        roles={"media_operator"},
+    )
+
+    with pytest.raises(VideoPromptForbidden, match="evidence"):
+        VideoPromptCompiler(db_session, planning_enabled=True).compile(
+            project.id,
+            storyboard_version.id,
+            shot.shot_id,
+            actor_without_sales_access,
+        )
