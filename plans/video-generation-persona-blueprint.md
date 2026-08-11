@@ -14,8 +14,11 @@
 - **Step 2 进行中（2026-08-11）**：已新增 `MediaAsset`、`MediaUploadIntent`、`MediaAssetRelation`、`MediaConsentRecord`、`MediaScanReport`、`MediaRightsRecord`，以及 `0022_media_assets`、`0023_media_review_evidence` 迁移。
 - 已完成 S3-compatible 预签名上传、独立 quarantine/asset bucket、服务端 key、精确大小/MIME/hash/SSE 约束、生产配置 fail-closed、provider result URL SSRF/DNS-rebinding 防护，以及认证上传/完成 API。
 - 资产晋级改为证据 ID 驱动：扫描绑定资产哈希，版权和同意记录绑定组织、范围与有效期；对象先复制到 asset bucket 并复核 hash/size/MIME，再删除隔离副本和提交数据库，失败时保持 quarantine。
-- 当前验证证据：媒体专项测试 57 passed、88% coverage；全量后端 389 passed、1 skipped；SQLite 可从空库升级到 `0023_media_review_evidence`，并通过 `0023 → 0022 → 0023` 往返。
-- **Step 2 剩余**：真实恶意文件扫描与媒体 probe 沙箱、受控下载/缩略图、软删保留与对象生命周期清理任务。
+- 已完成真实 ClamAV + FFprobe 自动检查链路：S3 隔离对象流式暂存到 0600 随机临时文件并重新计算 SHA-256；命令无 shell、限制超时和输出量；只持久化白名单技术元数据。扫描和 probe 任一 unavailable/rejected 都不能晋级。
+- 客户端提交扫描结论的 API 已移除，替换为只接收空请求体的 202 排队接口；Celery Worker 从数据库重新派生组织、对象 key、哈希、MIME 和大小。生产上传/提交未启用 inspection 时拒绝启动。
+- Worker 容器使用非 root、只读根文件系统、`cap_drop: ALL`、`no-new-privileges` 和 noexec/nosuid/nodev 临时目录；ClamAV 1.4 LTS 病毒库通过持久卷更新并只读挂入 Worker。
+- 当前验证证据：检查链路专项 17 passed、86% coverage；全量后端 409 passed、1 skipped；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0023_media_review_evidence`，并通过 `0023 → 0022 → 0023` 往返。
+- **Step 2 剩余**：受控下载/缩略图、软删保留与对象生命周期清理任务。
 
 ## 1. 执行摘要
 
@@ -431,8 +434,11 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
   - `backend/alembic/versions/0023_media_review_evidence.py`
   - `backend/app/services/media/assets.py`
   - `backend/app/services/media/review.py`
+  - `backend/app/services/media/inspection.py`
+  - `backend/app/services/media/inspection_service.py`
   - `backend/app/integrations/object_store.py`
   - `backend/app/api/v1/video.py`
+  - `backend/app/tasks/media_tasks.py`
   - `backend/tests/test_media_assets.py`
 - **工作**：实现 `MediaAsset/AssetRelation/UploadIntent/ConsentRecord`；local-dev/S3-compatible Adapter；quarantine、预签名上传、complete 校验、hash、ACL、软删和清理任务；同时实现提交前必需的 rights/consent/扫描最小门禁。
 - **验收**：越权资产不可读；大文件不进入 DB/Celery；客户端 key 篡改、伪 MIME、超限、未完成上传、重复 hash、媒体炸弹、SSRF result URL 和被引用删除均有明确行为；检查不可用不能晋级；生产 local storage 启动失败。
