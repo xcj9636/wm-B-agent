@@ -114,9 +114,25 @@ class VideoPersonaSpec(BaseModel):
     default_workflow: VideoWorkflowMode = VideoWorkflowMode.AUTO
 
 
+class VideoProjectBrief(BaseModel):
+    """Provider-neutral business brief pinned to a video project."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: str = Field(min_length=1, max_length=200)
+    objective: str = Field(min_length=1, max_length=1000)
+    product_summary: str = Field(min_length=1, max_length=2000)
+    target_audience: str = Field(min_length=1, max_length=1000)
+    markets: List[str] = Field(min_length=1, max_length=50)
+    channels: List[str] = Field(min_length=1, max_length=20)
+    language: str = Field(min_length=2, max_length=35)
+    target_duration_seconds: int = Field(ge=1, le=3600)
+
+
 class StoryboardShot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    shot_id: UUID = Field(default_factory=uuid4)
     sequence: int = Field(ge=1, le=100)
     duration_seconds: int = Field(ge=1, le=120)
     purpose: str = Field(min_length=1, max_length=160)

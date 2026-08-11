@@ -1765,6 +1765,133 @@ class VideoPersonaVersion(Base):
     )
 
 
+class VideoProject(Base):
+    """Project pinned to one approved persona snapshot."""
+
+    __tablename__ = "video_projects"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    owner_user_id = Column(Integer, nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    brief_json = Column(JSON, nullable=False)
+    brief_hash = Column(String(64), nullable=False)
+    persona_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("video_persona_versions.id"),
+        nullable=False,
+    )
+    persona_snapshot_json = Column(JSON, nullable=False)
+    persona_spec_hash = Column(String(64), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False, default="draft")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "owner_user_id",
+            "idempotency_key",
+            name="uq_video_project_scope_idempotency",
+        ),
+        Index("idx_video_project_org_created", "org_id", "created_at"),
+        Index("idx_video_project_persona", "persona_version_id"),
+    )
+
+
+class VideoProjectEvidence(Base):
+    """Immutable, ACL-authorized knowledge snapshot allowed for one project."""
+
+    __tablename__ = "video_project_evidence"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("video_projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    knowledge_record_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_documents.record_id"),
+        nullable=False,
+    )
+    document_id = Column(UUID(as_uuid=True), nullable=False)
+    document_version = Column(Integer, nullable=False)
+    source_ref = Column(String(500), nullable=False)
+    title = Column(String(300), nullable=False)
+    authority = Column(String(60), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    acl_policy_version = Column(String(64), nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    added_by_user_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "knowledge_record_id",
+            name="uq_video_project_evidence_record",
+        ),
+        Index("idx_video_project_evidence_project", "project_id"),
+    )
+
+
+class VideoStoryboardVersion(Base):
+    """Immutable storyboard revision with independent approval."""
+
+    __tablename__ = "video_storyboard_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("video_projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    revision = Column(Integer, nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    storyboard_json = Column(JSON, nullable=False)
+    storyboard_hash = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False, default="draft")
+    created_by_user_id = Column(Integer, nullable=False)
+    approved_by_user_id = Column(Integer)
+    approved_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "revision",
+            name="uq_video_storyboard_revision",
+        ),
+        UniqueConstraint(
+            "org_id",
+            "created_by_user_id",
+            "idempotency_key",
+            name="uq_video_storyboard_scope_idempotency",
+        ),
+        CheckConstraint(
+            "revision > 0",
+            name="ck_video_storyboard_revision_positive",
+        ),
+        Index(
+            "idx_video_storyboard_project_status",
+            "project_id",
+            "status",
+            "revision",
+        ),
+    )
+
+
 class MediaUploadIntent(Base):
     """Server-keyed, one-use upload intent for a quarantined object."""
 

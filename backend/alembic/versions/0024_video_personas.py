@@ -79,7 +79,130 @@ def upgrade() -> None:
         ["org_id", "created_at"],
     )
 
+    op.create_table(
+        "video_projects",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("org_id", sa.Uuid(), nullable=False),
+        sa.Column("owner_user_id", sa.Integer(), nullable=False),
+        sa.Column("idempotency_key", sa.String(255), nullable=False),
+        sa.Column("input_hash", sa.String(64), nullable=False),
+        sa.Column("brief_json", sa.JSON(), nullable=False),
+        sa.Column("brief_hash", sa.String(64), nullable=False),
+        sa.Column("persona_version_id", sa.Uuid(), nullable=False),
+        sa.Column("persona_snapshot_json", sa.JSON(), nullable=False),
+        sa.Column("persona_spec_hash", sa.String(64), nullable=False),
+        sa.Column("sensitivity", sa.String(20), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["persona_version_id"],
+            ["video_persona_versions.id"],
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "org_id",
+            "owner_user_id",
+            "idempotency_key",
+            name="uq_video_project_scope_idempotency",
+        ),
+    )
+    op.create_index(
+        "idx_video_project_org_created",
+        "video_projects",
+        ["org_id", "created_at"],
+    )
+    op.create_index(
+        "idx_video_project_persona",
+        "video_projects",
+        ["persona_version_id"],
+    )
+
+    op.create_table(
+        "video_project_evidence",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("project_id", sa.Uuid(), nullable=False),
+        sa.Column("org_id", sa.Uuid(), nullable=False),
+        sa.Column("knowledge_record_id", sa.Uuid(), nullable=False),
+        sa.Column("document_id", sa.Uuid(), nullable=False),
+        sa.Column("document_version", sa.Integer(), nullable=False),
+        sa.Column("source_ref", sa.String(500), nullable=False),
+        sa.Column("title", sa.String(300), nullable=False),
+        sa.Column("authority", sa.String(60), nullable=False),
+        sa.Column("sensitivity", sa.String(20), nullable=False),
+        sa.Column("acl_policy_version", sa.String(64), nullable=False),
+        sa.Column("content_hash", sa.String(64), nullable=False),
+        sa.Column("added_by_user_id", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["knowledge_record_id"],
+            ["knowledge_documents.record_id"],
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id"],
+            ["video_projects.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "project_id",
+            "knowledge_record_id",
+            name="uq_video_project_evidence_record",
+        ),
+    )
+    op.create_index(
+        "idx_video_project_evidence_project",
+        "video_project_evidence",
+        ["project_id"],
+    )
+
+    op.create_table(
+        "video_storyboard_versions",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("project_id", sa.Uuid(), nullable=False),
+        sa.Column("org_id", sa.Uuid(), nullable=False),
+        sa.Column("revision", sa.Integer(), nullable=False),
+        sa.Column("idempotency_key", sa.String(255), nullable=False),
+        sa.Column("input_hash", sa.String(64), nullable=False),
+        sa.Column("storyboard_json", sa.JSON(), nullable=False),
+        sa.Column("storyboard_hash", sa.String(64), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False),
+        sa.Column("created_by_user_id", sa.Integer(), nullable=False),
+        sa.Column("approved_by_user_id", sa.Integer()),
+        sa.Column("approved_at", sa.DateTime()),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.CheckConstraint(
+            "revision > 0",
+            name="ck_video_storyboard_revision_positive",
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id"],
+            ["video_projects.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "project_id",
+            "revision",
+            name="uq_video_storyboard_revision",
+        ),
+        sa.UniqueConstraint(
+            "org_id",
+            "created_by_user_id",
+            "idempotency_key",
+            name="uq_video_storyboard_scope_idempotency",
+        ),
+    )
+    op.create_index(
+        "idx_video_storyboard_project_status",
+        "video_storyboard_versions",
+        ["project_id", "status", "revision"],
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("video_storyboard_versions")
+    op.drop_table("video_project_evidence")
+    op.drop_table("video_projects")
     op.drop_table("video_persona_versions")
     op.drop_table("video_personas")
