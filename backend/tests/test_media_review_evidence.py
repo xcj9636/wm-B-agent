@@ -60,7 +60,10 @@ def scan_command(target):
         scanner_version="1.4.2",
         status=AssetScanStatus.PASSED,
         asset_sha256=target.sha256,
-        findings={"signatures": []},
+        findings={
+            "signatures": [],
+            "probe": {"status": "passed", "metadata": {}},
+        },
     )
 
 
@@ -236,6 +239,31 @@ def test_required_consent_must_cover_video_and_reference_same_org_evidence(db_se
             scan_report_id=scan.id,
             rights_record_id=rights.id,
             consent_record_id=image_only.id,
+            principal=admin,
+            object_store=FakePromotionStore(),
+            now=now,
+        )
+
+
+def test_promotion_rejects_scan_evidence_without_passed_probe(db_session):
+    now = datetime.now(timezone.utc)
+    admin = principal()
+    target = asset(db_session, admin)
+    service = MediaReviewService(db_session)
+    scan = service.record_scan(
+        target.id,
+        scan_command(target).model_copy(update={"findings": {"signatures": []}}),
+        admin,
+        now=now,
+    )
+    rights = service.record_rights(target.id, rights_command(now), admin, now=now)
+
+    with pytest.raises(MediaAssetConflict, match="probe"):
+        service.promote(
+            target.id,
+            scan_report_id=scan.id,
+            rights_record_id=rights.id,
+            consent_record_id=None,
             principal=admin,
             object_store=FakePromotionStore(),
             now=now,
