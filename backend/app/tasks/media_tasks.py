@@ -12,8 +12,9 @@ from app.integrations.object_store import (
     ObjectStoreConfigurationError,
     S3CompatibleMediaObjectStore,
 )
-from app.models.database import MediaAsset
+from app.models.database import MediaAsset, User
 from app.services.agent_runtime.contracts import ExecutionPrincipal
+from app.services.media.assets import MediaAssetForbidden
 from app.services.media.inspection import MediaInspectionRunner
 from app.services.media.inspection_service import MediaInspectionService
 from app.services.media.thumbnail import MediaThumbnailRunner, MediaThumbnailService
@@ -93,6 +94,16 @@ def run_media_thumbnail(
     asset = db.get(MediaAsset, asset_id)
     if asset is None or asset.deleted_at is not None:
         raise LookupError("Media asset was not found")
+    requester = db.get(User, requested_by_user_id)
+    if (
+        requester is None
+        or not requester.is_active
+        or (
+            requester.id != asset.owner_user_id
+            and not requester.is_superuser
+        )
+    ):
+        raise MediaAssetForbidden("Thumbnail task requester is not authorized")
     principal = ExecutionPrincipal(
         org_id=asset.org_id,
         user_id=requested_by_user_id,
