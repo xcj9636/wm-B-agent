@@ -21,6 +21,7 @@ from app.services.agent_runtime.contracts import (
     derive_sensitivity,
 )
 from app.services.idempotency import canonical_hash
+from app.services.knowledge import SQLKnowledgeACL
 from app.services.media.contracts import (
     GenerationIntent,
     GenerationMode,
@@ -77,6 +78,7 @@ class VideoPromptCompiler:
     def __init__(self, db: Session, *, planning_enabled: bool) -> None:
         self._db = db
         self._planning_enabled = planning_enabled
+        self._knowledge_acl = SQLKnowledgeACL(db)
 
     def compile(
         self,
@@ -116,7 +118,7 @@ class VideoPromptCompiler:
             raise VideoPromptNotFound("Storyboard shot was not found")
         persona = VideoPersonaSpec.model_validate(project.persona_snapshot_json)
         self._reject_prohibited_claims(persona, shot)
-        evidence_manifest = self._evidence_manifest(project.id, shot)
+        evidence_manifest = self._evidence_manifest(project.id, shot, principal)
         reference_assets, sensitivity = self._reference_assets(
             shot,
             principal,
@@ -163,6 +165,7 @@ class VideoPromptCompiler:
         self,
         project_id: UUID,
         shot: StoryboardShot,
+        principal: ExecutionPrincipal,
     ) -> list[dict[str, object]]:
         requested = set(shot.claim_evidence_ids)
         rows = (
@@ -183,6 +186,15 @@ class VideoPromptCompiler:
         remaining = self._MAX_EVIDENCE_CHARS
         manifest: list[dict[str, object]] = []
         for row in rows:
+            if not self._knowledge_acl.authorize(
+                principal=principal,
+                document_id=row.document_id,
+                document_version=row.document_version,
+                acl_policy_version=row.acl_policy_version,
+            ):
+                raise VideoPromptForbidden(
+                    "Project evidence is no longer authorized"
+                )
             chunks = (
                 self._db.query(KnowledgeChunk)
                 .filter(KnowledgeChunk.document_record_id == row.knowledge_record_id)
