@@ -78,6 +78,28 @@ def test_media_features_are_default_off():
     assert config.MEDIA_UPLOAD_ENABLED is False
     assert config.MEDIA_PLANNING_ENABLED is False
     assert config.MEDIA_SUBMIT_ENABLED is False
+    assert config.MEDIA_INSPECTION_ENABLED is False
+
+
+def test_production_upload_and_submission_require_inspection():
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            DEPLOYMENT_ENVIRONMENT="production",
+            MEDIA_UPLOAD_ENABLED=True,
+            MEDIA_OBJECT_STORE_BACKEND="s3",
+            MEDIA_S3_QUARANTINE_BUCKET="media-quarantine",
+            MEDIA_S3_ASSET_BUCKET="media-assets",
+        )
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_UPLOAD_ENABLED=True,
+            MEDIA_PLANNING_ENABLED=True,
+            MEDIA_SUBMIT_ENABLED=True,
+            MEDIA_POLICY_SIGNING_KEY="m" * 32,
+        )
 
 
 def test_settings_reject_multi_tenant_deployment_claim():
@@ -109,6 +131,7 @@ def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
     config = Settings(
         _env_file=None,
         MEDIA_UPLOAD_ENABLED=True,
+        MEDIA_INSPECTION_ENABLED=True,
         MEDIA_PLANNING_ENABLED=True,
         MEDIA_SUBMIT_ENABLED=True,
         MEDIA_POLICY_SIGNING_KEY="m" * 32,

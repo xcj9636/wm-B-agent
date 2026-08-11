@@ -235,6 +235,7 @@ def test_production_media_upload_requires_configured_s3_backend():
         _env_file=None,
         DEPLOYMENT_ENVIRONMENT="production",
         MEDIA_UPLOAD_ENABLED=True,
+        MEDIA_INSPECTION_ENABLED=True,
         MEDIA_OBJECT_STORE_BACKEND="s3",
         MEDIA_S3_QUARANTINE_BUCKET="media-quarantine",
         MEDIA_S3_ASSET_BUCKET="media-assets",
