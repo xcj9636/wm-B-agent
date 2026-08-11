@@ -4,7 +4,7 @@ from datetime import datetime
 from functools import lru_cache
 from hashlib import sha256
 import json
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,7 +21,13 @@ from app.integrations.object_store import (
     PresignedUpload,
     S3CompatibleMediaObjectStore,
 )
-from app.models.database import MediaAsset, MediaUploadIntent, User
+from app.models.database import (
+    MediaAsset,
+    MediaConsentRecord,
+    MediaRightsRecord,
+    MediaScanReport,
+    User,
+)
 from app.services.agent_runtime.contracts import (
     ExecutionPrincipal,
     Sensitivity,
@@ -35,7 +41,18 @@ from app.services.media.assets import (
     MediaAssetService,
     UploadIntentCommand,
 )
-from app.services.media.contracts import MediaAssetKind
+from app.services.media.contracts import (
+    AssetConsentStatus,
+    AssetRightsStatus,
+    AssetScanStatus,
+    MediaAssetKind,
+)
+from app.services.media.review import (
+    ConsentEvidenceCommand,
+    MediaReviewService,
+    RightsEvidenceCommand,
+    ScanEvidenceCommand,
+)
 
 
 router = APIRouter()
@@ -80,8 +97,98 @@ class MediaAssetResponse(BaseModel):
     created_at: datetime
 
 
+class ScanReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scanner: str = Field(min_length=1, max_length=100)
+    scanner_version: str = Field(min_length=1, max_length=100)
+    status: AssetScanStatus
+    asset_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    findings: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScanReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    asset_id: UUID
+    scanner: str
+    scanner_version: str
+    status: str
+    asset_sha256: str
+    created_at: datetime
+
+
+class RightsReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: AssetRightsStatus
+    basis: str = Field(min_length=1, max_length=100)
+    territories: list[str] = Field(min_length=1, max_length=100)
+    channels: list[str] = Field(min_length=1, max_length=100)
+    source_ref: str = Field(min_length=1, max_length=500)
+    valid_from: datetime
+    valid_until: Optional[datetime] = None
+
+
+class RightsReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    asset_id: UUID
+    status: str
+    basis: str
+    territories: list[str]
+    channels: list[str]
+    source_ref: str
+    valid_from: datetime
+    valid_until: Optional[datetime]
+    created_at: datetime
+
+
+class ConsentReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    subject_ref: str = Field(min_length=1, max_length=255)
+    purpose: str = Field(min_length=1, max_length=500)
+    regions: list[str] = Field(min_length=1, max_length=100)
+    media_types: list[str] = Field(min_length=1, max_length=20)
+    status: AssetConsentStatus
+    valid_from: datetime
+    valid_until: Optional[datetime] = None
+    evidence_asset_id: UUID
+
+
+class ConsentReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    asset_id: UUID
+    subject_ref: str
+    purpose: str
+    regions: list[str]
+    media_types: list[str]
+    status: str
+    valid_from: datetime
+    valid_until: Optional[datetime]
+    evidence_asset_id: UUID
+    created_at: datetime
+
+
+class PromoteAssetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scan_report_id: UUID
+    rights_record_id: UUID
+    consent_record_id: Optional[UUID] = None
+
+
 def get_media_asset_service(db: Session = Depends(get_db)) -> MediaAssetService:
     return MediaAssetService(db, upload_enabled=settings.MEDIA_UPLOAD_ENABLED)
+
+
+def get_media_review_service(db: Session = Depends(get_db)) -> MediaReviewService:
+    return MediaReviewService(db)
 
 
 @lru_cache(maxsize=1)
@@ -225,3 +332,102 @@ async def complete_upload(
             status_code=409,
             detail="Upload cannot be completed",
         ) from exc
+
+
+@router.post(
+    "/assets/{asset_id}/reviews/scan",
+    response_model=ScanReviewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_scan_review(
+    asset_id: UUID,
+    request: ScanReviewRequest,
+    current_user: User = Depends(get_current_active_user),
+    review_service: MediaReviewService = Depends(get_media_review_service),
+):
+    try:
+        report: MediaScanReport = review_service.record_scan(
+            asset_id,
+            ScanEvidenceCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return ScanReviewResponse.model_validate(report)
+    except Exception as exc:
+        _raise_review_http_error(exc)
+
+
+@router.post(
+    "/assets/{asset_id}/reviews/rights",
+    response_model=RightsReviewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_rights_review(
+    asset_id: UUID,
+    request: RightsReviewRequest,
+    current_user: User = Depends(get_current_active_user),
+    review_service: MediaReviewService = Depends(get_media_review_service),
+):
+    try:
+        record: MediaRightsRecord = review_service.record_rights(
+            asset_id,
+            RightsEvidenceCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return RightsReviewResponse.model_validate(record)
+    except Exception as exc:
+        _raise_review_http_error(exc)
+
+
+@router.post(
+    "/assets/{asset_id}/reviews/consent",
+    response_model=ConsentReviewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def record_consent_review(
+    asset_id: UUID,
+    request: ConsentReviewRequest,
+    current_user: User = Depends(get_current_active_user),
+    review_service: MediaReviewService = Depends(get_media_review_service),
+):
+    try:
+        record: MediaConsentRecord = review_service.record_consent(
+            asset_id,
+            ConsentEvidenceCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return ConsentReviewResponse.model_validate(record)
+    except Exception as exc:
+        _raise_review_http_error(exc)
+
+
+@router.post(
+    "/assets/{asset_id}/promote",
+    response_model=MediaAssetResponse,
+)
+async def promote_asset(
+    asset_id: UUID,
+    request: PromoteAssetRequest,
+    current_user: User = Depends(get_current_active_user),
+    review_service: MediaReviewService = Depends(get_media_review_service),
+):
+    try:
+        asset = review_service.promote(
+            asset_id,
+            scan_report_id=request.scan_report_id,
+            rights_record_id=request.rights_record_id,
+            consent_record_id=request.consent_record_id,
+            principal=_principal(current_user),
+        )
+        return MediaAssetResponse.model_validate(asset)
+    except Exception as exc:
+        _raise_review_http_error(exc)
+
+
+def _raise_review_http_error(exc: Exception) -> None:
+    if isinstance(exc, MediaAssetNotFound):
+        raise HTTPException(status_code=404, detail="Media review resource not found") from exc
+    if isinstance(exc, MediaAssetForbidden):
+        raise HTTPException(status_code=403, detail="Media review forbidden") from exc
+    if isinstance(exc, MediaAssetConflict):
+        raise HTTPException(status_code=409, detail="Media review evidence is invalid") from exc
+    raise exc
