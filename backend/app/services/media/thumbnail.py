@@ -125,6 +125,21 @@ class MediaThumbnailService:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def authorize_request(
+        self,
+        asset_id: UUID,
+        principal: ExecutionPrincipal,
+    ) -> MediaAsset:
+        """Authorize a user request without granting worker capabilities."""
+        source = self._asset(asset_id)
+        if source.org_id != principal.org_id:
+            raise MediaAssetForbidden("Asset is outside the current organization")
+        roles = {role.strip().lower() for role in principal.roles}
+        if source.owner_user_id != principal.user_id and "admin" not in roles:
+            raise MediaAssetForbidden("Thumbnail request requires asset ownership")
+        self._validate_source(source)
+        return source
+
     def generate(
         self,
         asset_id: UUID,

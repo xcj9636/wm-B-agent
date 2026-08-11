@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     MEDIA_S3_KEY_PREFIX: str = ""
     MEDIA_S3_KMS_KEY_ID: str = ""
     MEDIA_DOWNLOAD_TTL_SECONDS: int = Field(default=120, ge=30, le=300)
+    MEDIA_THUMBNAIL_ENABLED: bool = False
+    MEDIA_FFMPEG_PATH: str = "/usr/bin/ffmpeg"
+    MEDIA_THUMBNAIL_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=300)
+    MEDIA_THUMBNAIL_PROCESS_OUTPUT_BYTES: int = Field(
+        default=1_048_576,
+        ge=1024,
+        le=16_777_216,
+    )
+    MEDIA_THUMBNAIL_MAX_BYTES: int = Field(
+        default=10_485_760,
+        ge=1024,
+        le=52_428_800,
+    )
     MEDIA_INSPECTION_ENABLED: bool = False
     MEDIA_CLAMSCAN_PATH: str = "/usr/bin/clamscan"
     MEDIA_FFPROBE_PATH: str = "/usr/bin/ffprobe"
@@ -218,6 +231,11 @@ class Settings(BaseSettings):
                 raise ValueError("MEDIA_CLAMSCAN_PATH must be absolute")
             if not Path(self.MEDIA_FFPROBE_PATH).is_absolute():
                 raise ValueError("MEDIA_FFPROBE_PATH must be absolute")
+        if self.MEDIA_THUMBNAIL_ENABLED:
+            if self.MEDIA_OBJECT_STORE_BACKEND != "s3":
+                raise ValueError("media thumbnails require the S3 backend")
+            if not Path(self.MEDIA_FFMPEG_PATH).is_absolute():
+                raise ValueError("MEDIA_FFMPEG_PATH must be absolute")
         if (
             self.DEPLOYMENT_ENVIRONMENT == "production"
             and self.MEDIA_UPLOAD_ENABLED

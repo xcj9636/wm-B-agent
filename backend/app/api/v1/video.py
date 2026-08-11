@@ -52,7 +52,11 @@ from app.services.media.review import (
     MediaReviewService,
     RightsEvidenceCommand,
 )
-from app.tasks.media_tasks import inspect_media_asset_task
+from app.services.media.thumbnail import MediaThumbnailService
+from app.tasks.media_tasks import (
+    generate_media_thumbnail_task,
+    inspect_media_asset_task,
+)
 
 
 router = APIRouter()
@@ -104,6 +108,18 @@ class InspectionQueueRequest(BaseModel):
 
 
 class InspectionQueueResponse(BaseModel):
+    asset_id: UUID
+    task_id: str
+    status: str
+
+
+class ThumbnailQueueRequest(BaseModel):
+    """Intentionally empty: transform parameters are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ThumbnailQueueResponse(BaseModel):
     asset_id: UUID
     task_id: str
     status: str
@@ -187,6 +203,12 @@ def get_media_access_service(
     return MediaAssetAccessService(db)
 
 
+def get_media_thumbnail_service(
+    db: Session = Depends(get_db),
+) -> MediaThumbnailService:
+    return MediaThumbnailService(db)
+
+
 class MediaInspectionDispatchUnavailable(RuntimeError):
     pass
 
@@ -200,6 +222,20 @@ def dispatch_media_inspection(asset_id: UUID, requested_by_user_id: int) -> str:
 
 def get_media_inspection_dispatcher() -> Callable[[UUID, int], str]:
     return dispatch_media_inspection
+
+
+def dispatch_media_thumbnail(asset_id: UUID, requested_by_user_id: int) -> str:
+    if not settings.MEDIA_THUMBNAIL_ENABLED:
+        raise MediaInspectionDispatchUnavailable("Media thumbnails are disabled")
+    result = generate_media_thumbnail_task.delay(
+        str(asset_id),
+        requested_by_user_id,
+    )
+    return str(result.id)
+
+
+def get_media_thumbnail_dispatcher() -> Callable[[UUID, int], str]:
+    return dispatch_media_thumbnail
 
 
 @lru_cache(maxsize=1)
@@ -379,6 +415,47 @@ async def queue_media_inspection(
         ) from exc
     except Exception as exc:
         _raise_review_http_error(exc)
+
+
+@router.post(
+    "/assets/{asset_id}/thumbnail",
+    response_model=ThumbnailQueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def queue_media_thumbnail(
+    asset_id: UUID,
+    request: ThumbnailQueueRequest,
+    current_user: User = Depends(get_current_active_user),
+    thumbnail_service: MediaThumbnailService = Depends(
+        get_media_thumbnail_service
+    ),
+    dispatcher: Callable[[UUID, int], str] = Depends(
+        get_media_thumbnail_dispatcher
+    ),
+):
+    try:
+        thumbnail_service.authorize_request(
+            asset_id,
+            _principal(current_user),
+        )
+        task_id = dispatcher(asset_id, current_user.id)
+        return ThumbnailQueueResponse(
+            asset_id=asset_id,
+            task_id=task_id,
+            status="queued",
+        )
+    except MediaInspectionDispatchUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Media thumbnail service is unavailable",
+        ) from exc
+    except (MediaAssetNotFound, MediaAssetForbidden) as exc:
+        raise HTTPException(status_code=404, detail="Media asset not found") from exc
+    except MediaAssetConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Media asset cannot produce a thumbnail",
+        ) from exc
 
 
 @router.post(
