@@ -114,6 +114,8 @@ def test_promotion_copies_to_asset_bucket_verifies_then_deletes_quarantine():
     promoted = object_store.promote(
         "quarantine/ba6e/upload-id",
         expected_sha256="a" * 64,
+        expected_size_bytes=4096,
+        expected_content_type="image/png",
     )
 
     assert promoted.key == "assets/ba6e/upload-id"
@@ -146,6 +148,8 @@ def test_promotion_recovers_existing_verified_destination_without_copying():
     promoted = object_store.promote(
         "quarantine/ba6e/upload-id",
         expected_sha256="a" * 64,
+        expected_size_bytes=4096,
+        expected_content_type="image/png",
     )
 
     assert promoted.key == "assets/ba6e/upload-id"
@@ -162,6 +166,24 @@ def test_promotion_never_deletes_quarantine_when_destination_hash_is_wrong():
         store(client).promote(
             "quarantine/ba6e/upload-id",
             expected_sha256="a" * 64,
+            expected_size_bytes=4096,
+            expected_content_type="image/png",
+        )
+
+    assert client.delete_calls == []
+
+
+def test_promotion_keeps_quarantine_when_destination_size_is_wrong():
+    client = FakeS3Client()
+    client.asset_exists = True
+    client.head_response["ContentLength"] = 4097
+
+    with pytest.raises(ObjectStoreIntegrityError, match="size"):
+        store(client).promote(
+            "quarantine/ba6e/upload-id",
+            expected_sha256="a" * 64,
+            expected_size_bytes=4096,
+            expected_content_type="image/png",
         )
 
     assert client.delete_calls == []

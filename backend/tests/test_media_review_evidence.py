@@ -95,12 +95,21 @@ class FakePromotionStore:
     def __init__(self):
         self.calls = []
 
-    def promote(self, key, *, expected_sha256):
-        self.calls.append((key, expected_sha256))
+    def promote(
+        self,
+        key,
+        *,
+        expected_sha256,
+        expected_size_bytes,
+        expected_content_type,
+    ):
+        self.calls.append(
+            (key, expected_sha256, expected_size_bytes, expected_content_type)
+        )
         return StoredObjectMetadata(
             key=key.replace("quarantine/", "assets/", 1),
-            size_bytes=1024,
-            content_type="image/png",
+            size_bytes=expected_size_bytes,
+            content_type=expected_content_type,
             sha256=expected_sha256,
         )
 

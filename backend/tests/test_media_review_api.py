@@ -10,11 +10,18 @@ from app.api.v1.video import get_media_object_store
 class FakePromotionStore:
     backend_name = "s3"
 
-    def promote(self, key, *, expected_sha256):
+    def promote(
+        self,
+        key,
+        *,
+        expected_sha256,
+        expected_size_bytes,
+        expected_content_type,
+    ):
         return StoredObjectMetadata(
             key=key.replace("quarantine/", "assets/", 1),
-            size_bytes=4096,
-            content_type="image/png",
+            size_bytes=expected_size_bytes,
+            content_type=expected_content_type,
             sha256=expected_sha256,
         )
 
