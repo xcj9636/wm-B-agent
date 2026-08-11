@@ -27,6 +27,10 @@ from app.models.database import (
     MediaConsentRecord,
     MediaRightsRecord,
     User,
+    VideoPersonaVersion,
+    VideoProject,
+    VideoProjectEvidence,
+    VideoStoryboardVersion,
 )
 from app.services.agent_runtime.contracts import (
     ExecutionPrincipal,
@@ -46,6 +50,30 @@ from app.services.media.contracts import (
     AssetConsentStatus,
     AssetRightsStatus,
     MediaAssetKind,
+    Storyboard,
+    VideoPersonaSpec,
+    VideoProjectBrief,
+)
+from app.services.media.personas import (
+    PersonaRevisionCommand,
+    VideoPersonaConflict,
+    VideoPersonaForbidden,
+    VideoPersonaNotFound,
+    VideoPersonaService,
+)
+from app.services.media.planning import (
+    StoryboardRevisionCommand,
+    VideoPlanningConflict,
+    VideoPlanningForbidden,
+    VideoPlanningNotFound,
+    VideoPlanningService,
+    VideoProjectCommand,
+)
+from app.services.media.prompts import (
+    VideoPromptCompiler,
+    VideoPromptConflict,
+    VideoPromptForbidden,
+    VideoPromptNotFound,
 )
 from app.services.media.review import (
     ConsentEvidenceCommand,
@@ -196,6 +224,100 @@ class PromoteAssetRequest(BaseModel):
     consent_record_id: Optional[UUID] = None
 
 
+class PersonaRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=8, max_length=255)
+    spec: VideoPersonaSpec
+
+
+class EmptyApprovalRequest(BaseModel):
+    """Approval identity and status are always derived on the server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PersonaRevisionResponse(BaseModel):
+    persona_id: UUID
+    version_id: UUID
+    revision: int
+    status: str
+    spec_hash: str
+    spec: VideoPersonaSpec
+    approved_by_user_id: Optional[int]
+    approved_at: Optional[datetime]
+    created_at: datetime
+
+
+class VideoProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=8, max_length=255)
+    persona_version_id: UUID
+    brief: VideoProjectBrief
+    evidence_record_ids: list[UUID] = Field(default_factory=list, max_length=50)
+
+
+class ProjectEvidenceResponse(BaseModel):
+    id: UUID
+    knowledge_record_id: UUID
+    document_id: UUID
+    document_version: int
+    source_ref: str
+    title: str
+    authority: str
+    sensitivity: str
+    content_hash: str
+
+
+class VideoProjectResponse(BaseModel):
+    id: UUID
+    persona_version_id: UUID
+    persona_spec_hash: str
+    brief: VideoProjectBrief
+    brief_hash: str
+    sensitivity: str
+    status: str
+    evidence: list[ProjectEvidenceResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class StoryboardRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=8, max_length=255)
+    storyboard: Storyboard
+
+
+class StoryboardRevisionResponse(BaseModel):
+    project_id: UUID
+    version_id: UUID
+    revision: int
+    status: str
+    storyboard_hash: str
+    storyboard: Storyboard
+    approved_by_user_id: Optional[int]
+    approved_at: Optional[datetime]
+    created_at: datetime
+
+
+class CompileShotRequest(BaseModel):
+    """Provider, routing, identity, and policy inputs are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CompileShotResponse(BaseModel):
+    shot_id: UUID
+    persona_version_id: UUID
+    mode: str
+    sensitivity: str
+    reference_asset_ids: list[UUID]
+    prompt_hash: str
+    evidence_snapshot_hash: str
+
+
 def get_media_asset_service(db: Session = Depends(get_db)) -> MediaAssetService:
     return MediaAssetService(db, upload_enabled=settings.MEDIA_UPLOAD_ENABLED)
 
@@ -220,6 +342,33 @@ def get_media_lifecycle_service(
     db: Session = Depends(get_db),
 ) -> MediaAssetLifecycleService:
     return MediaAssetLifecycleService(db)
+
+
+def get_video_persona_service(
+    db: Session = Depends(get_db),
+) -> VideoPersonaService:
+    return VideoPersonaService(
+        db,
+        planning_enabled=settings.MEDIA_PLANNING_ENABLED,
+    )
+
+
+def get_video_planning_service(
+    db: Session = Depends(get_db),
+) -> VideoPlanningService:
+    return VideoPlanningService(
+        db,
+        planning_enabled=settings.MEDIA_PLANNING_ENABLED,
+    )
+
+
+def get_video_prompt_compiler(
+    db: Session = Depends(get_db),
+) -> VideoPromptCompiler:
+    return VideoPromptCompiler(
+        db,
+        planning_enabled=settings.MEDIA_PLANNING_ENABLED,
+    )
 
 
 class MediaInspectionDispatchUnavailable(RuntimeError):
@@ -290,6 +439,236 @@ def _principal(user: User) -> ExecutionPrincipal:
         ).hexdigest(),
         authn_context="jwt",
     )
+
+
+def _persona_response(
+    persona_id: UUID,
+    version: VideoPersonaVersion,
+) -> PersonaRevisionResponse:
+    return PersonaRevisionResponse(
+        persona_id=persona_id,
+        version_id=version.id,
+        revision=version.revision,
+        status=version.status,
+        spec_hash=version.spec_hash,
+        spec=VideoPersonaSpec.model_validate(version.spec_json),
+        approved_by_user_id=version.approved_by_user_id,
+        approved_at=version.approved_at,
+        created_at=version.created_at,
+    )
+
+
+def _storyboard_response(
+    version: VideoStoryboardVersion,
+) -> StoryboardRevisionResponse:
+    return StoryboardRevisionResponse(
+        project_id=version.project_id,
+        version_id=version.id,
+        revision=version.revision,
+        status=version.status,
+        storyboard_hash=version.storyboard_hash,
+        storyboard=Storyboard.model_validate(version.storyboard_json),
+        approved_by_user_id=version.approved_by_user_id,
+        approved_at=version.approved_at,
+        created_at=version.created_at,
+    )
+
+
+def _project_response(
+    project: VideoProject,
+    evidence: list[VideoProjectEvidence],
+) -> VideoProjectResponse:
+    return VideoProjectResponse(
+        id=project.id,
+        persona_version_id=project.persona_version_id,
+        persona_spec_hash=project.persona_spec_hash,
+        brief=VideoProjectBrief.model_validate(project.brief_json),
+        brief_hash=project.brief_hash,
+        sensitivity=project.sensitivity,
+        status=project.status,
+        evidence=[
+            ProjectEvidenceResponse(
+                id=row.id,
+                knowledge_record_id=row.knowledge_record_id,
+                document_id=row.document_id,
+                document_version=row.document_version,
+                source_ref=row.source_ref,
+                title=row.title,
+                authority=row.authority,
+                sensitivity=row.sensitivity,
+                content_hash=row.content_hash,
+            )
+            for row in evidence
+        ],
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+    )
+
+
+def _require_media_reviewer(principal: ExecutionPrincipal) -> None:
+    roles = {role.strip().lower() for role in principal.roles}
+    if not roles.intersection({"media_reviewer", "admin"}):
+        raise HTTPException(
+            status_code=403,
+            detail="Media approval requires reviewer role",
+        )
+
+
+@router.post(
+    "/personas",
+    response_model=PersonaRevisionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_video_persona(
+    request: PersonaRevisionRequest,
+    current_user: User = Depends(get_current_active_user),
+    persona_service: VideoPersonaService = Depends(get_video_persona_service),
+):
+    try:
+        persona, version = persona_service.create(
+            PersonaRevisionCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return _persona_response(persona.id, version)
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "persona")
+
+
+@router.post(
+    "/personas/{persona_id}/versions",
+    response_model=PersonaRevisionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def revise_video_persona(
+    persona_id: UUID,
+    request: PersonaRevisionRequest,
+    current_user: User = Depends(get_current_active_user),
+    persona_service: VideoPersonaService = Depends(get_video_persona_service),
+):
+    try:
+        persona, version = persona_service.revise(
+            persona_id,
+            PersonaRevisionCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return _persona_response(persona.id, version)
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "persona")
+
+
+@router.post(
+    "/persona-versions/{version_id}/approve",
+    response_model=PersonaRevisionResponse,
+)
+async def approve_video_persona(
+    version_id: UUID,
+    request: EmptyApprovalRequest,
+    current_user: User = Depends(get_current_active_user),
+    persona_service: VideoPersonaService = Depends(get_video_persona_service),
+):
+    principal = _principal(current_user)
+    _require_media_reviewer(principal)
+    try:
+        version = persona_service.approve(version_id, principal)
+        return _persona_response(version.persona_id, version)
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "persona")
+
+
+@router.post(
+    "/projects",
+    response_model=VideoProjectResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_video_project(
+    request: VideoProjectRequest,
+    current_user: User = Depends(get_current_active_user),
+    planning_service: VideoPlanningService = Depends(get_video_planning_service),
+):
+    try:
+        project, evidence = planning_service.create_project(
+            VideoProjectCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return _project_response(project, evidence)
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "project")
+
+
+@router.post(
+    "/projects/{project_id}/storyboards",
+    response_model=StoryboardRevisionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def revise_video_storyboard(
+    project_id: UUID,
+    request: StoryboardRevisionRequest,
+    current_user: User = Depends(get_current_active_user),
+    planning_service: VideoPlanningService = Depends(get_video_planning_service),
+):
+    try:
+        _, version = planning_service.revise_storyboard(
+            project_id,
+            StoryboardRevisionCommand(**request.model_dump()),
+            _principal(current_user),
+        )
+        return _storyboard_response(version)
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "storyboard")
+
+
+@router.post(
+    "/storyboard-versions/{version_id}/approve",
+    response_model=StoryboardRevisionResponse,
+)
+async def approve_video_storyboard(
+    version_id: UUID,
+    request: EmptyApprovalRequest,
+    current_user: User = Depends(get_current_active_user),
+    planning_service: VideoPlanningService = Depends(get_video_planning_service),
+):
+    principal = _principal(current_user)
+    _require_media_reviewer(principal)
+    try:
+        version = planning_service.approve_storyboard(version_id, principal)
+        return _storyboard_response(version)
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "storyboard")
+
+
+@router.post(
+    (
+        "/projects/{project_id}/storyboards/{storyboard_version_id}"
+        "/shots/{shot_id}/compile"
+    ),
+    response_model=CompileShotResponse,
+)
+async def compile_video_shot(
+    project_id: UUID,
+    storyboard_version_id: UUID,
+    shot_id: UUID,
+    request: CompileShotRequest,
+    current_user: User = Depends(get_current_active_user),
+    compiler: VideoPromptCompiler = Depends(get_video_prompt_compiler),
+):
+    try:
+        compiled = compiler.compile(
+            project_id,
+            storyboard_version_id,
+            shot_id,
+            _principal(current_user),
+        )
+        return CompileShotResponse(
+            shot_id=compiled.intent.shot_id,
+            persona_version_id=compiled.intent.persona_version_id,
+            mode=compiled.intent.mode.value,
+            sensitivity=compiled.intent.sensitivity.value,
+            reference_asset_ids=compiled.intent.reference_asset_ids,
+            prompt_hash=compiled.prompt_hash,
+            evidence_snapshot_hash=compiled.evidence_snapshot_hash,
+        )
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "generation")
 
 
 @router.post(
@@ -616,4 +995,43 @@ def _raise_review_http_error(exc: Exception) -> None:
         raise HTTPException(status_code=403, detail="Media review forbidden") from exc
     if isinstance(exc, MediaAssetConflict):
         raise HTTPException(status_code=409, detail="Media review evidence is invalid") from exc
+    raise exc
+
+
+def _raise_video_planning_http_error(exc: Exception, resource: str) -> None:
+    if isinstance(
+        exc,
+        (VideoPersonaNotFound, VideoPlanningNotFound, VideoPromptNotFound),
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Video {resource} not found",
+        ) from exc
+    if isinstance(
+        exc,
+        (VideoPersonaForbidden, VideoPlanningForbidden, VideoPromptForbidden),
+    ):
+        if "disabled" in str(exc).lower():
+            raise HTTPException(
+                status_code=503,
+                detail="Video planning is unavailable",
+            ) from exc
+        # Cross-tenant and ownership failures intentionally match missing resources.
+        raise HTTPException(
+            status_code=404,
+            detail=f"Video {resource} not found",
+        ) from exc
+    if isinstance(
+        exc,
+        (
+            IdempotencyConflict,
+            VideoPersonaConflict,
+            VideoPlanningConflict,
+            VideoPromptConflict,
+        ),
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Video {resource} request conflicts with current state",
+        ) from exc
     raise exc
