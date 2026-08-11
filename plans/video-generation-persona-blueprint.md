@@ -1,6 +1,6 @@
 # B-agent 视频生成 Persona 与媒体生产链路蓝图
 
-> 状态：Step 1-4 核心链路已实现，持久 Generation Job 与成本/恢复链路待实施
+> 状态：Step 1-4 已实现；Step 5 持久 Job、预算与安全提交核心已实现，Worker/回调/结果摄取待完成
 > 日期：2026-08-11  
 > 范围：视频 Persona、文生图、图生视频、文生视频、参考素材生成、媒体资产、异步任务、成本与并发、安全合规、前端视频工坊  
 > 实施原则：业务核心 provider-neutral；模型能力动态发现并固定快照；先建资产与安全边界，再开放生成；每一步可独立发布、灰度和回滚。
@@ -25,8 +25,11 @@
 - 已提供认证创建、审批、分页列表、版本历史、项目详情和单 Shot 编译 API。浏览器只收到 mode、敏感级别、参考资产 ID 和哈希回执，不收到完整 provider prompt。
 - 已新增中英文 `Video Studio`：可创建 Persona/项目/单 Shot 分镜、执行管理员审批、查看证据与版本历史并编译安全回执；统一 API client 自动使用可热切换的后端 Base URL。
 - 部署已接入 `MEDIA_PLANNING_ENABLED` 与 `MEDIA_SUBMIT_ENABLED`，默认均为 `false`。规划开关只开放规划面，外部媒体提交仍保持关闭。
-- 当前验证证据：视频规划核心服务 86% coverage、媒体运行时 91%、fal Adapter 83%；全量后端 495 passed、1 skipped；前端 47 passed，Vue/TypeScript 与生产构建通过；`docker compose config --quiet` 通过；SQLite 可从空库升级到 `0025_media_runtime`，并通过 `0025 → 0024 → 0025` 往返。
-- **下一阶段**：Step 5 持久 Generation Job、提交不确定态、回调收件箱、配额/成本与恢复；随后接入单 Shot 生成编排和 SSE。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
+- **Step 5 核心底座已完成（2026-08-11）**：新增 `0026_media_jobs`、Generation Job/Attempt/Event、月度 `MediaBudgetAccount` 和 append-only 微美元账本；创建任务会固定当前 active runtime revision 与精确模型别名，并在同一事务内完成预算预留。
+- Worker claim 使用 lease 与递增 fencing token；提交前从 vault 引用加载 `GenerationIntent`，逐字段核对组织、用户、项目、Shot、mode、敏感级别和 input hash，再重新验证短时签名 `PolicyDecision`。数据库和事件不保存完整 Prompt。
+- `begin_submission` 在网络调用前持久化 effect started；任何调用异常或此后的 lease 过期均进入 `submission_unknown`，即使 Provider 报告 retryable 也不自动重发。成功回执固定 provider request ID；重复成功结算和提交前取消不会重复扣款或释放预算。
+- 当前增量验证证据：持久 Job 与提交协调测试 8 passed；连同 policy/fal 回归共 33 passed；`jobs.py` 80%、`submission.py` 91%、合计 82% coverage；SQLite 从空库升级至 `0026_media_jobs` 并通过 `0026 → 0025 → 0026` 往返。
+- **下一阶段**：完成真实 Worker 依赖装配、callback inbox、poll fallback、人工对账和结果 quarantine 摄取，再开放 Job API/SSE 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
 
 ## 1. 执行摘要
 
@@ -492,6 +495,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 
 ### Step 5 — 持久化媒体 Job、成本与恢复
 
+- **状态**：核心 Job/Attempt/Event、原子预算、lease/fencing、PolicyDecision 前置校验和 `submission_unknown` 已完成；Worker/回调/poll/取消远端确认与结果摄取待完成
 - **分支**：`feature/durable-media-jobs`
 - **依赖**：Step 2 + Step 4
 - **主要文件**：
