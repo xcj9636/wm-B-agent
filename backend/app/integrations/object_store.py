@@ -34,6 +34,8 @@ class MediaObjectStore(Protocol):
         key: str,
         *,
         expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
     ) -> StoredObjectMetadata: ...
 
 
@@ -175,6 +177,8 @@ class S3CompatibleMediaObjectStore:
         key: str,
         *,
         expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
     ) -> StoredObjectMetadata:
         """Copy verified quarantine data to the asset bucket, then delete source."""
         source_key = self._physical_quarantine_key(key)
@@ -217,6 +221,17 @@ class S3CompatibleMediaObjectStore:
         if metadata.sha256 != expected_sha256:
             raise ObjectStoreIntegrityError(
                 "Promoted object checksum does not match the asset"
+            )
+        if metadata.size_bytes != expected_size_bytes:
+            raise ObjectStoreIntegrityError(
+                "Promoted object size does not match the asset"
+            )
+        if (
+            metadata.content_type.strip().lower()
+            != expected_content_type.strip().lower()
+        ):
+            raise ObjectStoreIntegrityError(
+                "Promoted object MIME does not match the asset"
             )
         self._client.delete_object(
             Bucket=self._quarantine_bucket,

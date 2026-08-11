@@ -216,6 +216,8 @@ class MediaReviewService:
         promoted = object_store.promote(
             asset.storage_key,
             expected_sha256=asset.sha256,
+            expected_size_bytes=asset.size_bytes,
+            expected_content_type=asset.mime_type,
         )
         if not promoted.key.startswith("assets/"):
             raise MediaAssetConflict("Promoted object is outside the asset namespace")
