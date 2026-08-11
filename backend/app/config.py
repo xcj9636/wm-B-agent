@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     MEDIA_POLICY_VERSION: str = Field(default="media-policy-v1", min_length=1)
     MEDIA_POLICY_SIGNING_KEY: str = ""
     MEDIA_POLICY_DECISION_TTL_SECONDS: int = Field(default=120, ge=1, le=900)
+    MEDIA_OBJECT_STORE_BACKEND: Literal["local", "s3"] = "local"
+    MEDIA_S3_ENDPOINT_URL: str = ""
+    MEDIA_S3_REGION: str = "us-east-1"
+    MEDIA_S3_QUARANTINE_BUCKET: str = ""
+    MEDIA_S3_ASSET_BUCKET: str = ""
+    MEDIA_S3_KEY_PREFIX: str = ""
+    MEDIA_S3_KMS_KEY_ID: str = ""
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"
@@ -177,13 +184,30 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_media_feature_dependencies(self) -> "Settings":
-        if not self.MEDIA_SUBMIT_ENABLED:
-            return self
-        if not self.MEDIA_UPLOAD_ENABLED or not self.MEDIA_PLANNING_ENABLED:
+        if (
+            self.DEPLOYMENT_ENVIRONMENT == "production"
+            and self.MEDIA_UPLOAD_ENABLED
+            and self.MEDIA_OBJECT_STORE_BACKEND != "s3"
+        ):
+            raise ValueError("production media uploads require the S3 backend")
+        if self.MEDIA_UPLOAD_ENABLED and self.MEDIA_OBJECT_STORE_BACKEND == "s3":
+            if (
+                not self.MEDIA_S3_QUARANTINE_BUCKET
+                or not self.MEDIA_S3_ASSET_BUCKET
+            ):
+                raise ValueError("S3 media uploads require both media buckets")
+            if self.MEDIA_S3_QUARANTINE_BUCKET == self.MEDIA_S3_ASSET_BUCKET:
+                raise ValueError("S3 quarantine and asset buckets must differ")
+        if self.MEDIA_SUBMIT_ENABLED and (
+            not self.MEDIA_UPLOAD_ENABLED or not self.MEDIA_PLANNING_ENABLED
+        ):
             raise ValueError(
                 "media submission requires upload and planning to be enabled"
             )
-        if len(self.MEDIA_POLICY_SIGNING_KEY) < 32:
+        if (
+            self.MEDIA_SUBMIT_ENABLED
+            and len(self.MEDIA_POLICY_SIGNING_KEY) < 32
+        ):
             raise ValueError(
                 "media submission requires a dedicated signing key of at least 32 characters"
             )
