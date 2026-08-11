@@ -129,6 +129,63 @@ class VideoPersonaService:
         self._db.refresh(version)
         return version
 
+    def list_latest(
+        self,
+        principal: ExecutionPrincipal,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[tuple[VideoPersona, VideoPersonaVersion]], int]:
+        self._require_enabled()
+        query = self._db.query(VideoPersona).filter(
+            VideoPersona.org_id == principal.org_id,
+            VideoPersona.retired_at.is_(None),
+        )
+        if "admin" not in {role.strip().lower() for role in principal.roles}:
+            query = query.filter(VideoPersona.owner_user_id == principal.user_id)
+        total = query.count()
+        personas = (
+            query.order_by(VideoPersona.created_at.desc(), VideoPersona.id)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        items: list[tuple[VideoPersona, VideoPersonaVersion]] = []
+        for persona in personas:
+            version = (
+                self._db.query(VideoPersonaVersion)
+                .filter(VideoPersonaVersion.persona_id == persona.id)
+                .order_by(VideoPersonaVersion.revision.desc())
+                .first()
+            )
+            if version is not None:
+                items.append((persona, version))
+        return items, total
+
+    def list_versions(
+        self,
+        persona_id: UUID,
+        principal: ExecutionPrincipal,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[VideoPersona, list[VideoPersonaVersion], int]:
+        self._require_enabled()
+        persona = self._persona(persona_id)
+        self._authorize_owner(persona, principal)
+        query = self._db.query(VideoPersonaVersion).filter(
+            VideoPersonaVersion.persona_id == persona.id,
+            VideoPersonaVersion.org_id == principal.org_id,
+        )
+        total = query.count()
+        versions = (
+            query.order_by(VideoPersonaVersion.revision.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return persona, versions, total
+
     def _new_version(
         self,
         persona: VideoPersona,

@@ -7,7 +7,7 @@ import json
 from typing import Callable, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -249,6 +249,13 @@ class PersonaRevisionResponse(BaseModel):
     created_at: datetime
 
 
+class PersonaListResponse(BaseModel):
+    items: list[PersonaRevisionResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class VideoProjectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -283,6 +290,13 @@ class VideoProjectResponse(BaseModel):
     updated_at: datetime
 
 
+class ProjectListResponse(BaseModel):
+    items: list[VideoProjectResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class StoryboardRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -300,6 +314,10 @@ class StoryboardRevisionResponse(BaseModel):
     approved_by_user_id: Optional[int]
     approved_at: Optional[datetime]
     created_at: datetime
+
+
+class VideoProjectDetailResponse(VideoProjectResponse):
+    storyboards: list[StoryboardRevisionResponse]
 
 
 class CompileShotRequest(BaseModel):
@@ -512,6 +530,109 @@ def _require_media_reviewer(principal: ExecutionPrincipal) -> None:
             status_code=403,
             detail="Media approval requires reviewer role",
         )
+
+
+@router.get("/personas", response_model=PersonaListResponse)
+async def list_video_personas(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    persona_service: VideoPersonaService = Depends(get_video_persona_service),
+):
+    try:
+        items, total = persona_service.list_latest(
+            _principal(current_user),
+            limit=limit,
+            offset=offset,
+        )
+        return PersonaListResponse(
+            items=[
+                _persona_response(persona.id, version)
+                for persona, version in items
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "persona")
+
+
+@router.get(
+    "/personas/{persona_id}/versions",
+    response_model=PersonaListResponse,
+)
+async def list_video_persona_versions(
+    persona_id: UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    persona_service: VideoPersonaService = Depends(get_video_persona_service),
+):
+    try:
+        persona, versions, total = persona_service.list_versions(
+            persona_id,
+            _principal(current_user),
+            limit=limit,
+            offset=offset,
+        )
+        return PersonaListResponse(
+            items=[_persona_response(persona.id, version) for version in versions],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "persona")
+
+
+@router.get("/projects", response_model=ProjectListResponse)
+async def list_video_projects(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    planning_service: VideoPlanningService = Depends(get_video_planning_service),
+):
+    try:
+        items, total = planning_service.list_projects(
+            _principal(current_user),
+            limit=limit,
+            offset=offset,
+        )
+        return ProjectListResponse(
+            items=[
+                _project_response(project, evidence)
+                for project, evidence in items
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "project")
+
+
+@router.get(
+    "/projects/{project_id}",
+    response_model=VideoProjectDetailResponse,
+)
+async def get_video_project(
+    project_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    planning_service: VideoPlanningService = Depends(get_video_planning_service),
+):
+    try:
+        project, evidence, storyboards = planning_service.project_detail(
+            project_id,
+            _principal(current_user),
+        )
+        base = _project_response(project, evidence)
+        return VideoProjectDetailResponse(
+            **base.model_dump(),
+            storyboards=[_storyboard_response(version) for version in storyboards],
+        )
+    except Exception as exc:
+        _raise_video_planning_http_error(exc, "project")
 
 
 @router.post(

@@ -250,6 +250,54 @@ class VideoPlanningService:
         self._db.refresh(version)
         return version
 
+    def list_projects(
+        self,
+        principal: ExecutionPrincipal,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[tuple[VideoProject, list[VideoProjectEvidence]]], int]:
+        self._require_enabled()
+        query = self._db.query(VideoProject).filter(
+            VideoProject.org_id == principal.org_id
+        )
+        if "admin" not in {role.strip().lower() for role in principal.roles}:
+            query = query.filter(VideoProject.owner_user_id == principal.user_id)
+        total = query.count()
+        projects = (
+            query.order_by(VideoProject.created_at.desc(), VideoProject.id)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return [
+            (project, self._project_evidence(project.id))
+            for project in projects
+        ], total
+
+    def project_detail(
+        self,
+        project_id: UUID,
+        principal: ExecutionPrincipal,
+    ) -> tuple[
+        VideoProject,
+        list[VideoProjectEvidence],
+        list[VideoStoryboardVersion],
+    ]:
+        self._require_enabled()
+        project = self._project(project_id)
+        self._authorize_owner(project, principal)
+        storyboards = (
+            self._db.query(VideoStoryboardVersion)
+            .filter(
+                VideoStoryboardVersion.project_id == project.id,
+                VideoStoryboardVersion.org_id == principal.org_id,
+            )
+            .order_by(VideoStoryboardVersion.revision.desc())
+            .all()
+        )
+        return project, self._project_evidence(project.id), storyboards
+
     def _authorize_document(
         self,
         record_id: UUID,
