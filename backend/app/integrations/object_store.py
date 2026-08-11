@@ -1,6 +1,11 @@
 """Object-store boundary used by quarantined media asset ingestion."""
 
-from typing import Any, Dict, Optional, Protocol
+from contextlib import contextmanager
+from hashlib import sha256
+import os
+from pathlib import Path
+import tempfile
+from typing import Any, Dict, Iterator, Optional, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,6 +42,15 @@ class MediaObjectStore(Protocol):
         expected_size_bytes: int,
         expected_content_type: str,
     ) -> StoredObjectMetadata: ...
+
+    def stage_quarantined(
+        self,
+        key: str,
+        *,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
+    ): ...
 
 
 class ObjectStoreConfigurationError(RuntimeError):
@@ -238,6 +252,98 @@ class S3CompatibleMediaObjectStore:
             Key=source_key,
         )
         return metadata
+
+    @contextmanager
+    def stage_quarantined(
+        self,
+        key: str,
+        *,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
+    ) -> Iterator[Path]:
+        """Stream a quarantine object to a private, integrity-checked file."""
+        physical_key = self._physical_quarantine_key(key)
+        response = self._client.get_object(
+            Bucket=self._quarantine_bucket,
+            Key=physical_key,
+        )
+        body = response.get("Body")
+        if body is None or not callable(getattr(body, "read", None)):
+            raise ObjectStoreIntegrityError("Stored object body is unavailable")
+        try:
+            self._validate_staged_headers(
+                response,
+                expected_sha256=expected_sha256,
+                expected_size_bytes=expected_size_bytes,
+                expected_content_type=expected_content_type,
+            )
+            with tempfile.TemporaryDirectory(
+                prefix="b-agent-media-stage-"
+            ) as directory:
+                os.chmod(directory, 0o700)
+                staged_path = Path(directory) / "input.bin"
+                descriptor = os.open(
+                    staged_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+                digest = sha256()
+                written = 0
+                with os.fdopen(descriptor, "wb") as staged_file:
+                    while True:
+                        chunk = body.read(
+                            min(1024 * 1024, expected_size_bytes - written + 1)
+                        )
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > expected_size_bytes:
+                            raise ObjectStoreIntegrityError(
+                                "Stored object size exceeds upload intent"
+                            )
+                        digest.update(chunk)
+                        staged_file.write(chunk)
+                    staged_file.flush()
+                    os.fsync(staged_file.fileno())
+                if written != expected_size_bytes:
+                    raise ObjectStoreIntegrityError(
+                        "Stored object size does not match upload intent"
+                    )
+                if digest.hexdigest() != expected_sha256:
+                    raise ObjectStoreIntegrityError(
+                        "Stored object checksum does not match upload intent"
+                    )
+                yield staged_path
+        finally:
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
+
+    @staticmethod
+    def _validate_staged_headers(
+        response: dict,
+        *,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expected_content_type: str,
+    ) -> None:
+        if response.get("ContentLength") != expected_size_bytes:
+            raise ObjectStoreIntegrityError(
+                "Stored object size does not match upload intent"
+            )
+        if (
+            str(response.get("ContentType") or "").strip().lower()
+            != expected_content_type.strip().lower()
+        ):
+            raise ObjectStoreIntegrityError(
+                "Stored object MIME does not match upload intent"
+            )
+        metadata = response.get("Metadata") or {}
+        if str(metadata.get("sha256") or "").strip().lower() != expected_sha256:
+            raise ObjectStoreIntegrityError(
+                "Stored object checksum metadata does not match upload intent"
+            )
 
     def _metadata(
         self,
