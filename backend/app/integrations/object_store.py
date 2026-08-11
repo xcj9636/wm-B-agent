@@ -70,6 +70,16 @@ class MediaObjectStore(Protocol):
         sha256: str,
     ) -> StoredObjectMetadata: ...
 
+    def put_quarantined_generated(
+        self,
+        *,
+        key: str,
+        path: Path,
+        content_type: str,
+        sha256: str,
+        size_bytes: int,
+    ) -> StoredObjectMetadata: ...
+
     def delete_asset(self, key: str) -> None: ...
 
     def create_download(
@@ -388,6 +398,104 @@ class S3CompatibleMediaObjectStore:
                 "Stored derivative failed integrity validation"
             )
         return metadata
+
+    def put_quarantined_generated(
+        self,
+        *,
+        key: str,
+        path: Path,
+        content_type: str,
+        sha256: str,
+        size_bytes: int,
+    ) -> StoredObjectMetadata:
+        """Idempotently store a server-fetched provider result in quarantine."""
+        if not key.startswith("quarantine/generated/"):
+            raise ObjectStoreConfigurationError(
+                "Generated media key is outside its quarantine namespace"
+            )
+        physical_key = self._physical_quarantine_key(key)
+        if not path.is_absolute() or not path.is_file():
+            raise ObjectStoreConfigurationError(
+                "Generated media path must be an absolute regular file"
+            )
+        if size_bytes < 1 or path.stat().st_size != size_bytes:
+            raise ObjectStoreIntegrityError("Generated media size does not match")
+        if self._file_sha256(path) != sha256:
+            raise ObjectStoreIntegrityError("Generated media checksum does not match")
+        normalized_type = content_type.strip().lower()
+        if not normalized_type:
+            raise ObjectStoreConfigurationError(
+                "Generated media content type is required"
+            )
+        try:
+            existing = self._metadata(
+                bucket=self._quarantine_bucket,
+                physical_key=physical_key,
+                logical_key=key,
+            )
+        except Exception as exc:
+            if not self._is_not_found(exc):
+                raise
+        else:
+            self._assert_generated_metadata(
+                existing,
+                sha256=sha256,
+                size_bytes=size_bytes,
+                content_type=normalized_type,
+            )
+            return existing
+
+        options = {
+            "Bucket": self._quarantine_bucket,
+            "Key": physical_key,
+            "ContentType": normalized_type,
+            "ContentLength": size_bytes,
+            "Metadata": {"sha256": sha256},
+        }
+        if self._kms_key_id:
+            options.update(
+                {
+                    "ServerSideEncryption": "aws:kms",
+                    "SSEKMSKeyId": self._kms_key_id,
+                }
+            )
+        else:
+            options["ServerSideEncryption"] = "AES256"
+        with path.open("rb") as handle:
+            self._client.put_object(Body=handle, **options)
+        stored = self._metadata(
+            bucket=self._quarantine_bucket,
+            physical_key=physical_key,
+            logical_key=key,
+        )
+        self._assert_generated_metadata(
+            stored,
+            sha256=sha256,
+            size_bytes=size_bytes,
+            content_type=normalized_type,
+        )
+        return stored
+
+    @staticmethod
+    def _assert_generated_metadata(
+        metadata: StoredObjectMetadata,
+        *,
+        sha256: str,
+        size_bytes: int,
+        content_type: str,
+    ) -> None:
+        if metadata.sha256 != sha256:
+            raise ObjectStoreIntegrityError(
+                "Stored generated media checksum does not match"
+            )
+        if metadata.size_bytes != size_bytes:
+            raise ObjectStoreIntegrityError(
+                "Stored generated media size does not match"
+            )
+        if metadata.content_type.strip().lower() != content_type:
+            raise ObjectStoreIntegrityError(
+                "Stored generated media content type does not match"
+            )
 
     def delete_asset(self, key: str) -> None:
         """Idempotently delete one canonical promoted-object key."""

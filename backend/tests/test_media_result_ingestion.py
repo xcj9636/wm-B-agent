@@ -3,12 +3,14 @@ from datetime import date, datetime
 from uuid import uuid4
 
 import pytest
+import httpx
 
 from app.integrations.object_store import StoredObjectMetadata
 from app.integrations.provider_media import SafeProviderMediaURLPolicy
 from app.integrations.fal_media import MediaOutput
 from app.models.database import MediaAsset, MediaGenerationJob
 from app.services.media.result_ingestion import (
+    HttpxMediaRemoteFetcher,
     MediaRemoteStream,
     MediaResultIngestionDenied,
     ProviderResultIngestor,
@@ -226,3 +228,105 @@ async def test_result_ingestion_rejects_multiple_outputs_in_v1(db_session):
 
     with pytest.raises(MediaResultIngestionDenied, match="exactly one"):
         await ingestor.ingest(job=job, outputs=[output, output])
+
+
+class FakeNetworkStream:
+    def __init__(self, address):
+        self.address = address
+
+    def get_extra_info(self, name):
+        return self.address if name == "server_addr" else None
+
+
+@pytest.mark.asyncio
+async def test_httpx_fetcher_exposes_actual_peer_and_bounded_headers():
+    def handler(_request):
+        return httpx.Response(
+            200,
+            content=b"video123",
+            headers={
+                "content-type": "video/mp4; charset=binary",
+                "content-length": "8",
+            },
+            extensions={
+                "network_stream": FakeNetworkStream(("93.184.216.34", 443))
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    fetcher = HttpxMediaRemoteFetcher(http_client=client)
+    approved = policy().validate(
+        "https://v3.fal.media/files/generated.mp4"
+    )
+    try:
+        async with fetcher.stream(approved) as response:
+            payload = b"".join([chunk async for chunk in response.chunks])
+    finally:
+        await client.aclose()
+
+    assert response.peer_ip == "93.184.216.34"
+    assert response.content_type == "video/mp4"
+    assert response.content_length == 8
+    assert payload == b"video123"
+
+
+@pytest.mark.asyncio
+async def test_httpx_fetcher_rejects_missing_peer_and_invalid_length():
+    responses = iter(
+        [
+            httpx.Response(200, content=b"x"),
+            httpx.Response(
+                200,
+                content=b"x",
+                headers={"content-length": "not-an-integer"},
+                extensions={
+                    "network_stream": FakeNetworkStream(
+                        ("93.184.216.34", 443)
+                    )
+                },
+            ),
+        ]
+    )
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _request: next(responses))
+    )
+    fetcher = HttpxMediaRemoteFetcher(http_client=client)
+    approved = policy().validate(
+        "https://v3.fal.media/files/generated.mp4"
+    )
+    try:
+        with pytest.raises(MediaResultIngestionDenied, match="peer"):
+            async with fetcher.stream(approved):
+                pass
+        with pytest.raises(MediaResultIngestionDenied, match="size"):
+            async with fetcher.stream(approved):
+                pass
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_ingestion_rejects_empty_or_changed_content_type(db_session):
+    job = generation_job(db_session)
+    output = MediaOutput(
+        url="https://v3.fal.media/files/generated.mp4",
+        content_type="video/mp4",
+    )
+    for fetcher, match in (
+        (FakeFetcher(content_length=0, values=()), "empty"),
+        (
+            FakeFetcher(
+                content_type="image/png",
+                content_length=8,
+            ),
+            "changed",
+        ),
+    ):
+        with pytest.raises(MediaResultIngestionDenied, match=match):
+            await ProviderResultIngestor(
+                db_session,
+                fetcher=fetcher,
+                object_store=FakeObjectStore(),
+                url_policy=policy(),
+                max_bytes=1024,
+            ).ingest(job=job, outputs=[output])

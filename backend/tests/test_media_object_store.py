@@ -66,6 +66,28 @@ class FakeS3NotFound(RuntimeError):
     response = {"Error": {"Code": "NoSuchKey"}}
 
 
+class GeneratedS3Client(FakeS3Client):
+    def __init__(self):
+        super().__init__()
+        self.generated_exists = False
+        self.generated_payload = b""
+
+    def head_object(self, **kwargs):
+        self.head_calls.append(kwargs)
+        if kwargs["Bucket"] == "media-quarantine" and not self.generated_exists:
+            raise FakeS3NotFound()
+        return {
+            "ContentLength": len(self.generated_payload),
+            "ContentType": "video/mp4",
+            "Metadata": {"sha256": sha256(self.generated_payload).hexdigest()},
+        }
+
+    def put_object(self, **kwargs):
+        self.put_calls.append(kwargs)
+        self.generated_payload = kwargs["Body"].read()
+        self.generated_exists = True
+
+
 def store(client=None, **overrides):
     values = {
         "client": client or FakeS3Client(),
@@ -345,6 +367,64 @@ def test_object_store_requires_separate_nonempty_buckets():
         store(quarantine_bucket="same", asset_bucket="same")
     with pytest.raises(ObjectStoreConfigurationError):
         store(quarantine_bucket="")
+
+
+def test_generated_provider_result_is_idempotently_written_to_quarantine(tmp_path):
+    payload = b"generated-video"
+    digest = sha256(payload).hexdigest()
+    path = tmp_path / "provider-result.mp4"
+    path.write_bytes(payload)
+    client = GeneratedS3Client()
+    object_store = store(client)
+    key = "quarantine/generated/org-id/job-id/output-0"
+
+    first = object_store.put_quarantined_generated(
+        key=key,
+        path=path,
+        content_type="video/mp4",
+        sha256=digest,
+        size_bytes=len(payload),
+    )
+    replay = object_store.put_quarantined_generated(
+        key=key,
+        path=path,
+        content_type="video/mp4",
+        sha256=digest,
+        size_bytes=len(payload),
+    )
+
+    assert first == replay
+    assert first.key == key
+    assert len(client.put_calls) == 1
+    call = client.put_calls[0]
+    assert call["Bucket"] == "media-quarantine"
+    assert call["Key"] == f"tenant-media/{key}"
+    assert call["ServerSideEncryption"] == "aws:kms"
+    assert call["SSEKMSKeyId"] == "kms-key-1"
+    assert call["Metadata"] == {"sha256": digest}
+
+
+def test_generated_result_store_rejects_wrong_namespace_or_integrity(tmp_path):
+    path = tmp_path / "provider-result.mp4"
+    path.write_bytes(b"generated-video")
+    object_store = store(GeneratedS3Client())
+
+    with pytest.raises(ObjectStoreConfigurationError):
+        object_store.put_quarantined_generated(
+            key="quarantine/user-controlled/output-0",
+            path=path,
+            content_type="video/mp4",
+            sha256=sha256(path.read_bytes()).hexdigest(),
+            size_bytes=path.stat().st_size,
+        )
+    with pytest.raises(ObjectStoreIntegrityError):
+        object_store.put_quarantined_generated(
+            key="quarantine/generated/org-id/job-id/output-0",
+            path=path,
+            content_type="video/mp4",
+            sha256="0" * 64,
+            size_bytes=path.stat().st_size,
+        )
 
 
 def test_production_media_upload_requires_configured_s3_backend():
