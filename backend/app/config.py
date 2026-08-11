@@ -1,6 +1,7 @@
 """
 Application configuration using Pydantic Settings
 """
+from pathlib import Path
 from typing import Dict, List, Literal
 from uuid import UUID
 from pydantic import Field, field_validator, model_validator
@@ -60,6 +61,17 @@ class Settings(BaseSettings):
     MEDIA_S3_ASSET_BUCKET: str = ""
     MEDIA_S3_KEY_PREFIX: str = ""
     MEDIA_S3_KMS_KEY_ID: str = ""
+    MEDIA_INSPECTION_ENABLED: bool = False
+    MEDIA_CLAMSCAN_PATH: str = "/usr/bin/clamscan"
+    MEDIA_FFPROBE_PATH: str = "/usr/bin/ffprobe"
+    MEDIA_INSPECTION_TIMEOUT_SECONDS: int = Field(default=30, ge=1, le=300)
+    MEDIA_INSPECTION_MAX_OUTPUT_BYTES: int = Field(
+        default=1_048_576,
+        ge=1024,
+        le=16_777_216,
+    )
+    MEDIA_MAX_DURATION_SECONDS: int = Field(default=600, ge=1, le=86_400)
+    MEDIA_MAX_DIMENSION_PIXELS: int = Field(default=8192, ge=64, le=32_768)
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"
@@ -198,11 +210,26 @@ class Settings(BaseSettings):
                 raise ValueError("S3 media uploads require both media buckets")
             if self.MEDIA_S3_QUARANTINE_BUCKET == self.MEDIA_S3_ASSET_BUCKET:
                 raise ValueError("S3 quarantine and asset buckets must differ")
+        if self.MEDIA_INSPECTION_ENABLED:
+            if self.MEDIA_OBJECT_STORE_BACKEND != "s3":
+                raise ValueError("media inspection requires the S3 backend")
+            if not Path(self.MEDIA_CLAMSCAN_PATH).is_absolute():
+                raise ValueError("MEDIA_CLAMSCAN_PATH must be absolute")
+            if not Path(self.MEDIA_FFPROBE_PATH).is_absolute():
+                raise ValueError("MEDIA_FFPROBE_PATH must be absolute")
+        if (
+            self.DEPLOYMENT_ENVIRONMENT == "production"
+            and self.MEDIA_UPLOAD_ENABLED
+            and not self.MEDIA_INSPECTION_ENABLED
+        ):
+            raise ValueError("production media uploads require inspection")
         if self.MEDIA_SUBMIT_ENABLED and (
-            not self.MEDIA_UPLOAD_ENABLED or not self.MEDIA_PLANNING_ENABLED
+            not self.MEDIA_UPLOAD_ENABLED
+            or not self.MEDIA_INSPECTION_ENABLED
+            or not self.MEDIA_PLANNING_ENABLED
         ):
             raise ValueError(
-                "media submission requires upload and planning to be enabled"
+                "media submission requires upload, inspection, and planning"
             )
         if (
             self.MEDIA_SUBMIT_ENABLED

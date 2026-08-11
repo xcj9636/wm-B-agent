@@ -9,7 +9,7 @@ celery = Celery(
     "trade_ai_agent",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.task_functions"],
+    include=["app.tasks.task_functions", "app.tasks.media_tasks"],
 )
 
 # Configure Celery
