@@ -409,7 +409,13 @@ async def promote_asset(
     request: PromoteAssetRequest,
     current_user: User = Depends(get_current_active_user),
     review_service: MediaReviewService = Depends(get_media_review_service),
+    object_store: Optional[MediaObjectStore] = Depends(get_media_object_store),
 ):
+    if object_store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Media object store is unavailable",
+        )
     try:
         asset = review_service.promote(
             asset_id,
@@ -417,6 +423,7 @@ async def promote_asset(
             rights_record_id=request.rights_record_id,
             consent_record_id=request.consent_record_id,
             principal=_principal(current_user),
+            object_store=object_store,
         )
         return MediaAssetResponse.model_validate(asset)
     except Exception as exc:

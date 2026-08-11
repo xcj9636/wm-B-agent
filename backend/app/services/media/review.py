@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.integrations.object_store import MediaObjectStore
 from app.models.database import (
     MediaAsset,
     MediaConsentRecord,
@@ -179,10 +180,19 @@ class MediaReviewService:
         rights_record_id: UUID,
         consent_record_id: Optional[UUID],
         principal: ExecutionPrincipal,
+        object_store: MediaObjectStore,
         now: Optional[datetime] = None,
     ) -> MediaAsset:
         self._require_role(principal, {"admin"}, "administrator")
         asset = self._owned_asset(asset_id, principal)
+        if not asset.quarantined:
+            if (
+                asset.scan_report_id == scan_report_id
+                and asset.rights_record_id == rights_record_id
+                and asset.consent_record_id == consent_record_id
+            ):
+                return asset
+            raise MediaAssetConflict("Asset was promoted with different evidence")
         checked_at = _naive_utc(now)
         scan = self._evidence(MediaScanReport, scan_report_id)
         rights = self._evidence(MediaRightsRecord, rights_record_id)
@@ -203,6 +213,19 @@ class MediaReviewService:
             self._authorize_evidence(consent, asset, principal)
             self._validate_consent(consent, checked_at)
 
+        promoted = object_store.promote(
+            asset.storage_key,
+            expected_sha256=asset.sha256,
+        )
+        if not promoted.key.startswith("assets/"):
+            raise MediaAssetConflict("Promoted object is outside the asset namespace")
+        if promoted.sha256 != asset.sha256:
+            raise MediaAssetConflict("Promoted object checksum does not match asset")
+        if promoted.size_bytes != asset.size_bytes:
+            raise MediaAssetConflict("Promoted object size does not match asset")
+        if promoted.content_type.strip().lower() != asset.mime_type:
+            raise MediaAssetConflict("Promoted object MIME does not match asset")
+
         asset.scan_status = AssetScanStatus.PASSED.value
         asset.rights_status = AssetRightsStatus.VERIFIED.value
         asset.consent_status = (
@@ -213,6 +236,7 @@ class MediaReviewService:
         asset.scan_report_id = scan.id
         asset.rights_record_id = rights.id
         asset.consent_record_id = consent.id if consent is not None else None
+        asset.storage_key = promoted.key
         asset.quarantined = False
         asset.reviewed_by_user_id = principal.user_id
         asset.reviewed_at = checked_at

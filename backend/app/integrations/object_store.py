@@ -29,6 +29,13 @@ class MediaObjectStore(Protocol):
 
     def head(self, key: str) -> StoredObjectMetadata: ...
 
+    def promote(
+        self,
+        key: str,
+        *,
+        expected_sha256: str,
+    ) -> StoredObjectMetadata: ...
+
 
 class ObjectStoreConfigurationError(RuntimeError):
     pass
@@ -157,10 +164,74 @@ class S3CompatibleMediaObjectStore:
 
     def head(self, key: str) -> StoredObjectMetadata:
         physical_key = self._physical_quarantine_key(key)
-        response = self._client.head_object(
-            Bucket=self._quarantine_bucket,
-            Key=physical_key,
+        return self._metadata(
+            bucket=self._quarantine_bucket,
+            physical_key=physical_key,
+            logical_key=key,
         )
+
+    def promote(
+        self,
+        key: str,
+        *,
+        expected_sha256: str,
+    ) -> StoredObjectMetadata:
+        """Copy verified quarantine data to the asset bucket, then delete source."""
+        source_key = self._physical_quarantine_key(key)
+        asset_key = f"assets/{key.removeprefix('quarantine/')}"
+        destination_key = self._physical_asset_key(asset_key)
+        try:
+            metadata = self._metadata(
+                bucket=self._asset_bucket,
+                physical_key=destination_key,
+                logical_key=asset_key,
+            )
+        except Exception as exc:
+            if not self._is_not_found(exc):
+                raise
+            copy_options = {
+                "Bucket": self._asset_bucket,
+                "Key": destination_key,
+                "CopySource": {
+                    "Bucket": self._quarantine_bucket,
+                    "Key": source_key,
+                },
+                "MetadataDirective": "COPY",
+            }
+            if self._kms_key_id:
+                copy_options.update(
+                    {
+                        "ServerSideEncryption": "aws:kms",
+                        "SSEKMSKeyId": self._kms_key_id,
+                    }
+                )
+            else:
+                copy_options["ServerSideEncryption"] = "AES256"
+            self._client.copy_object(**copy_options)
+            metadata = self._metadata(
+                bucket=self._asset_bucket,
+                physical_key=destination_key,
+                logical_key=asset_key,
+            )
+
+        if metadata.sha256 != expected_sha256:
+            raise ObjectStoreIntegrityError(
+                "Promoted object checksum does not match the asset"
+            )
+        self._client.delete_object(
+            Bucket=self._quarantine_bucket,
+            Key=source_key,
+        )
+        return metadata
+
+    def _metadata(
+        self,
+        *,
+        bucket: str,
+        physical_key: str,
+        logical_key: str,
+    ) -> StoredObjectMetadata:
+        response = self._client.head_object(Bucket=bucket, Key=physical_key)
         metadata = response.get("Metadata") or {}
         sha256 = str(metadata.get("sha256") or "").strip().lower()
         if len(sha256) != 64:
@@ -168,7 +239,7 @@ class S3CompatibleMediaObjectStore:
                 "Stored object is missing its SHA-256 metadata"
             )
         return StoredObjectMetadata(
-            key=key,
+            key=logical_key,
             size_bytes=response["ContentLength"],
             content_type=response["ContentType"],
             sha256=sha256,
@@ -187,3 +258,19 @@ class S3CompatibleMediaObjectStore:
         if any(segment in {"", ".", ".."} for segment in segments):
             raise ObjectStoreConfigurationError("Object key is not canonical")
         return f"{self._key_prefix}/{key}" if self._key_prefix else key
+
+    def _physical_asset_key(self, key: str) -> str:
+        if not key.startswith("assets/") or key.startswith("/") or "\\" in key:
+            raise ObjectStoreConfigurationError(
+                "Object key is outside the asset namespace"
+            )
+        segments = key.split("/")
+        if any(segment in {"", ".", ".."} for segment in segments):
+            raise ObjectStoreConfigurationError("Object key is not canonical")
+        return f"{self._key_prefix}/{key}" if self._key_prefix else key
+
+    @staticmethod
+    def _is_not_found(exc: Exception) -> bool:
+        response = getattr(exc, "response", {})
+        error = response.get("Error", {}) if isinstance(response, dict) else {}
+        return str(error.get("Code", "")) in {"404", "NoSuchKey", "NotFound"}
