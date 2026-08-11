@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import re
 from typing import List, Tuple
 from uuid import UUID
 
@@ -281,6 +282,39 @@ class MediaGenerationJobService:
             job,
             "submission.accepted",
             {"provider_request_id": request_id},
+            now,
+        )
+        self._db.commit()
+        return job
+
+    def mark_submission_unknown(
+        self,
+        job_id: UUID,
+        *,
+        worker_id: str,
+        fencing_token: int,
+        error_code: str,
+        now: datetime,
+    ) -> MediaGenerationJob:
+        """Freeze an ambiguous external effect so no worker can resubmit it."""
+        now = self._naive_utc(now)
+        job = self._leased_job(job_id, worker_id, fencing_token, now)
+        attempt = self._current_attempt(job)
+        if job.effect_state != "started" or attempt.status != "submitting":
+            raise MediaJobLeaseConflict("media job has no ambiguous submission")
+        safe_code = self._safe_error_code(error_code)
+        job.status = "submission_unknown"
+        job.effect_state = "unknown"
+        job.error_code = safe_code
+        job.updated_at = now
+        attempt.status = "submission_unknown"
+        attempt.effect_state = "unknown"
+        attempt.error_code = safe_code
+        self._clear_lease(job)
+        self._append_event(
+            job,
+            "submission.unknown",
+            {"error_code": safe_code},
             now,
         )
         self._db.commit()
@@ -599,6 +633,13 @@ class MediaGenerationJobService:
         if not normalized or len(normalized) > 255:
             raise ValueError(f"{name} is invalid")
         return normalized
+
+    @staticmethod
+    def _safe_error_code(value: str) -> str:
+        normalized = value.strip().lower()
+        if re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,99}", normalized):
+            return normalized
+        return "provider_submission_failed"
 
     @staticmethod
     def _naive_utc(value: datetime) -> datetime:
