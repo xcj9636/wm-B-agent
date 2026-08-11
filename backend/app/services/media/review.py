@@ -277,6 +277,10 @@ class MediaReviewService:
             raise MediaAssetConflict("Asset scan has not passed")
         if report.asset_sha256 != asset.sha256:
             raise MediaAssetConflict("Scan evidence hash does not match asset")
+        findings = report.findings_json or {}
+        probe = findings.get("probe") if isinstance(findings, dict) else None
+        if not isinstance(probe, dict) or probe.get("status") != "passed":
+            raise MediaAssetConflict("Asset media probe has not passed")
 
     @staticmethod
     def _validate_rights(record: MediaRightsRecord, checked_at: datetime) -> None:

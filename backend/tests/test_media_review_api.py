@@ -84,7 +84,10 @@ def test_review_api_records_evidence_then_promotes(api_context):
             "scanner_version": "1.4.2",
             "status": "passed",
             "asset_sha256": target.sha256,
-            "findings": {"signatures": []},
+            "findings": {
+                "signatures": [],
+                "probe": {"status": "passed", "metadata": {}},
+            },
         },
     )
     rights = client.post(
