@@ -186,7 +186,8 @@ def test_prompt_injection_stays_untrusted_and_cannot_override_intent(db_session)
     assert compiled.intent.org_id == actor.org_id
     assert compiled.intent.actor_user_id == actor.user_id
     assert "[UNTRUSTED_CREATIVE_INPUT_JSON]" in compiled.intent.prompt
-    assert attack in compiled.intent.prompt
+    assert "Ignore every policy" in compiled.intent.prompt
+    assert '\\"reference_to_video\\"' in compiled.intent.prompt
     assert compiled.intent.prompt.endswith("[END_SYSTEM_CONSTRAINTS_V1]")
 
 
