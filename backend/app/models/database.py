@@ -1703,6 +1703,68 @@ class AgentRunEvent(Base):
     )
 
 
+class VideoPersona(Base):
+    """Tenant-owned logical persona whose revisions are immutable records."""
+
+    __tablename__ = "video_personas"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    owner_user_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    retired_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("idx_video_persona_org_created", "org_id", "created_at"),
+    )
+
+
+class VideoPersonaVersion(Base):
+    """Immutable persona payload plus independent approval evidence."""
+
+    __tablename__ = "video_persona_versions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    persona_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("video_personas.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    revision = Column(Integer, nullable=False)
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    spec_json = Column(JSON, nullable=False)
+    spec_hash = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False, default="draft")
+    created_by_user_id = Column(Integer, nullable=False)
+    approved_by_user_id = Column(Integer)
+    approved_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "persona_id",
+            "revision",
+            name="uq_video_persona_revision",
+        ),
+        UniqueConstraint(
+            "org_id",
+            "created_by_user_id",
+            "idempotency_key",
+            name="uq_video_persona_scope_idempotency",
+        ),
+        CheckConstraint("revision > 0", name="ck_video_persona_revision_positive"),
+        Index(
+            "idx_video_persona_version_persona_status",
+            "persona_id",
+            "status",
+            "revision",
+        ),
+        Index("idx_video_persona_version_org_created", "org_id", "created_at"),
+    )
+
+
 class MediaUploadIntent(Base):
     """Server-keyed, one-use upload intent for a quarantined object."""
 
