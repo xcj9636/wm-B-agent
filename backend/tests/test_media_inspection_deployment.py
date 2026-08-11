@@ -35,3 +35,23 @@ def test_media_inspection_configuration_is_documented():
         "MEDIA_INSPECTION_TIMEOUT_SECONDS",
     ]:
         assert f"{setting}=" in env_example
+
+
+def test_thumbnail_and_lifecycle_worker_configuration_is_deployable():
+    env_example = (REPOSITORY_ROOT / ".env.example").read_text()
+    compose = (REPOSITORY_ROOT / "docker-compose.yml").read_text()
+    celery_worker = (
+        REPOSITORY_ROOT / "backend" / "app" / "tasks" / "celery_worker.py"
+    ).read_text()
+
+    for setting in [
+        "MEDIA_THUMBNAIL_ENABLED",
+        "MEDIA_FFMPEG_PATH",
+        "MEDIA_THUMBNAIL_MAX_BYTES",
+        "MEDIA_LIFECYCLE_ENABLED",
+        "MEDIA_RETENTION_DAYS",
+        "MEDIA_MAINTENANCE_USER_ID",
+    ]:
+        assert f"{setting}=" in env_example
+        assert setting in compose
+    assert "cleanup_media_assets_task" in celery_worker
