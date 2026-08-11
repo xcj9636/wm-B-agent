@@ -1,9 +1,12 @@
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 from app.config import Settings
 from app.integrations.object_store import StoredObjectMetadata
-from app.models.database import MediaAsset
+from app.models.database import MediaAsset, User
+from app.services.media.assets import MediaAssetForbidden
 from app.services.media.thumbnail import GeneratedThumbnail
 from app.tasks.media_tasks import generate_media_thumbnail_task, run_media_thumbnail
 
@@ -58,7 +61,22 @@ def create_source(db, org_id):
     return asset
 
 
+def create_requester(db, *, user_id=42, is_superuser=False):
+    requester = User(
+        id=user_id,
+        username=f"thumbnail-requester-{user_id}",
+        email=f"thumbnail-requester-{user_id}@example.test",
+        hashed_password="unused",
+        is_active=True,
+        is_superuser=is_superuser,
+    )
+    db.add(requester)
+    db.commit()
+    return requester
+
+
 def test_thumbnail_worker_derives_tenant_from_durable_asset(db_session):
+    create_requester(db_session)
     source = create_source(
         db_session,
         Settings(_env_file=None).AGENT_ORG_ID,
@@ -78,3 +96,31 @@ def test_thumbnail_worker_derives_tenant_from_durable_asset(db_session):
     assert generate_media_thumbnail_task.name == (
         "app.tasks.media_tasks.generate_media_thumbnail_task"
     )
+
+
+def test_thumbnail_worker_rejects_forged_or_inactive_requester(db_session):
+    source = create_source(
+        db_session,
+        Settings(_env_file=None).AGENT_ORG_ID,
+    )
+
+    with pytest.raises(MediaAssetForbidden):
+        run_media_thumbnail(
+            db_session,
+            asset_id=source.id,
+            requested_by_user_id=999,
+            object_store=FakeStore(),
+            runner=FakeRunner(),
+        )
+
+    inactive = create_requester(db_session, user_id=999)
+    inactive.is_active = False
+    db_session.commit()
+    with pytest.raises(MediaAssetForbidden):
+        run_media_thumbnail(
+            db_session,
+            asset_id=source.id,
+            requested_by_user_id=inactive.id,
+            object_store=FakeStore(),
+            runner=FakeRunner(),
+        )
