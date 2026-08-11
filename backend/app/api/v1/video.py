@@ -18,6 +18,7 @@ from app.integrations.object_store import (
     MediaObjectStore,
     ObjectStoreConfigurationError,
     ObjectStoreIntegrityError,
+    PresignedDownload,
     PresignedUpload,
     S3CompatibleMediaObjectStore,
 )
@@ -40,6 +41,7 @@ from app.services.media.assets import (
     MediaAssetService,
     UploadIntentCommand,
 )
+from app.services.media.access import MediaAssetAccessService
 from app.services.media.contracts import (
     AssetConsentStatus,
     AssetRightsStatus,
@@ -177,6 +179,12 @@ def get_media_asset_service(db: Session = Depends(get_db)) -> MediaAssetService:
 
 def get_media_review_service(db: Session = Depends(get_db)) -> MediaReviewService:
     return MediaReviewService(db)
+
+
+def get_media_access_service(
+    db: Session = Depends(get_db),
+) -> MediaAssetAccessService:
+    return MediaAssetAccessService(db)
 
 
 class MediaInspectionDispatchUnavailable(RuntimeError):
@@ -445,6 +453,40 @@ async def promote_asset(
         return MediaAssetResponse.model_validate(asset)
     except Exception as exc:
         _raise_review_http_error(exc)
+
+
+@router.post(
+    "/assets/{asset_id}/download",
+    response_model=PresignedDownload,
+)
+async def create_asset_download(
+    asset_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    access_service: MediaAssetAccessService = Depends(get_media_access_service),
+    object_store: Optional[MediaObjectStore] = Depends(get_media_object_store),
+):
+    if object_store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Media object store is unavailable",
+        )
+    try:
+        return access_service.create_download(
+            asset_id,
+            _principal(current_user),
+            object_store,
+            expires_seconds=settings.MEDIA_DOWNLOAD_TTL_SECONDS,
+        )
+    except MediaAssetNotFound as exc:
+        raise HTTPException(status_code=404, detail="Media asset not found") from exc
+    except MediaAssetForbidden as exc:
+        # Do not reveal whether an asset exists across authorization boundaries.
+        raise HTTPException(status_code=404, detail="Media asset not found") from exc
+    except MediaAssetConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Media asset is not downloadable",
+        ) from exc
 
 
 def _raise_review_http_error(exc: Exception) -> None:

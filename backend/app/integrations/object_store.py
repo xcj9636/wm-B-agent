@@ -52,6 +52,15 @@ class MediaObjectStore(Protocol):
         expected_content_type: str,
     ): ...
 
+    def create_download(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        download_name: str,
+        expires_seconds: int = 120,
+    ) -> "PresignedDownload": ...
+
 
 class ObjectStoreConfigurationError(RuntimeError):
     pass
@@ -70,8 +79,17 @@ class PresignedUpload(BaseModel):
     expires_seconds: int = Field(ge=60, le=3600)
 
 
+class PresignedDownload(BaseModel):
+    """Opaque, short-lived read credential; storage coordinates stay private."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: str = Field(min_length=1, max_length=4000)
+    expires_seconds: int = Field(ge=30, le=300)
+
+
 class S3CompatibleMediaObjectStore:
-    """Quarantine-only browser upload adapter with server-owned object keys."""
+    """Server-owned quarantine, promotion, and controlled-read adapter."""
 
     backend_name = "s3"
 
@@ -177,6 +195,43 @@ class S3CompatibleMediaObjectStore:
             key=key,
             expires_seconds=expires_seconds,
         )
+
+    def create_download(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        download_name: str,
+        expires_seconds: int = 120,
+    ) -> PresignedDownload:
+        """Create a least-privilege credential for one promoted object."""
+        if not 30 <= expires_seconds <= 300:
+            raise ObjectStoreConfigurationError(
+                "Download expiry must be between 30 and 300 seconds"
+            )
+        physical_key = self._physical_asset_key(key)
+        normalized_type = content_type.strip().lower()
+        if (
+            not normalized_type
+            or "\r" in normalized_type
+            or "\n" in normalized_type
+        ):
+            raise ObjectStoreConfigurationError("Content type is invalid")
+        if not self._is_safe_download_name(download_name):
+            raise ObjectStoreConfigurationError("Download name is invalid")
+        url = self._client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self._asset_bucket,
+                "Key": physical_key,
+                "ResponseContentType": normalized_type,
+                "ResponseContentDisposition": (
+                    f'attachment; filename="{download_name}"'
+                ),
+            },
+            ExpiresIn=expires_seconds,
+        )
+        return PresignedDownload(url=url, expires_seconds=expires_seconds)
 
     def head(self, key: str) -> StoredObjectMetadata:
         physical_key = self._physical_quarantine_key(key)
@@ -389,6 +444,16 @@ class S3CompatibleMediaObjectStore:
         if any(segment in {"", ".", ".."} for segment in segments):
             raise ObjectStoreConfigurationError("Object key is not canonical")
         return f"{self._key_prefix}/{key}" if self._key_prefix else key
+
+    @staticmethod
+    def _is_safe_download_name(value: str) -> bool:
+        if not 1 <= len(value) <= 255 or value in {".", ".."}:
+            return False
+        return all(
+            character.isascii()
+            and (character.isalnum() or character in {".", "_", "-"})
+            for character in value
+        )
 
     @staticmethod
     def _is_not_found(exc: Exception) -> bool:

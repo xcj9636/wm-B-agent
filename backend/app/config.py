@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     MEDIA_S3_ASSET_BUCKET: str = ""
     MEDIA_S3_KEY_PREFIX: str = ""
     MEDIA_S3_KMS_KEY_ID: str = ""
+    MEDIA_DOWNLOAD_TTL_SECONDS: int = Field(default=120, ge=30, le=300)
     MEDIA_INSPECTION_ENABLED: bool = False
     MEDIA_CLAMSCAN_PATH: str = "/usr/bin/clamscan"
     MEDIA_FFPROBE_PATH: str = "/usr/bin/ffprobe"

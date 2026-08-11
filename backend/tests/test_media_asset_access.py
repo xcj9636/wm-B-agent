@@ -124,6 +124,37 @@ def test_download_rejects_cross_tenant_access(db_session):
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("scan_status", "failed"),
+        ("rights_status", "unknown"),
+        ("consent_status", "unknown"),
+    ],
+)
+def test_download_fails_closed_when_approval_evidence_is_incomplete(
+    db_session,
+    field,
+    value,
+):
+    org_id = uuid4()
+    asset = promoted_asset(db_session, org_id)
+    if field == "consent_status":
+        asset.consent_required = True
+    setattr(asset, field, value)
+    db_session.commit()
+    store = FakeDownloadStore()
+
+    with pytest.raises(MediaAssetConflict):
+        MediaAssetAccessService(db_session).create_download(
+            asset.id,
+            principal(org_id),
+            store,
+        )
+
+    assert store.calls == []
+
+
+@pytest.mark.parametrize(
     ("sensitivity", "actor_id", "roles", "allowed"),
     [
         (Sensitivity.CONFIDENTIAL, 7, {"user"}, True),
