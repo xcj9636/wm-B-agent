@@ -1449,6 +1449,13 @@ class MediaGenerationJob(Base):
     actual_cost_microusd = Column(BigInteger)
     budget_finalized_at = Column(DateTime)
     provider_request_id = Column(String(255))
+    provider_state = Column(String(30))
+    reconcile_count = Column(Integer, nullable=False, default=0)
+    next_reconcile_at = Column(DateTime)
+    last_reconciled_at = Column(DateTime)
+    reconciliation_fencing_token = Column(Integer, nullable=False, default=0)
+    reconciliation_leased_by = Column(String(100))
+    reconciliation_lease_until = Column(DateTime)
     result_ref = Column(String(1000))
     error_code = Column(String(100))
     deadline_at = Column(DateTime, nullable=False)
@@ -1487,6 +1494,11 @@ class MediaGenerationJob(Base):
             name="uq_media_job_scope_idempotency",
         ),
         Index("idx_media_job_dispatch", "status", "created_at"),
+        Index(
+            "idx_media_job_reconciliation",
+            "status",
+            "next_reconcile_at",
+        ),
         Index("idx_media_job_org_created", "org_id", "created_at"),
     )
 

@@ -276,6 +276,8 @@ class MediaGenerationJobService:
         job.status = "submitted"
         job.effect_state = "confirmed"
         job.provider_request_id = request_id
+        job.provider_state = "queued"
+        job.next_reconcile_at = now
         job.updated_at = now
         self._clear_lease(job)
         self._append_event(

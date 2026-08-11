@@ -79,7 +79,6 @@ def test_observed_queue_state_schedules_bounded_poll_and_blocks_stale_fence(
         limit=1,
         lease_seconds=30,
     )[0]
-
     pending = service.record_pending(
         job.id,
         worker_id="reconciler-a",
@@ -121,6 +120,7 @@ def test_expired_reconcile_lease_is_reclaimed_with_new_fence(db_session):
         limit=1,
         lease_seconds=30,
     )[0]
+    first_fencing_token = first.reconciliation_fencing_token
 
     reclaimed = service.claim_batch(
         worker_id="reconciler-b",
@@ -132,7 +132,7 @@ def test_expired_reconcile_lease_is_reclaimed_with_new_fence(db_session):
     assert reclaimed.id == job.id
     assert reclaimed.status == "submitted"
     assert reclaimed.reconciliation_fencing_token == (
-        first.reconciliation_fencing_token + 1
+        first_fencing_token + 1
     )
     assert reclaimed.reconciliation_leased_by == "reconciler-b"
 
