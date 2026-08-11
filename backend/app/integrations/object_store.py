@@ -70,6 +70,8 @@ class MediaObjectStore(Protocol):
         sha256: str,
     ) -> StoredObjectMetadata: ...
 
+    def delete_asset(self, key: str) -> None: ...
+
     def create_download(
         self,
         *,
@@ -386,6 +388,13 @@ class S3CompatibleMediaObjectStore:
                 "Stored derivative failed integrity validation"
             )
         return metadata
+
+    def delete_asset(self, key: str) -> None:
+        """Idempotently delete one canonical promoted-object key."""
+        self._client.delete_object(
+            Bucket=self._asset_bucket,
+            Key=self._physical_asset_key(key),
+        )
 
     @contextmanager
     def stage_quarantined(

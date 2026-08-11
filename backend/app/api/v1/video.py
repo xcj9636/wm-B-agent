@@ -53,6 +53,7 @@ from app.services.media.review import (
     RightsEvidenceCommand,
 )
 from app.services.media.thumbnail import MediaThumbnailService
+from app.services.media.lifecycle import MediaAssetLifecycleService
 from app.tasks.media_tasks import (
     generate_media_thumbnail_task,
     inspect_media_asset_task,
@@ -123,6 +124,12 @@ class ThumbnailQueueResponse(BaseModel):
     asset_id: UUID
     task_id: str
     status: str
+
+
+class MediaDeletionResponse(BaseModel):
+    id: UUID
+    status: str
+    deleted_at: datetime
 
 
 class RightsReviewRequest(BaseModel):
@@ -207,6 +214,12 @@ def get_media_thumbnail_service(
     db: Session = Depends(get_db),
 ) -> MediaThumbnailService:
     return MediaThumbnailService(db)
+
+
+def get_media_lifecycle_service(
+    db: Session = Depends(get_db),
+) -> MediaAssetLifecycleService:
+    return MediaAssetLifecycleService(db)
 
 
 class MediaInspectionDispatchUnavailable(RuntimeError):
@@ -563,6 +576,36 @@ async def create_asset_download(
         raise HTTPException(
             status_code=409,
             detail="Media asset is not downloadable",
+        ) from exc
+
+
+@router.delete(
+    "/assets/{asset_id}",
+    response_model=MediaDeletionResponse,
+)
+async def soft_delete_media_asset(
+    asset_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    lifecycle_service: MediaAssetLifecycleService = Depends(
+        get_media_lifecycle_service
+    ),
+):
+    try:
+        deleted = lifecycle_service.soft_delete(
+            asset_id,
+            _principal(current_user),
+        )
+        return MediaDeletionResponse(
+            id=deleted.id,
+            status="deleted",
+            deleted_at=deleted.deleted_at,
+        )
+    except (MediaAssetNotFound, MediaAssetForbidden) as exc:
+        raise HTTPException(status_code=404, detail="Media asset not found") from exc
+    except MediaAssetConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Media asset is still referenced",
         ) from exc
 
 
