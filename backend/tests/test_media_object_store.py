@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.integrations.object_store import (
     ObjectStoreConfigurationError,
+    ObjectStoreIntegrityError,
     PresignedUpload,
     S3CompatibleMediaObjectStore,
 )
@@ -13,6 +14,9 @@ class FakeS3Client:
     def __init__(self):
         self.presign_calls = []
         self.head_calls = []
+        self.copy_calls = []
+        self.delete_calls = []
+        self.asset_exists = False
         self.head_response = {
             "ContentLength": 4096,
             "ContentType": "image/png",
@@ -28,7 +32,20 @@ class FakeS3Client:
 
     def head_object(self, **kwargs):
         self.head_calls.append(kwargs)
+        if kwargs["Bucket"] == "media-assets" and not self.asset_exists:
+            raise FakeS3NotFound()
         return self.head_response
+
+    def copy_object(self, **kwargs):
+        self.copy_calls.append(kwargs)
+        self.asset_exists = True
+
+    def delete_object(self, **kwargs):
+        self.delete_calls.append(kwargs)
+
+
+class FakeS3NotFound(RuntimeError):
+    response = {"Error": {"Code": "NoSuchKey"}}
 
 
 def store(client=None, **overrides):
@@ -88,6 +105,66 @@ def test_head_reads_only_the_quarantine_bucket_and_validates_checksum():
     assert metadata.size_bytes == 4096
     assert metadata.content_type == "image/png"
     assert metadata.sha256 == "a" * 64
+
+
+def test_promotion_copies_to_asset_bucket_verifies_then_deletes_quarantine():
+    client = FakeS3Client()
+    object_store = store(client)
+
+    promoted = object_store.promote(
+        "quarantine/ba6e/upload-id",
+        expected_sha256="a" * 64,
+    )
+
+    assert promoted.key == "assets/ba6e/upload-id"
+    assert client.copy_calls == [
+        {
+            "Bucket": "media-assets",
+            "Key": "tenant-media/assets/ba6e/upload-id",
+            "CopySource": {
+                "Bucket": "media-quarantine",
+                "Key": "tenant-media/quarantine/ba6e/upload-id",
+            },
+            "MetadataDirective": "COPY",
+            "ServerSideEncryption": "aws:kms",
+            "SSEKMSKeyId": "kms-key-1",
+        }
+    ]
+    assert client.delete_calls == [
+        {
+            "Bucket": "media-quarantine",
+            "Key": "tenant-media/quarantine/ba6e/upload-id",
+        }
+    ]
+
+
+def test_promotion_recovers_existing_verified_destination_without_copying():
+    client = FakeS3Client()
+    client.asset_exists = True
+    object_store = store(client)
+
+    promoted = object_store.promote(
+        "quarantine/ba6e/upload-id",
+        expected_sha256="a" * 64,
+    )
+
+    assert promoted.key == "assets/ba6e/upload-id"
+    assert client.copy_calls == []
+    assert len(client.delete_calls) == 1
+
+
+def test_promotion_never_deletes_quarantine_when_destination_hash_is_wrong():
+    client = FakeS3Client()
+    client.asset_exists = True
+    client.head_response["Metadata"]["sha256"] = "b" * 64
+
+    with pytest.raises(ObjectStoreIntegrityError, match="checksum"):
+        store(client).promote(
+            "quarantine/ba6e/upload-id",
+            expected_sha256="a" * 64,
+        )
+
+    assert client.delete_calls == []
 
 
 @pytest.mark.parametrize(

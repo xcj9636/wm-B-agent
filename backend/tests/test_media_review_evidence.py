@@ -17,6 +17,7 @@ from app.services.media.review import (
     RightsEvidenceCommand,
     ScanEvidenceCommand,
 )
+from app.integrations.object_store import StoredObjectMetadata
 
 
 def principal(*, org_id=None, user_id=7, roles=None):
@@ -88,6 +89,22 @@ def consent_command(now, evidence_asset_id):
     )
 
 
+class FakePromotionStore:
+    backend_name = "s3"
+
+    def __init__(self):
+        self.calls = []
+
+    def promote(self, key, *, expected_sha256):
+        self.calls.append((key, expected_sha256))
+        return StoredObjectMetadata(
+            key=key.replace("quarantine/", "assets/", 1),
+            size_bytes=1024,
+            content_type="image/png",
+            sha256=expected_sha256,
+        )
+
+
 def test_promotion_uses_persisted_scan_rights_and_consent_evidence(db_session):
     now = datetime.now(timezone.utc)
     admin = principal()
@@ -109,6 +126,7 @@ def test_promotion_uses_persisted_scan_rights_and_consent_evidence(db_session):
         rights_record_id=rights.id,
         consent_record_id=consent.id,
         principal=admin,
+        object_store=FakePromotionStore(),
         now=now,
     )
 
@@ -170,6 +188,7 @@ def test_promotion_rejects_expired_or_cross_tenant_evidence(db_session):
             rights_record_id=expired_rights.id,
             consent_record_id=None,
             principal=first_admin,
+            object_store=FakePromotionStore(),
             now=now,
         )
 
@@ -180,6 +199,7 @@ def test_promotion_rejects_expired_or_cross_tenant_evidence(db_session):
             rights_record_id=other_rights.id,
             consent_record_id=None,
             principal=first_admin,
+            object_store=FakePromotionStore(),
             now=now,
         )
 
@@ -208,6 +228,6 @@ def test_required_consent_must_cover_video_and_reference_same_org_evidence(db_se
             rights_record_id=rights.id,
             consent_record_id=image_only.id,
             principal=admin,
+            object_store=FakePromotionStore(),
             now=now,
         )
-

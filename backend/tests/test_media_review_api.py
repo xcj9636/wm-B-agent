@@ -2,6 +2,21 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.models.database import MediaAsset
+from app.integrations.object_store import StoredObjectMetadata
+from app.main import app
+from app.api.v1.video import get_media_object_store
+
+
+class FakePromotionStore:
+    backend_name = "s3"
+
+    def promote(self, key, *, expected_sha256):
+        return StoredObjectMetadata(
+            key=key.replace("quarantine/", "assets/", 1),
+            size_bytes=4096,
+            content_type="image/png",
+            sha256=expected_sha256,
+        )
 
 
 def create_asset(db, user, *, consent_required=False, suffix="review-target"):
@@ -51,6 +66,7 @@ def test_review_api_records_evidence_then_promotes(api_context):
     client, db, user = api_context
     user.is_superuser = True
     db.commit()
+    app.dependency_overrides[get_media_object_store] = FakePromotionStore
     target = create_asset(db, user)
     now = datetime.now(timezone.utc)
 
@@ -123,4 +139,3 @@ def test_consent_review_api_persists_evidence_asset_reference(api_context):
     assert consent.json()["asset_id"] == str(target.id)
     assert consent.json()["evidence_asset_id"] == str(document.id)
     assert consent.json()["status"] == "valid"
-
