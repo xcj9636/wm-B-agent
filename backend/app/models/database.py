@@ -1759,6 +1759,9 @@ class MediaAsset(Base):
     rights_status = Column(String(30), nullable=False, default="unknown")
     consent_required = Column(Boolean, nullable=False, default=False)
     consent_status = Column(String(30), nullable=False, default="unknown")
+    scan_report_id = Column(UUID(as_uuid=True), ForeignKey("media_scan_reports.id"))
+    rights_record_id = Column(UUID(as_uuid=True), ForeignKey("media_rights_records.id"))
+    consent_record_id = Column(UUID(as_uuid=True), ForeignKey("media_consent_records.id"))
     metadata_json = Column(JSON, nullable=False, default=dict)
     reviewed_by_user_id = Column(Integer)
     reviewed_at = Column(DateTime)
@@ -1770,6 +1773,65 @@ class MediaAsset(Base):
         Index("idx_media_asset_org_hash", "org_id", "sha256"),
         Index("idx_media_asset_quarantine", "quarantined", "scan_status"),
         CheckConstraint("size_bytes > 0", name="ck_media_asset_size_positive"),
+    )
+
+
+class MediaScanReport(Base):
+    """Immutable malware/content scan evidence bound to an asset checksum."""
+
+    __tablename__ = "media_scan_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    asset_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    scanner = Column(String(100), nullable=False)
+    scanner_version = Column(String(100), nullable=False)
+    status = Column(String(30), nullable=False)
+    asset_sha256 = Column(String(64), nullable=False)
+    findings_json = Column(JSON, nullable=False, default=dict)
+    created_by_user_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_media_scan_asset_created", "asset_id", "created_at"),
+        Index("idx_media_scan_org_status", "org_id", "status"),
+    )
+
+
+class MediaRightsRecord(Base):
+    """Auditable usage-rights decision with scope and validity window."""
+
+    __tablename__ = "media_rights_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    asset_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status = Column(String(30), nullable=False)
+    basis = Column(String(100), nullable=False)
+    territories = Column(JSON, nullable=False, default=list)
+    channels = Column(JSON, nullable=False, default=list)
+    source_ref = Column(String(500), nullable=False)
+    valid_from = Column(DateTime, nullable=False)
+    valid_until = Column(DateTime)
+    reviewed_by_user_id = Column(Integer, nullable=False)
+    revoked_at = Column(DateTime)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_media_rights_asset_created", "asset_id", "created_at"),
+        Index("idx_media_rights_org_status", "org_id", "status"),
+        CheckConstraint(
+            "valid_until IS NULL OR valid_until > valid_from",
+            name="ck_media_rights_valid_range",
+        ),
     )
 
 
@@ -1815,6 +1877,11 @@ class MediaConsentRecord(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), nullable=False)
+    asset_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     subject_ref = Column(String(255), nullable=False)
     purpose = Column(String(500), nullable=False)
     regions = Column(JSON, nullable=False, default=list)
