@@ -168,10 +168,10 @@ def test_fenced_submission_state_never_retries_an_unknown_effect(db_session):
         fencing_token=claimed.fencing_token,
         now=NOW + timedelta(seconds=5),
     )
-    recovered = service.recover_expired(now=NOW + timedelta(seconds=31))
-
     assert attempt.attempt_number == 1
     assert attempt.status == "submitting"
+    recovered = service.recover_expired(now=NOW + timedelta(seconds=31))
+
     assert [item.id for item in recovered] == [job.id]
     assert recovered[0].status == "submission_unknown"
     assert recovered[0].effect_state == "unknown"
@@ -249,7 +249,7 @@ def test_provider_receipt_is_unique_and_terminal_result_is_monotonic(db_session)
         for event in db_session.query(MediaGenerationEvent)
         .filter(MediaGenerationEvent.job_id == first.id)
         .order_by(MediaGenerationEvent.sequence)
-    ] == [1, 2, 3, 4]
+    ] == [1, 2, 3, 4, 5]
 
 
 def test_cancelling_before_submission_releases_budget_exactly_once(db_session):

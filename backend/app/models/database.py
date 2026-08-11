@@ -4,7 +4,7 @@ SQLAlchemy database models
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
-    BigInteger, Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum,
+    BigInteger, Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey, Enum,
     JSON, Float, Index, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.orm import relationship, declarative_base
@@ -1370,6 +1370,224 @@ class MediaRuntimeActivation(Base):
     )
     activated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     activated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class MediaBudgetAccount(Base):
+    """Locked monthly balance used to reserve expensive media work atomically."""
+
+    __tablename__ = "media_budget_accounts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    period_start = Column(Date, nullable=False)
+    limit_microusd = Column(BigInteger, nullable=False)
+    reserved_microusd = Column(BigInteger, nullable=False, default=0)
+    spent_microusd = Column(BigInteger, nullable=False, default=0)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "limit_microusd >= 0 AND reserved_microusd >= 0 "
+            "AND spent_microusd >= 0",
+            name="ck_media_budget_nonnegative",
+        ),
+        UniqueConstraint(
+            "org_id",
+            "period_start",
+            name="uq_media_budget_org_period",
+        ),
+    )
+
+
+class MediaGenerationJob(Base):
+    """Durable, fenced generation intent with no raw prompt or provider secret."""
+
+    __tablename__ = "media_generation_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    owner_user_id = Column(Integer, nullable=False)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("video_projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    storyboard_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("video_storyboard_versions.id"),
+        nullable=False,
+    )
+    shot_id = Column(UUID(as_uuid=True), nullable=False)
+    runtime_revision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_runtime_revisions.id"),
+        nullable=False,
+    )
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    intent_hash = Column(String(64), nullable=False)
+    payload_ref = Column(String(1000), nullable=False)
+    mode = Column(String(40), nullable=False)
+    provider = Column(String(30), nullable=False)
+    model_id = Column(String(255), nullable=False)
+    sensitivity = Column(String(20), nullable=False)
+    status = Column(String(30), nullable=False, default="queued")
+    effect_state = Column(String(20), nullable=False, default="none")
+    fencing_token = Column(Integer, nullable=False, default=0)
+    leased_by = Column(String(100))
+    lease_until = Column(DateTime)
+    heartbeat_at = Column(DateTime)
+    event_sequence = Column(Integer, nullable=False, default=0)
+    reserved_cost_microusd = Column(BigInteger, nullable=False)
+    estimate_hash = Column(String(64), nullable=False)
+    budget_period_start = Column(Date, nullable=False)
+    actual_cost_microusd = Column(BigInteger)
+    budget_finalized_at = Column(DateTime)
+    provider_request_id = Column(String(255))
+    result_ref = Column(String(1000))
+    error_code = Column(String(100))
+    deadline_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    completed_at = Column(DateTime)
+    cancelled_at = Column(DateTime)
+
+    attempts = relationship(
+        "MediaGenerationAttempt",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="MediaGenerationAttempt.attempt_number",
+    )
+    events = relationship(
+        "MediaGenerationEvent",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="MediaGenerationEvent.sequence",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "reserved_cost_microusd >= 0",
+            name="ck_media_job_reserved_cost_nonnegative",
+        ),
+        UniqueConstraint(
+            "org_id",
+            "owner_user_id",
+            "idempotency_key",
+            name="uq_media_job_scope_idempotency",
+        ),
+        Index("idx_media_job_dispatch", "status", "created_at"),
+        Index("idx_media_job_org_created", "org_id", "created_at"),
+    )
+
+
+class MediaGenerationAttempt(Base):
+    """One external submission effect; request IDs are globally deduplicated."""
+
+    __tablename__ = "media_generation_attempts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_number = Column(Integer, nullable=False)
+    fencing_token = Column(Integer, nullable=False)
+    provider = Column(String(30), nullable=False)
+    model_id = Column(String(255), nullable=False)
+    status = Column(String(30), nullable=False)
+    effect_state = Column(String(20), nullable=False)
+    provider_request_id = Column(String(255))
+    error_code = Column(String(100))
+    started_at = Column(DateTime, nullable=False)
+    submitted_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    job = relationship("MediaGenerationJob", back_populates="attempts")
+
+    __table_args__ = (
+        CheckConstraint(
+            "attempt_number > 0",
+            name="ck_media_attempt_number_positive",
+        ),
+        UniqueConstraint(
+            "job_id",
+            "attempt_number",
+            name="uq_media_attempt_job_number",
+        ),
+        UniqueConstraint(
+            "provider",
+            "provider_request_id",
+            name="uq_media_attempt_provider_request",
+        ),
+    )
+
+
+class MediaGenerationEvent(Base):
+    """Append-only, ordered and secret-free job audit event."""
+
+    __tablename__ = "media_generation_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence = Column(Integer, nullable=False)
+    event_type = Column(String(50), nullable=False)
+    data_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    job = relationship("MediaGenerationJob", back_populates="events")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "sequence",
+            name="uq_media_event_job_sequence",
+        ),
+        Index("idx_media_event_job_created", "job_id", "created_at"),
+    )
+
+
+class MediaBudgetLedgerEntry(Base):
+    """Append-only budget evidence; integer micro-USD avoids float drift."""
+
+    __tablename__ = "media_budget_ledger_entries"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    period_start = Column(Date, nullable=False)
+    entry_type = Column(String(30), nullable=False)
+    amount_microusd = Column(BigInteger, nullable=False)
+    idempotency_key = Column(String(255), nullable=False, unique=True)
+    estimate_hash = Column(String(64))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "amount_microusd >= 0",
+            name="ck_media_ledger_amount_nonnegative",
+        ),
+        Index("idx_media_ledger_org_period", "org_id", "period_start"),
+    )
 
 
 class AIChatSession(Base):
