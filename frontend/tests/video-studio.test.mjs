@@ -58,3 +58,24 @@ test('video studio loads real read models with complete UI states', () => {
   assert.doesNotMatch(view, /Mock data|coming soon|SYSTEM_CONSTRAINTS|intent\.prompt/i)
   assert.doesNotMatch(view, /[—–]/)
 })
+
+test('video studio drives the approval-gated planning workflow from the browser', () => {
+  const view = source('src/views/VideoStudio.vue')
+
+  for (const action of [
+    'videoApi.createPersona',
+    'videoApi.createProject',
+    'videoApi.createStoryboard',
+    'videoApi.approvePersona',
+    'videoApi.approveStoryboard',
+    'videoApi.compileShot',
+  ]) {
+    assert.match(view, new RegExp(action.replace('.', '\\.')))
+  }
+
+  assert.match(view, /personaDialogOpen/)
+  assert.match(view, /projectDialogOpen/)
+  assert.match(view, /storyboardDialogOpen/)
+  assert.match(view, /compiledReceipt/)
+  assert.doesNotMatch(view, /compiledReceipt[^\n]*prompt|prompt:\s*compiledReceipt/i)
+})
