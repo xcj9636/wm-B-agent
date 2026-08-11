@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'AI Chat' },
       },
       {
+        path: 'video-studio',
+        name: 'VideoStudio',
+        component: () => import('@/views/VideoStudio.vue'),
+        meta: { title: 'Video Studio' },
+      },
+      {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),

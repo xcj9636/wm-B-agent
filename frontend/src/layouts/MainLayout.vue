@@ -59,6 +59,13 @@
           </template>
         </el-menu-item>
 
+        <el-menu-item index="/video-studio">
+          <el-icon><VideoCamera /></el-icon>
+          <template #title>
+            {{ $t('Video Studio') }}
+          </template>
+        </el-menu-item>
+
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
           <template #title>
