@@ -1295,6 +1295,83 @@ class AIRuntimeConfiguration(Base):
     )
 
 
+class MediaRuntimeRevision(Base):
+    """Immutable media-provider configuration captured for reproducible jobs."""
+
+    __tablename__ = "media_runtime_revisions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    revision = Column(Integer, nullable=False)
+    provider = Column(String(30), nullable=False)
+    enabled_modes = Column(JSON, nullable=False, default=list)
+    model_aliases = Column(JSON, nullable=False, default=dict)
+    capability_snapshot = Column(JSON, nullable=False, default=dict)
+    capability_snapshot_hash = Column(String(64), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "revision > 0",
+            name="ck_media_runtime_revision_positive",
+        ),
+        CheckConstraint(
+            "provider = 'fal'",
+            name="ck_media_runtime_provider_supported",
+        ),
+        UniqueConstraint(
+            "org_id",
+            "revision",
+            name="uq_media_runtime_org_revision",
+        ),
+        Index("idx_media_runtime_revision_org_created", "org_id", "created_at"),
+    )
+
+
+class MediaRuntimeProbeRecord(Base):
+    """Append-only, secret-free health evidence for one runtime revision."""
+
+    __tablename__ = "media_runtime_probe_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id = Column(UUID(as_uuid=True), nullable=False)
+    revision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_runtime_revisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ready = Column(Boolean, nullable=False)
+    reachable = Column(Boolean, nullable=False)
+    issues = Column(JSON, nullable=False, default=list)
+    capability_snapshot_hash = Column(String(64), nullable=False)
+    probed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index(
+            "idx_media_runtime_probe_revision_created",
+            "revision_id",
+            "created_at",
+        ),
+    )
+
+
+class MediaRuntimeActivation(Base):
+    """Mutable pointer; referenced revisions and their job contracts stay immutable."""
+
+    __tablename__ = "media_runtime_activations"
+
+    org_id = Column(UUID(as_uuid=True), primary_key=True)
+    active_revision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_runtime_revisions.id"),
+        nullable=False,
+    )
+    activated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    activated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class AIChatSession(Base):
     """Private workspace chat owned by one authenticated user."""
 

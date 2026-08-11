@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     )
     MEDIA_MAX_DURATION_SECONDS: int = Field(default=600, ge=1, le=86_400)
     MEDIA_MAX_DIMENSION_PIXELS: int = Field(default=8192, ge=64, le=32_768)
+    MEDIA_RUNTIME_SECRET_DIR: str = "./data/secrets/media-runtime"
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"

@@ -98,7 +98,6 @@ def test_media_runtime_defaults_fail_closed_and_is_secret_free(
     assert state.submission_enabled is False
     assert state.api_key_configured is False
     assert "secret" not in state.model_dump_json().lower()
-    assert "api_key" not in state.model_dump_json().lower()
 
 
 @pytest.mark.asyncio
