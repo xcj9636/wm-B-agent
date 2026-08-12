@@ -223,6 +223,38 @@ def test_factory_rejects_missing_or_overpermissive_secret_file(
         factory.build(generation)
 
 
+def test_factory_rejects_symlinked_secret_file(db_session, tmp_path):
+    org_id = uuid4()
+    pinned = runtime(
+        db_session,
+        org_id=org_id,
+        revision=1,
+        model_id="fal-ai/pinned-model",
+    )
+    db_session.commit()
+    generation = job(
+        db_session,
+        org_id=org_id,
+        revision_id=pinned.id,
+        model_id="fal-ai/pinned-model",
+    )
+    secret_dir = tmp_path / "runtime-secrets"
+    secret_dir.mkdir(mode=0o700)
+    target = tmp_path / "replacement.key"
+    target.write_text("replacement-secret", encoding="utf-8")
+    os.chmod(target, 0o600)
+    (secret_dir / f"{pinned.id}.key").symlink_to(target)
+
+    with pytest.raises(MediaRuntimeUnavailable, match="unavailable"):
+        PinnedMediaRuntimeFactory(
+            db_session,
+            config(secret_dir),
+            adapter_builder=lambda *_args, **_kwargs: pytest.fail(
+                "symlinked secret must not construct an adapter"
+            ),
+        ).build(generation)
+
+
 def test_reserved_estimate_cost_resolver_is_explicit_and_bounded(db_session):
     org_id = uuid4()
     pinned = runtime(
