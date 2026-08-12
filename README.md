@@ -53,6 +53,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **媒体 Provider Runtime**：fal 能力白名单、不可变运行时 revision、逐版本 `0600` 密钥、健康探测与显式激活；队列适配器支持 submit/status/result/cancel，拒绝重定向、未知模型、超限响应和非批准媒体域名。
 - **持久媒体生成任务**：Generation Job/Attempt/Event、月度微美元预算预留与 append-only 账本、提交与对账双 fencing、运行时版本固定、终态单调转换，以及禁止自动重发的 `submission_unknown` 协调边界；provider 完成后必须先获得隔离摄取回执才能结算成功。
 - **Provider 结果隔离摄取**：对 fal 输出重新执行允许域和 DNS 校验，并核对实际 socket peer；拒绝重定向、私网地址、未知 MIME、超限和截断响应，使用 `0600` 临时文件计算 SHA-256 后幂等写入 S3 quarantine，生成资产保持待扫描/版权/同意复核状态。
+- **媒体对账 Worker**：Celery Beat 按配置唤醒 submitted Job；Worker 逐个即时领取、递增 fencing，严格重建任务固定的 runtime revision，安全读取逐版本密钥，查询 fal 状态并把完成结果摄取到隔离区。读取失败只退避重试，不重发生成请求。
 - **Video Studio**：中英文创建 Persona、项目和单 Shot 分镜，查看版本与证据，执行管理员审批；所有请求自动使用设置页可热切换的后端地址。
 
 ### 当前能力边界
@@ -61,7 +62,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 |---|---|
 | 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
 | 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime、fal 异步队列适配器、持久 Generation Job/Attempt/Event 与原子预算账本 |
-| 后续产品化重点 | 媒体 Worker 真实依赖装配、回调 inbox、人工处理 `submission_unknown`、成本证据解析、Job API/SSE、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
+| 后续产品化重点 | 媒体提交 Worker、回调 inbox、人工处理 `submission_unknown`、可信成本回执解析、Job API/SSE、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -469,7 +470,8 @@ alembic current
 | AI 策略 | `OMNIROUTE_ALLOWED_PROVIDERS`、`OMNIROUTE_MODEL_*` | OmniRoute 模式 | 固定供应商白名单和业务模型别名 |
 | AI 密钥 | `OMNIROUTE_API_KEY` 或 `OMNIROUTE_API_KEY_FILE` | 网关启用鉴权时 | 推荐生产环境使用挂载文件 |
 | 连接器 | `CONNECTOR_SECRET_DIR` | 使用 Hunter 等连接器时 | 后端连接器凭据目录 |
-| 媒体密钥 | `MEDIA_RUNTIME_SECRET_DIR` | 配置媒体 Provider 时 | 每个不可变 runtime revision 的后端凭据目录 |
+| 媒体密钥 | `MEDIA_RUNTIME_SECRET_DIR` | 配置媒体 Provider 时 | 每个不可变 runtime revision 的后端凭据目录；对账 Worker 拒绝符号链接、非普通文件和组/其他用户可读文件 |
+| 媒体对账 | `MEDIA_RESULT_*`、`MEDIA_RECONCILE_*` | 启用媒体外部提交时 | 限制结果下载大小/超时、单轮任务量、租约、轮询和退避；租约最少 300 秒并长于任务硬超时 |
 | 邮箱 | `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET` | 连接 Gmail 时 | Google OAuth 客户端 |
 | 邮箱 | `OUTLOOK_CLIENT_ID`、`OUTLOOK_CLIENT_SECRET`、`OUTLOOK_TENANT_ID` | 连接 Microsoft 时 | Microsoft OAuth 客户端与租户 |
 | 邮箱 | `GMAIL_REDIRECT_URI`、`OUTLOOK_REDIRECT_URI`、`FRONTEND_BASE_URL` | 使用邮箱 OAuth 时 | 服务端回调和完成后的前端地址 |
@@ -521,7 +523,7 @@ npm run lint:check
 npm run build
 ```
 
-最近的完整工程验证基线（2026-08-11，`b-agent-enterprise-platform`）：后端 `495 passed, 1 skipped`；前端 `47 passed`；`docker compose config --quiet` 通过。媒体运行时服务覆盖率为 91%，fal Adapter 覆盖率为 83%。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
+最近的完整工程验证基线（2026-08-12，`b-agent-enterprise-platform`）：后端 `542 passed, 1 skipped`；前端最近基线 `47 passed`；`docker compose config --quiet` 通过。新增 pinned runtime 与 reconciliation worker 两个核心模块的合并覆盖率为 89%。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
@@ -569,8 +571,10 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - 当前部署模型是单组织信任边界，不应在未完成租户隔离审计前作为开放式多租户 SaaS 运行。
 - 媒体下载只对已晋级且扫描、版权、同意证据完整的资产签发最长 300 秒凭据；隔离区、软删除和越权资产不会获得签名。
 - 缩略图参数完全由服务端固定，媒体二进制不进入 API/Celery payload；派生资产继承敏感级别并保存血缘。对象清理默认关闭，启用后仍需真实超级管理员维护身份与保留期。
-- fal API Key 按 runtime revision 写入后端 `0600` 文件，数据库与 API 只保存配置和 `api_key_configured`；Provider 返回的控制 URL 不被信任，队列 URL 始终由固定 origin 与已批准模型 ID 构造。
-- `MEDIA_SUBMIT_ENABLED` 仍默认关闭；Job/Attempt、预算、提交不确定态、fenced poll fallback、实际 peer 校验和 S3 结果隔离摄取已经落地，但真实外部提交仍要等待 Worker/密钥/成本解析器装配、回调认证和发布故障注入验收完成。
+- fal API Key 按 runtime revision 写入后端 `0600` 文件，数据库与 API 只保存配置和 `api_key_configured`；对账 Worker 使用 `O_NOFOLLOW` 和打开后的文件元数据复核阻断符号链接替换。Provider 返回的控制 URL 不被信任，队列 URL 始终由固定 origin 与已批准模型 ID 构造。
+- 对账 Worker 不读取“当前激活”指针，而只使用 Job 提交时固定的 revision、能力快照 hash、模式与模型别名；逐个即时领取避免大文件下载耗尽批次中后续任务的租约。
+- 当前成本结算器的 basis 是 `reserved_estimate_ceiling`：它使用任务预留估算上限，不代表 fal 实际账单。可信 Provider 成本回执及差额核销完成前，界面和报表不得展示为“实际成本”。
+- `MEDIA_SUBMIT_ENABLED` 仍默认关闭；对账 Worker、固定运行时装配、fenced poll、实际 peer 校验和 S3 结果隔离已落地，但生产开放仍要等待提交 Worker、回调认证、可信成本回执、`submission_unknown` 人工协调和故障注入验收。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档

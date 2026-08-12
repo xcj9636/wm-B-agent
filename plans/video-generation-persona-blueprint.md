@@ -1,7 +1,7 @@
 # B-agent 视频生成 Persona 与媒体生产链路蓝图
 
-> 状态：Step 1-4 已实现；Step 5 持久 Job、预算、安全提交、fenced poll 与 S3 结果隔离已实现，生产 Worker/回调待完成
-> 日期：2026-08-11  
+> 状态：Step 1-4 已实现；Step 5 持久 Job、预算、安全提交、pinned runtime 对账 Worker 与 S3 结果隔离已实现，提交 Worker/回调待完成
+> 日期：2026-08-12
 > 范围：视频 Persona、文生图、图生视频、文生视频、参考素材生成、媒体资产、异步任务、成本与并发、安全合规、前端视频工坊  
 > 实施原则：业务核心 provider-neutral；模型能力动态发现并固定快照；先建资产与安全边界，再开放生成；每一步可独立发布、灰度和回滚。
 
@@ -32,8 +32,12 @@
 - provider completed 后必须依次完成安全 result read、幂等 quarantine ingestor 和服务端成本核验，只有 `quarantine://` 回执可进入成功终态；provider URL 不写入 Job。provider failed 同样在当前 fence 下结算并保持终态单调。
 - 已实现真实远程结果摄取边界：重新校验 fal.media 允许域与 DNS 公网集合，并用 HTTPX network stream 的实际 socket peer 阻断 DNS rebinding；禁止 redirect，限制 Content-Length 和实际流大小，MIME 必须在固定 image/video 白名单且与 provider 回执一致。
 - 下载内容仅进入 `0600` 随机临时文件，流式计算 SHA-256 后以服务端确定 key、KMS/AES 加密幂等写入 S3 quarantine；数据库只保存 Generated Asset、hash 和 provider request ID，不保存远程 URL。资产默认 pending scan、unknown rights/consent，不能直接下载或发布。
-- 当前增量验证证据：结果摄取与对象存储安全回归 39 passed；`result_ingestion.py` 91% coverage；此前 `0027 → 0026 → 0027` 迁移往返保持通过。
-- **下一阶段**：完成 pinned runtime adapter、真实 Worker/密钥/成本解析器装配、callback inbox 和人工处理 `submission_unknown`，再开放 Job API/SSE 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
+- submitted Job 对账 Worker 已真实装配：Beat 按配置派发，任务关闭时不访问数据库；Worker 每次只即时领取一个 Job，在 batch 上限内循环，避免大文件下载让尚未处理的租约过期。每次读取都使用独立时间戳和 fencing token。
+- `PinnedMediaRuntimeFactory` 只查询 Job 固定的 revision，不读取当前 activation；它复核组织、provider、能力快照 hash、mode、model alias 和模型能力，并为每个 Job 单独创建/关闭 fal Adapter。密钥使用 `O_NOFOLLOW` 打开并复核普通文件、`0600` 类权限和大小，符号链接或异常文件 fail closed。
+- Worker 对 provider queued/running 做有界轮询，runtime 暂时不可用或读取失败只安排安全重试，不自动重发生成请求；完成结果仍须先通过隔离摄取才能结算成功。
+- 当前 `ReservedEstimateCostResolver` 的证据基础是 `reserved_estimate_ceiling`。它是冻结的预算预留上限，不是供应商实际账单；可信成本回执和差额核销完成前不得对外宣称“实际成本”。
+- 当前验证证据：后端全量 `542 passed, 1 skipped`；pinned runtime 与 reconciliation worker 合并覆盖率 89%；Compose 配置校验通过。此前 `0027 → 0026 → 0027` 迁移往返保持通过。
+- **下一阶段**：完成安全提交 Worker、callback inbox、可信成本回执与人工处理 `submission_unknown`，再开放 Job API/SSE 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
 
 ## 1. 执行摘要
 
