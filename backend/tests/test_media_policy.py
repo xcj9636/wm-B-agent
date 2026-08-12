@@ -79,6 +79,15 @@ def test_media_features_are_default_off():
     assert config.MEDIA_PLANNING_ENABLED is False
     assert config.MEDIA_SUBMIT_ENABLED is False
     assert config.MEDIA_INSPECTION_ENABLED is False
+    assert config.MEDIA_RECONCILE_LEASE_SECONDS == 300
+
+
+def test_settings_reject_media_reconciliation_lease_shorter_than_task_timeout():
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_RECONCILE_LEASE_SECONDS=299,
+        )
 
 
 def test_production_upload_and_submission_require_inspection():
