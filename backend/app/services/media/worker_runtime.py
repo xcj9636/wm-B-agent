@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -67,22 +68,34 @@ class PinnedMediaRuntimeFactory:
 
     def _read_secret(self, revision_id) -> str:
         path = Path(self._settings.MEDIA_RUNTIME_SECRET_DIR) / f"{revision_id}.key"
-        try:
-            info = path.stat()
-        except OSError as exc:
-            raise MediaRuntimeUnavailable(
-                "Pinned media runtime secret is unavailable"
-            ) from exc
-        if not path.is_file() or info.st_mode & 0o077:
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is None:
             raise MediaRuntimeUnavailable(
                 "Pinned media runtime secret is unavailable"
             )
         try:
-            value = path.read_text(encoding="utf-8").strip()
+            descriptor = os.open(path, os.O_RDONLY | no_follow)
         except OSError as exc:
             raise MediaRuntimeUnavailable(
                 "Pinned media runtime secret is unavailable"
             ) from exc
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_mode & 0o077
+                or info.st_size > 16_384
+            ):
+                raise MediaRuntimeUnavailable(
+                    "Pinned media runtime secret is unavailable"
+                )
+            value = os.read(descriptor, 16_385).decode("utf-8").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise MediaRuntimeUnavailable(
+                "Pinned media runtime secret is unavailable"
+            ) from exc
+        finally:
+            os.close(descriptor)
         if not value:
             raise MediaRuntimeUnavailable(
                 "Pinned media runtime secret is unavailable"

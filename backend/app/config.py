@@ -91,6 +91,20 @@ class Settings(BaseSettings):
     MEDIA_MAX_DURATION_SECONDS: int = Field(default=600, ge=1, le=86_400)
     MEDIA_MAX_DIMENSION_PIXELS: int = Field(default=8192, ge=64, le=32_768)
     MEDIA_RUNTIME_SECRET_DIR: str = "./data/secrets/media-runtime"
+    MEDIA_RESULT_MAX_BYTES: int = Field(
+        default=1_073_741_824,
+        ge=1024,
+        le=2_147_483_648,
+    )
+    MEDIA_RESULT_DOWNLOAD_TIMEOUT_SECONDS: float = Field(
+        default=60.0,
+        gt=0,
+        le=300,
+    )
+    MEDIA_RECONCILE_BATCH_SIZE: int = Field(default=10, ge=1, le=100)
+    MEDIA_RECONCILE_LEASE_SECONDS: int = Field(default=300, ge=300, le=900)
+    MEDIA_RECONCILE_POLL_SECONDS: int = Field(default=15, ge=1, le=900)
+    MEDIA_RECONCILE_RETRY_SECONDS: int = Field(default=30, ge=1, le=3600)
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"

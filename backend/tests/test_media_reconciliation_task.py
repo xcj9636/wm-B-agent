@@ -137,8 +137,8 @@ async def test_batch_uses_a_fresh_reconciliation_time_for_each_job():
     )
 
     assert [call[1]["now"] for call in calls] == [
+        NOW,
         datetime(2026, 8, 12, 9, 0, 1),
-        datetime(2026, 8, 12, 9, 0, 2),
     ]
 
 

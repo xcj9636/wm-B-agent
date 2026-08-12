@@ -1,5 +1,6 @@
-"""Celery entry points for server-derived media inspection."""
+"""Celery entry points for server-derived media processing."""
 
+import asyncio
 from hashlib import sha256
 from datetime import datetime
 from typing import Optional
@@ -14,14 +15,110 @@ from app.integrations.object_store import (
     ObjectStoreConfigurationError,
     S3CompatibleMediaObjectStore,
 )
+from app.integrations.provider_media import SafeProviderMediaURLPolicy
 from app.models.database import MediaAsset, User
 from app.services.agent_runtime.contracts import ExecutionPrincipal
 from app.services.media.assets import MediaAssetForbidden
 from app.services.media.inspection import MediaInspectionRunner
 from app.services.media.inspection_service import MediaInspectionService
 from app.services.media.lifecycle import MediaAssetLifecycleService
+from app.services.media.reconcile_runtime import MediaReconciliationCoordinator
+from app.services.media.reconciliation import MediaReconciliationService
+from app.services.media.reconciliation_worker import (
+    run_media_reconciliation_batch,
+)
+from app.services.media.result_ingestion import (
+    HttpxMediaRemoteFetcher,
+    ProviderResultIngestor,
+)
 from app.services.media.thumbnail import MediaThumbnailRunner, MediaThumbnailService
+from app.services.media.worker_runtime import (
+    PinnedMediaRuntimeFactory,
+    ReservedEstimateCostResolver,
+)
 from app.tasks.celery_worker import celery
+
+
+async def _run_configured_media_reconciliation(
+    db: Session,
+    *,
+    worker_id: str,
+    now: datetime,
+) -> dict[str, int]:
+    reconciliation = MediaReconciliationService(db)
+    fetcher = HttpxMediaRemoteFetcher(
+        timeout_seconds=settings.MEDIA_RESULT_DOWNLOAD_TIMEOUT_SECONDS,
+    )
+    object_store = _object_store()
+    ingestor = ProviderResultIngestor(
+        db,
+        fetcher=fetcher,
+        object_store=object_store,
+        url_policy=SafeProviderMediaURLPolicy(
+            allowed_hosts={"fal.media", "*.fal.media"},
+        ),
+        max_bytes=settings.MEDIA_RESULT_MAX_BYTES,
+    )
+    cost_resolver = ReservedEstimateCostResolver()
+    try:
+        return await run_media_reconciliation_batch(
+            reconciliation=reconciliation,
+            runtime_factory=PinnedMediaRuntimeFactory(db),
+            coordinator_builder=lambda adapter: MediaReconciliationCoordinator(
+                db,
+                reconciliation=reconciliation,
+                adapter=adapter,
+                ingestor=ingestor,
+                cost_resolver=cost_resolver,
+                poll_after_seconds=settings.MEDIA_RECONCILE_POLL_SECONDS,
+                retry_after_seconds=settings.MEDIA_RECONCILE_RETRY_SECONDS,
+            ),
+            worker_id=worker_id,
+            now=now,
+            batch_size=settings.MEDIA_RECONCILE_BATCH_SIZE,
+            lease_seconds=settings.MEDIA_RECONCILE_LEASE_SECONDS,
+            retry_after_seconds=settings.MEDIA_RECONCILE_RETRY_SECONDS,
+        )
+    finally:
+        await fetcher.aclose()
+
+
+@celery.task(
+    bind=True,
+    name="app.tasks.media_tasks.reconcile_media_jobs_task",
+    acks_late=True,
+    max_retries=0,
+    soft_time_limit=240,
+    time_limit=270,
+)
+def reconcile_media_jobs_task(self):
+    """Poll submitted jobs only when the full external submission plane is on."""
+    if not settings.MEDIA_SUBMIT_ENABLED:
+        return {
+            "claimed": 0,
+            "pending": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "retry_scheduled": 0,
+            "status": "disabled",
+        }
+    db = SessionLocal()
+    try:
+        hostname = str(
+            getattr(self.request, "hostname", "media-reconciler")
+        )[:100]
+        return asyncio.run(
+            _run_configured_media_reconciliation(
+                db,
+                worker_id=hostname,
+                now=datetime.utcnow(),
+            )
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def run_media_inspection(

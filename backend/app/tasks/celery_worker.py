@@ -51,6 +51,10 @@ celery.conf.update(
             "task": "app.tasks.media_tasks.cleanup_media_assets_task",
             "schedule": 3600.0,
         },
+        "reconcile-media-generation-jobs": {
+            "task": "app.tasks.media_tasks.reconcile_media_jobs_task",
+            "schedule": float(settings.MEDIA_RECONCILE_POLL_SECONDS),
+        },
     },
 )
 
