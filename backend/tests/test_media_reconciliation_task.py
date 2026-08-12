@@ -8,6 +8,8 @@ from app.services.media.worker_runtime import MediaRuntimeUnavailable
 from app.tasks.celery_worker import celery
 from app.tasks.media_tasks import (
     reconcile_media_jobs_task,
+)
+from app.services.media.reconciliation_worker import (
     run_media_reconciliation_batch,
 )
 
@@ -105,6 +107,37 @@ async def test_batch_claims_bounded_jobs_uses_pinned_adapter_and_closes_each():
         "failed": 0,
         "retry_scheduled": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_batch_uses_a_fresh_reconciliation_time_for_each_job():
+    jobs = [
+        SimpleNamespace(id=uuid4(), reconciliation_fencing_token=index)
+        for index in (1, 2)
+    ]
+    calls = []
+    moments = iter(
+        [
+            datetime(2026, 8, 12, 9, 0, 1),
+            datetime(2026, 8, 12, 9, 0, 2),
+        ]
+    )
+
+    await run_media_reconciliation_batch(
+        reconciliation=FakeReconciliation(jobs),
+        runtime_factory=FakeRuntimeFactory([]),
+        coordinator_builder=lambda adapter: FakeCoordinator(calls, adapter),
+        worker_id="media-reconciler-a",
+        now=NOW,
+        batch_size=10,
+        lease_seconds=60,
+        clock=lambda: next(moments),
+    )
+
+    assert [call[1]["now"] for call in calls] == [
+        datetime(2026, 8, 12, 9, 0, 1),
+        datetime(2026, 8, 12, 9, 0, 2),
+    ]
 
 
 @pytest.mark.asyncio
