@@ -19,17 +19,20 @@ NOW = datetime(2026, 8, 12, 9, 0, 0)
 
 class FakeReconciliation:
     def __init__(self, jobs):
-        self.jobs = jobs
+        self.jobs = list(jobs)
+        self.all_jobs = list(jobs)
         self.claims = []
         self.retries = []
 
     def claim_batch(self, **kwargs):
         self.claims.append(kwargs)
-        return self.jobs
+        claimed = self.jobs[: kwargs["limit"]]
+        self.jobs = self.jobs[kwargs["limit"] :]
+        return claimed
 
     def record_retry(self, job_id, **kwargs):
         self.retries.append((job_id, kwargs))
-        return next(job for job in self.jobs if job.id == job_id)
+        return next(job for job in self.all_jobs if job.id == job_id)
 
 
 class FakeAdapter:
@@ -88,14 +91,13 @@ async def test_batch_claims_bounded_jobs_uses_pinned_adapter_and_closes_each():
         lease_seconds=60,
     )
 
-    assert reconciliation.claims == [
-        {
-            "worker_id": "media-reconciler-a",
-            "now": NOW,
-            "limit": 10,
-            "lease_seconds": 60,
-        }
-    ]
+    assert reconciliation.claims[0] == {
+        "worker_id": "media-reconciler-a",
+        "now": NOW,
+        "limit": 1,
+        "lease_seconds": 60,
+    }
+    assert all(claim["limit"] == 1 for claim in reconciliation.claims)
     assert runtime_factory.built == [job.id for job in jobs]
     assert closed == [job.id for job in jobs]
     assert [call[0] for call in calls] == [job.id for job in jobs]
