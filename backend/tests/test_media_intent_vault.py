@@ -93,16 +93,17 @@ def test_ciphertext_is_bound_to_reference_and_tampering_is_rejected(tmp_path):
     payload_ref = store.store(intent)
     original = tmp_path / "media-intents" / f"{intent.attempt_id}.intent"
 
-    raw = bytearray(original.read_bytes())
-    raw[-1] ^= 1
-    original.write_bytes(raw)
+    valid_ciphertext = original.read_bytes()
+    tampered = bytearray(valid_ciphertext)
+    tampered[-1] ^= 1
+    original.write_bytes(tampered)
     original.chmod(0o600)
     with pytest.raises(MediaIntentVaultUnavailable):
         store.load(payload_ref)
 
     other_id = uuid4()
     copied = tmp_path / "media-intents" / f"{other_id}.intent"
-    copied.write_bytes(bytes(raw))
+    copied.write_bytes(valid_ciphertext)
     copied.chmod(0o600)
     with pytest.raises(MediaIntentVaultUnavailable):
         store.load(f"vault://media-intents/{other_id}")
