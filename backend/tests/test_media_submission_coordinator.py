@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -8,6 +8,7 @@ from app.integrations.fal_media import MediaProviderError, MediaSubmissionReceip
 from app.models.database import MediaGenerationAttempt, MediaGenerationJob
 from app.services.agent_runtime.contracts import ExecutionPrincipal, Sensitivity
 from app.services.media.contracts import GenerationIntent, GenerationMode
+from app.services.media.jobs import MediaGenerationJobService, MediaJobLeaseConflict
 from app.services.media.submission import (
     MediaIntentMismatch,
     MediaSubmissionCoordinator,
@@ -237,3 +238,51 @@ async def test_any_provider_exception_after_effect_start_becomes_unknown(db_sess
     assert result.status == "submission_unknown"
     assert result.error_code == "provider_timeout"
     assert calls[-1] == ("jobs.mark_submission_unknown", "provider_timeout")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        MediaProviderError(error_code="provider_timeout", retryable=True),
+    ],
+)
+async def test_provider_completion_after_lease_expiry_is_not_recorded(
+    db_session,
+    failure,
+):
+    calls = []
+    generation_intent = intent(org_id=uuid4())
+    job = stored_job(db_session, generation_intent)
+    completion_time = NOW + timedelta(hours=1, seconds=1)
+    coordinator = MediaSubmissionCoordinator(
+        db_session,
+        jobs=MediaGenerationJobService(db_session),
+        vault=FakeVault(generation_intent, calls),
+        policy=FakePolicy(calls),
+        adapter=FakeAdapter(calls, failure=failure),
+        clock=lambda: completion_time,
+    )
+
+    with pytest.raises(MediaJobLeaseConflict):
+        await coordinator.submit_claimed(
+            job.id,
+            worker_id="worker-a",
+            fencing_token=3,
+            principal=principal(generation_intent.org_id),
+            decision=SimpleNamespace(decision_id=uuid4()),
+            now=NOW,
+        )
+
+    db_session.expire_all()
+    unresolved = db_session.get(MediaGenerationJob, job.id)
+    assert unresolved.status == "running"
+    assert unresolved.effect_state == "started"
+
+    recovered = MediaGenerationJobService(db_session).recover_expired(
+        now=completion_time
+    )
+    assert [item.id for item in recovered] == [job.id]
+    assert recovered[0].status == "submission_unknown"
+    assert recovered[0].error_code == "lease_expired_after_submission_started"
