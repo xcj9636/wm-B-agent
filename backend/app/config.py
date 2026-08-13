@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     MEDIA_UPLOAD_ENABLED: bool = False
     MEDIA_PLANNING_ENABLED: bool = False
     MEDIA_SUBMIT_ENABLED: bool = False
+    MEDIA_SUBMIT_BATCH_SIZE: int = Field(default=5, ge=1, le=100)
+    MEDIA_SUBMIT_LEASE_SECONDS: int = Field(default=300, ge=300, le=900)
+    MEDIA_SUBMIT_POLL_SECONDS: int = Field(default=10, ge=1, le=900)
+    MEDIA_INTENT_VAULT_DIR: str = "./data/private/media-intents"
+    MEDIA_INTENT_VAULT_KEY_FILE: str = "./data/secrets/media-intent.key"
     MEDIA_POLICY_VERSION: str = Field(default="media-policy-v1", min_length=1)
     MEDIA_POLICY_SIGNING_KEY: str = ""
     MEDIA_POLICY_DECISION_TTL_SECONDS: int = Field(default=120, ge=1, le=900)
@@ -288,6 +293,13 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "media submission requires a dedicated signing key of at least 32 characters"
+            )
+        if self.MEDIA_SUBMIT_ENABLED and (
+            not Path(self.MEDIA_INTENT_VAULT_DIR).is_absolute()
+            or not Path(self.MEDIA_INTENT_VAULT_KEY_FILE).is_absolute()
+        ):
+            raise ValueError(
+                "media submission requires absolute private intent vault paths"
             )
         return self
 
