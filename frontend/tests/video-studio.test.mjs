@@ -121,4 +121,16 @@ test('media job timeline has complete Chinese localization', () => {
   ]) {
     assert.match(i18n, new RegExp(`'${phrase}':`))
   }
+  for (const status of [
+    'running',
+    'submitting',
+    'submitted',
+    'cancel_requested',
+    'submission_unknown',
+    'succeeded',
+    'failed',
+    'cancelled',
+  ]) {
+    assert.match(i18n, new RegExp(`\\n  ${status}:`))
+  }
 })
