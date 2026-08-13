@@ -142,6 +142,7 @@ class MediaSubmissionAuthorizer:
             project is not None
             and project.org_id == job.org_id
             and project.owner_user_id == job.owner_user_id
+            and project.status == "active"
             and project.persona_version_id == intent.persona_version_id
             and project.persona_spec_hash
             == canonical_hash(project.persona_snapshot_json)
@@ -268,12 +269,22 @@ class MediaSubmissionAuthorizer:
             return AssetConsentStatus.UNKNOWN
         checked_at = now.replace(tzinfo=None)
         evidence = self._db.get(MediaAsset, record.evidence_asset_id)
+        evidence_scan = (
+            self._db.get(MediaScanReport, evidence.scan_report_id)
+            if evidence is not None and evidence.scan_report_id is not None
+            else None
+        )
         evidence_live = (
             evidence is not None
             and evidence.org_id == org_id
             and evidence.deleted_at is None
             and not evidence.quarantined
             and evidence.scan_status == "passed"
+            and evidence_scan is not None
+            and evidence_scan.org_id == org_id
+            and evidence_scan.asset_id == evidence.id
+            and evidence_scan.status == "passed"
+            and evidence_scan.asset_sha256 == evidence.sha256
         )
         active = (
             asset.org_id == org_id
