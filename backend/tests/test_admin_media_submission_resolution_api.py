@@ -296,8 +296,68 @@ def test_resolution_input_contract_rejects_unbounded_or_inconsistent_evidence(
             "evidence_reference": "contains spaces and private notes",
         },
     )
+    unapproved_evidence_source = client.post(
+        approval_url(job),
+        json={
+            "action": "confirmed_not_submitted",
+            "evidence_reference": "internal-note/NOT-CREATED-005",
+        },
+    )
 
     assert missing_request.status_code == 422
     assert unexpected_request.status_code == 422
     assert free_text.status_code == 422
+    assert unapproved_evidence_source.status_code == 422
     assert db.query(MediaSubmissionResolutionRequest).count() == 0
+
+
+def test_confirmed_submission_rejects_request_id_owned_by_another_job(
+    api_context,
+):
+    client, db, first_admin = api_context
+    first_admin.is_superuser = True
+    second_admin = create_admin(db, username="second-media-duplicate-admin")
+    existing_job, _, existing_attempt = create_unknown_job(
+        db,
+        request_suffix="existing-request",
+    )
+    existing_job.status = "submitted"
+    existing_job.effect_state = "confirmed"
+    existing_job.provider_request_id = "fal_request_already_owned"
+    existing_attempt.status = "submitted"
+    existing_attempt.effect_state = "confirmed"
+    existing_attempt.provider_request_id = "fal_request_already_owned"
+    db.commit()
+    unknown_job, _, _ = create_unknown_job(
+        db,
+        request_suffix="duplicate-request",
+    )
+    body = {
+        "action": "confirmed_submitted",
+        "evidence_reference": "provider-audit/DUPLICATE-REQUEST-001",
+        "provider_request_id": "fal_request_already_owned",
+    }
+
+    first = client.post(approval_url(unknown_job), json=body)
+    app.dependency_overrides[get_current_active_user] = lambda: second_admin
+    second = client.post(approval_url(unknown_job), json=body)
+    db.refresh(unknown_job)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"] == (
+        "Provider request is already assigned to another job"
+    )
+    assert unknown_job.status == "submission_unknown"
+    resolution = (
+        db.query(MediaSubmissionResolutionRequest)
+        .filter(MediaSubmissionResolutionRequest.job_id == unknown_job.id)
+        .one()
+    )
+    assert resolution.status.value == "pending"
+    assert (
+        db.query(MediaSubmissionResolutionApproval)
+        .filter(MediaSubmissionResolutionApproval.request_id == resolution.id)
+        .count()
+        == 1
+    )

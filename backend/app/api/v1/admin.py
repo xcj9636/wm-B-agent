@@ -30,6 +30,14 @@ from app.services.reliable_execution_status import (
     ReliableExecutionStatusService,
     get_reliable_execution_status_service,
 )
+from app.config import settings
+from app.services.media.submission_resolution import (
+    MediaSubmissionResolutionCommand,
+    MediaSubmissionResolutionConflict,
+    MediaSubmissionResolutionNotFound,
+    MediaSubmissionResolutionResponse,
+    MediaSubmissionResolutionService,
+)
 
 router = APIRouter()
 
@@ -109,6 +117,37 @@ async def approve_dead_letter_resolution(
         db.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ResolutionConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/media/jobs/{job_id}/submission-unknown/resolution-approvals",
+    response_model=MediaSubmissionResolutionResponse,
+)
+async def approve_unknown_media_submission_resolution(
+    job_id: UUID,
+    command: MediaSubmissionResolutionCommand,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Resolve an ambiguous media submit effect after two admin approvals."""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    service = MediaSubmissionResolutionService(db)
+    try:
+        result = service.approve(
+            job_id=job_id,
+            org_id=settings.AGENT_ORG_ID,
+            admin_user_id=current_user.id,
+            command=command,
+        )
+        db.commit()
+        return result
+    except MediaSubmissionResolutionNotFound as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MediaSubmissionResolutionConflict as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

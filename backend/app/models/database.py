@@ -112,6 +112,20 @@ class OutboxResolutionStatus(str, enum.Enum):
     EXECUTED = "executed"
 
 
+class MediaSubmissionResolutionAction(str, enum.Enum):
+    """Evidence-backed conclusion for an ambiguous provider submission."""
+
+    CONFIRMED_SUBMITTED = "confirmed_submitted"
+    CONFIRMED_NOT_SUBMITTED = "confirmed_not_submitted"
+
+
+class MediaSubmissionResolutionStatus(str, enum.Enum):
+    """Lifecycle of a two-person media submission resolution."""
+
+    PENDING = "pending"
+    EXECUTED = "executed"
+
+
 class User(Base):
     """User model"""
     __tablename__ = "users"
@@ -1571,6 +1585,99 @@ class MediaGenerationEvent(Base):
             name="uq_media_event_job_sequence",
         ),
         Index("idx_media_event_job_created", "job_id", "created_at"),
+    )
+
+
+class MediaSubmissionResolutionRequest(Base):
+    """One immutable conclusion for one submission-unknown lifecycle."""
+
+    __tablename__ = "media_submission_resolution_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    submission_unknown_version = Column(DateTime, nullable=False)
+    action = Column(
+        Enum(
+            MediaSubmissionResolutionAction,
+            values_callable=lambda values: [value.value for value in values],
+            name="media_submission_resolution_action",
+        ),
+        nullable=False,
+    )
+    evidence_reference = Column(String(128), nullable=False)
+    provider_request_id = Column(String(128))
+    status = Column(
+        Enum(
+            MediaSubmissionResolutionStatus,
+            values_callable=lambda values: [value.value for value in values],
+            name="media_submission_resolution_status",
+        ),
+        nullable=False,
+        default=MediaSubmissionResolutionStatus.PENDING,
+    )
+    requested_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    executed_at = Column(DateTime)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            "submission_unknown_version",
+            name="uq_media_submission_resolution_cycle",
+        ),
+        Index(
+            "idx_media_submission_resolution_job_status",
+            "job_id",
+            "status",
+        ),
+    )
+
+
+class MediaSubmissionResolutionApproval(Base):
+    """Approval by one distinct administrator."""
+
+    __tablename__ = "media_submission_resolution_approvals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "media_submission_resolution_requests.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    approved_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id",
+            "approved_by_user_id",
+            name="uq_media_submission_resolution_approver",
+        ),
+        Index(
+            "idx_media_submission_resolution_approval_request",
+            "request_id",
+        ),
     )
 
 
