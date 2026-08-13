@@ -10,7 +10,10 @@ from app.config import settings
 from app.main import app
 from app.models.database import MediaGenerationEvent, MediaGenerationJob, User
 from app.services.idempotency import IdempotencyConflict
-from app.services.media.job_creator import MediaGenerationJobUnavailable
+from app.services.media.job_creator import (
+    MediaGenerationJobCreator,
+    MediaGenerationJobUnavailable,
+)
 
 
 class FakeCreator:
@@ -58,6 +61,34 @@ def endpoint(project_id, shot_id):
         f"/api/v1/video/projects/{project_id}/shots/{shot_id}"
         "/generation-jobs"
     )
+
+
+def test_enabled_creator_dependency_returns_configured_creator(
+    api_context,
+    monkeypatch,
+    tmp_path,
+):
+    _, db, _ = api_context
+    vault_dir = tmp_path / "media-intents"
+    key_file = tmp_path / "media-intent.key"
+    key_file.write_bytes(b"k" * 32)
+    key_file.chmod(0o600)
+    monkeypatch.setattr(settings, "MEDIA_SUBMIT_ENABLED", True)
+    monkeypatch.setattr(settings, "MEDIA_INTENT_VAULT_DIR", str(vault_dir))
+    monkeypatch.setattr(
+        settings,
+        "MEDIA_INTENT_VAULT_KEY_FILE",
+        str(key_file),
+    )
+    monkeypatch.setattr(
+        settings,
+        "MEDIA_T2V_RESERVATION_CEILING_MICROUSD",
+        2_500_000,
+    )
+
+    creator = get_media_generation_job_creator(db)
+
+    assert isinstance(creator, MediaGenerationJobCreator)
 
 
 def test_authenticated_job_create_is_server_owned_and_secret_free(api_context):
