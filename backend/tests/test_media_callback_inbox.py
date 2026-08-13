@@ -178,6 +178,22 @@ def test_same_request_id_with_different_signed_body_is_not_a_retry(
     assert db_session.query(MediaGenerationEvent).count() == 1
 
 
+def test_webhook_verifier_rejects_jwk_with_ignored_non_base64url_characters(
+    signing_material,
+):
+    private_key, jwk = signing_material
+    body, headers = signed_callback(private_key, "request-1")
+    malformed = {**jwk, "x": jwk["x"] + "!!!!"}
+
+    with pytest.raises(FalWebhookVerificationError):
+        FalWebhookVerifier(EXPECTED_USER_ID).verify(
+            body=body,
+            headers=headers,
+            jwks=[malformed],
+            now=NOW,
+        )
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["signature", "stale", "future", "user", "request_id", "status"],
