@@ -76,6 +76,7 @@ class MediaGenerationJobService:
         now: datetime,
     ) -> Tuple[MediaGenerationJob, bool]:
         now = self._naive_utc(now)
+        deadline_at = self._naive_utc(command.deadline_at)
         input_hash = canonical_hash(command.model_dump(mode="json"))
         existing = (
             self._db.query(MediaGenerationJob)
@@ -92,7 +93,7 @@ class MediaGenerationJobService:
                     "Media job idempotency key was reused for different input"
                 )
             return existing, False
-        if command.deadline_at <= now:
+        if deadline_at <= now:
             raise ValueError("media job deadline must be in the future")
 
         runtime = self._active_runtime(command)
@@ -140,7 +141,7 @@ class MediaGenerationJobService:
             reserved_cost_microusd=command.estimated_cost_microusd,
             estimate_hash=command.estimate_hash,
             budget_period_start=period_start,
-            deadline_at=self._naive_utc(command.deadline_at),
+            deadline_at=deadline_at,
             created_at=now,
             updated_at=now,
         )
