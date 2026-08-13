@@ -90,6 +90,7 @@ from app.services.media.job_creator import (
     MediaGenerationJobCreator,
     MediaGenerationJobUnavailable,
 )
+from app.services.media.job_access import MediaGenerationJobAccessService
 from app.tasks.media_tasks import (
     generate_media_thumbnail_task,
     inspect_media_asset_task,
@@ -370,6 +371,18 @@ class MediaGenerationJobResponse(BaseModel):
     completed_at: Optional[datetime]
 
 
+class MediaGenerationEventResponse(BaseModel):
+    sequence: int
+    event_type: str
+    data: dict[str, object]
+    created_at: datetime
+
+
+class MediaGenerationEventListResponse(BaseModel):
+    items: list[MediaGenerationEventResponse]
+    next_sequence: int
+
+
 def get_media_asset_service(db: Session = Depends(get_db)) -> MediaAssetService:
     return MediaAssetService(db, upload_enabled=settings.MEDIA_UPLOAD_ENABLED)
 
@@ -435,6 +448,12 @@ def get_media_generation_job_creator(
         db,
         planning_enabled=settings.MEDIA_PLANNING_ENABLED,
     )
+
+
+def get_media_generation_job_access(
+    db: Session = Depends(get_db),
+) -> MediaGenerationJobAccessService:
+    return MediaGenerationJobAccessService(db)
     vault = EncryptedMediaIntentVault(
         root=settings.MEDIA_INTENT_VAULT_DIR,
         key_file=settings.MEDIA_INTENT_VAULT_KEY_FILE,
@@ -910,6 +929,73 @@ async def create_media_generation_job(
         return _media_generation_job_response(job)
     except Exception as exc:
         _raise_media_generation_http_error(exc)
+
+
+@router.get(
+    "/generation-jobs/{job_id}",
+    response_model=MediaGenerationJobResponse,
+)
+async def get_media_generation_job(
+    job_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    access: MediaGenerationJobAccessService = Depends(
+        get_media_generation_job_access
+    ),
+):
+    try:
+        job = access.get(
+            job_id,
+            org_id=settings.AGENT_ORG_ID,
+            user_id=current_user.id,
+            is_admin=bool(current_user.is_superuser),
+        )
+        return _media_generation_job_response(job)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Media generation job not found",
+        ) from exc
+
+
+@router.get(
+    "/generation-jobs/{job_id}/events",
+    response_model=MediaGenerationEventListResponse,
+)
+async def list_media_generation_job_events(
+    job_id: UUID,
+    after_sequence: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    access: MediaGenerationJobAccessService = Depends(
+        get_media_generation_job_access
+    ),
+):
+    try:
+        events, next_sequence = access.list_events(
+            job_id,
+            org_id=settings.AGENT_ORG_ID,
+            user_id=current_user.id,
+            is_admin=bool(current_user.is_superuser),
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+        return MediaGenerationEventListResponse(
+            items=[
+                MediaGenerationEventResponse(
+                    sequence=event.sequence,
+                    event_type=event.event_type,
+                    data=event.data,
+                    created_at=event.created_at,
+                )
+                for event in events
+            ],
+            next_sequence=next_sequence,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Media generation job not found",
+        ) from exc
 
 
 @router.post(
