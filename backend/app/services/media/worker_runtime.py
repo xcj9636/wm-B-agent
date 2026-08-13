@@ -64,6 +64,12 @@ class PinnedMediaRuntimeFactory:
         if aliases.get(job.mode) != job.model_id:
             raise MediaRuntimeUnavailable("Pinned media runtime is unavailable")
         api_key = self._read_secret(revision.id)
+        if self._settings.MEDIA_CALLBACK_ENABLED:
+            return self._adapter_builder(
+                api_key,
+                catalog=catalog,
+                webhook_url=self._settings.MEDIA_FAL_WEBHOOK_URL,
+            )
         return self._adapter_builder(api_key, catalog=catalog)
 
     def _read_secret(self, revision_id) -> str:

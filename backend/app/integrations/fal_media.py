@@ -5,6 +5,7 @@ from enum import Enum
 import json
 import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -111,6 +112,7 @@ class FalMediaAdapter:
         media_url_resolver=None,
         max_response_bytes: int = 1_000_000,
         max_request_bytes: int = 1_000_000,
+        webhook_url: Optional[str] = None,
     ) -> None:
         key = api_key.strip()
         if not key:
@@ -134,6 +136,7 @@ class FalMediaAdapter:
         self._owns_client = http_client is None
         self._max_response_bytes = max_response_bytes
         self._max_request_bytes = max_request_bytes
+        self._webhook_url = self._validate_webhook_url(webhook_url)
         self._media_policy = SafeProviderMediaURLPolicy(
             allowed_hosts={"fal.media", "*.fal.media"},
             resolver=media_url_resolver,
@@ -195,7 +198,10 @@ class FalMediaAdapter:
     ) -> MediaSubmissionReceipt:
         self._approve_model(model_id)
         payload = self._encode_arguments(arguments)
-        response = await self._request("POST", f"/{model_id}", content=payload)
+        path = f"/{model_id}"
+        if self._webhook_url is not None:
+            path = f"{path}?{urlencode({'fal_webhook': self._webhook_url})}"
+        response = await self._request("POST", path, content=payload)
         body = self._json_object(response)
         request_id = body.get("request_id")
         if not isinstance(request_id, str) or not self.REQUEST_ID_PATTERN.fullmatch(
@@ -319,6 +325,23 @@ class FalMediaAdapter:
     def _approve_model(self, model_id: str) -> None:
         if model_id not in self._model_ids:
             raise ValueError("media model is not approved by this runtime revision")
+
+    @staticmethod
+    def _validate_webhook_url(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or len(value) > 2000
+        ):
+            raise ValueError("fal webhook URL is invalid")
+        return value
 
     def _request_path(
         self,

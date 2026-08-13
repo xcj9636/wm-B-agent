@@ -37,6 +37,8 @@ Introduce a provider-neutral media production plane:
 - Media inference can evolve without changing the LLM gateway contract.
 - A UI flag cannot accidentally enable provider submission.
 - Provider/model discovery never grants approval automatically.
+- Provider callbacks are authenticated, deduplicated hints only; terminal state,
+  quarantined output, and cost are derived through server-side provider reads.
 - The system can distinguish business planning from expensive external effects.
 - Later steps must add quarantined object storage and durable submission attempts
   before `MEDIA_SUBMIT_ENABLED` can be enabled in any deployed environment.

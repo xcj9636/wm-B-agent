@@ -1588,6 +1588,35 @@ class MediaGenerationEvent(Base):
     )
 
 
+class MediaCallbackInbox(Base):
+    """Deduplicated, secret-free proof that a provider callback was verified."""
+
+    __tablename__ = "media_callback_inbox"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(String(30), nullable=False)
+    provider_account_ref_hash = Column(String(64), nullable=False)
+    provider_request_id = Column(String(255), nullable=False)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_generation_jobs.id", ondelete="SET NULL"),
+    )
+    body_sha256 = Column(String(64), nullable=False)
+    delivery_hint = Column(String(20), nullable=False)
+    signature_timestamp = Column(DateTime, nullable=False)
+    received_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_account_ref_hash",
+            "provider_request_id",
+            name="uq_media_callback_provider_account_request",
+        ),
+        Index("idx_media_callback_job_received", "job_id", "received_at"),
+    )
+
+
 class MediaSubmissionResolutionRequest(Base):
     """One immutable conclusion for one submission-unknown lifecycle."""
 

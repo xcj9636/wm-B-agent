@@ -3,6 +3,7 @@ Application configuration using Pydantic Settings
 """
 from pathlib import Path
 from typing import Dict, List, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -116,6 +117,20 @@ class Settings(BaseSettings):
     MEDIA_RECONCILE_LEASE_SECONDS: int = Field(default=300, ge=300, le=900)
     MEDIA_RECONCILE_POLL_SECONDS: int = Field(default=15, ge=1, le=900)
     MEDIA_RECONCILE_RETRY_SECONDS: int = Field(default=30, ge=1, le=3600)
+    MEDIA_CALLBACK_ENABLED: bool = False
+    MEDIA_CALLBACK_MAX_BODY_BYTES: int = Field(
+        default=262_144,
+        ge=1024,
+        le=1_048_576,
+    )
+    MEDIA_FAL_WEBHOOK_USER_ID: str = Field(default="", max_length=255)
+    MEDIA_FAL_WEBHOOK_URL: str = Field(default="", max_length=2000)
+    MEDIA_FAL_JWKS_CACHE_SECONDS: int = Field(
+        default=3600,
+        ge=60,
+        le=86_400,
+    )
+    MEDIA_FAL_JWKS_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0, le=15)
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/2"
@@ -314,6 +329,26 @@ class Settings(BaseSettings):
             raise ValueError(
                 "media submission requires a positive T2V reservation ceiling"
             )
+        if (
+            self.MEDIA_CALLBACK_ENABLED
+            and not self.MEDIA_FAL_WEBHOOK_USER_ID.strip()
+        ):
+            raise ValueError(
+                "media callbacks require the expected Fal webhook user ID"
+            )
+        if self.MEDIA_CALLBACK_ENABLED:
+            callback_url = urlsplit(self.MEDIA_FAL_WEBHOOK_URL)
+            if (
+                callback_url.scheme != "https"
+                or not callback_url.hostname
+                or callback_url.username is not None
+                or callback_url.password is not None
+                or callback_url.query
+                or callback_url.fragment
+            ):
+                raise ValueError(
+                    "media callbacks require a safe HTTPS webhook URL"
+                )
         return self
 
     model_config = SettingsConfigDict(
