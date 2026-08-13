@@ -448,12 +448,6 @@ def get_media_generation_job_creator(
         db,
         planning_enabled=settings.MEDIA_PLANNING_ENABLED,
     )
-
-
-def get_media_generation_job_access(
-    db: Session = Depends(get_db),
-) -> MediaGenerationJobAccessService:
-    return MediaGenerationJobAccessService(db)
     vault = EncryptedMediaIntentVault(
         root=settings.MEDIA_INTENT_VAULT_DIR,
         key_file=settings.MEDIA_INTENT_VAULT_KEY_FILE,
@@ -469,6 +463,12 @@ def get_media_generation_job_access(
         },
         deadline_seconds=settings.MEDIA_JOB_DEADLINE_SECONDS,
     )
+
+
+def get_media_generation_job_access(
+    db: Session = Depends(get_db),
+) -> MediaGenerationJobAccessService:
+    return MediaGenerationJobAccessService(db)
 
 
 class MediaInspectionDispatchUnavailable(RuntimeError):

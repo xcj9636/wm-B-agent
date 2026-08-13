@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -71,7 +72,7 @@ def test_enabled_creator_dependency_returns_configured_creator(
     _, db, _ = api_context
     vault_dir = tmp_path / "media-intents"
     key_file = tmp_path / "media-intent.key"
-    key_file.write_bytes(b"k" * 32)
+    key_file.write_bytes(base64.urlsafe_b64encode(b"k" * 32))
     key_file.chmod(0o600)
     monkeypatch.setattr(settings, "MEDIA_SUBMIT_ENABLED", True)
     monkeypatch.setattr(settings, "MEDIA_INTENT_VAULT_DIR", str(vault_dir))
