@@ -67,7 +67,7 @@ class MediaSubmissionAuthorizer:
         principal = self._principal(job, intent)
         self._validate_approved_snapshots(job, intent)
         assets = [
-            self._asset_snapshot(asset_id, intent.org_id, checked_at)
+            self.asset_snapshot(asset_id, intent.org_id, checked_at)
             for asset_id in intent.reference_asset_ids
         ]
         available_assets = [asset for asset in assets if asset is not None]
@@ -172,18 +172,29 @@ class MediaSubmissionAuthorizer:
                 "Media approval evidence is no longer valid"
             )
 
-    def _asset_snapshot(
+    def asset_snapshot(
         self,
         asset_id: UUID,
         org_id: UUID,
         now: datetime,
+        *,
+        lock: bool = False,
     ) -> MediaAssetPolicySnapshot | None:
-        asset = self._db.get(MediaAsset, asset_id)
+        """Read current evidence for a reference immediately before an effect."""
+        query = self._db.query(MediaAsset).filter(MediaAsset.id == asset_id)
+        if lock:
+            query = query.with_for_update()
+        asset = query.populate_existing().one_or_none()
         if asset is None:
             return None
-        scan_status = self._scan_status(asset, org_id)
-        rights_status = self._rights_status(asset, org_id, now)
-        consent_status = self._consent_status(asset, org_id, now)
+        scan_status = self._scan_status(asset, org_id, lock=lock)
+        rights_status = self._rights_status(asset, org_id, now, lock=lock)
+        consent_status = self._consent_status(
+            asset,
+            org_id,
+            now,
+            lock=lock,
+        )
         try:
             sensitivity = Sensitivity(asset.sensitivity)
         except ValueError as exc:
@@ -202,9 +213,19 @@ class MediaSubmissionAuthorizer:
             sensitivity=sensitivity,
         )
 
-    def _scan_status(self, asset: MediaAsset, org_id: UUID) -> AssetScanStatus:
+    def _scan_status(
+        self,
+        asset: MediaAsset,
+        org_id: UUID,
+        *,
+        lock: bool = False,
+    ) -> AssetScanStatus:
         report = (
-            self._db.get(MediaScanReport, asset.scan_report_id)
+            self._fresh_record(
+                MediaScanReport,
+                asset.scan_report_id,
+                lock=lock,
+            )
             if asset.scan_report_id is not None
             else None
         )
@@ -225,9 +246,15 @@ class MediaSubmissionAuthorizer:
         asset: MediaAsset,
         org_id: UUID,
         now: datetime,
+        *,
+        lock: bool = False,
     ) -> AssetRightsStatus:
         record = (
-            self._db.get(MediaRightsRecord, asset.rights_record_id)
+            self._fresh_record(
+                MediaRightsRecord,
+                asset.rights_record_id,
+                lock=lock,
+            )
             if asset.rights_record_id is not None
             else None
         )
@@ -257,20 +284,34 @@ class MediaSubmissionAuthorizer:
         asset: MediaAsset,
         org_id: UUID,
         now: datetime,
+        *,
+        lock: bool = False,
     ) -> AssetConsentStatus:
         if not asset.consent_required:
             return AssetConsentStatus.NOT_REQUIRED
         record = (
-            self._db.get(MediaConsentRecord, asset.consent_record_id)
+            self._fresh_record(
+                MediaConsentRecord,
+                asset.consent_record_id,
+                lock=lock,
+            )
             if asset.consent_record_id is not None
             else None
         )
         if record is None:
             return AssetConsentStatus.UNKNOWN
         checked_at = now.replace(tzinfo=None)
-        evidence = self._db.get(MediaAsset, record.evidence_asset_id)
+        evidence = self._fresh_record(
+            MediaAsset,
+            record.evidence_asset_id,
+            lock=lock,
+        )
         evidence_scan = (
-            self._db.get(MediaScanReport, evidence.scan_report_id)
+            self._fresh_record(
+                MediaScanReport,
+                evidence.scan_report_id,
+                lock=lock,
+            )
             if evidence is not None and evidence.scan_report_id is not None
             else None
         )
@@ -304,6 +345,12 @@ class MediaSubmissionAuthorizer:
         if record.revoked_at is not None or record.status == "revoked":
             return AssetConsentStatus.REVOKED
         return AssetConsentStatus.UNKNOWN
+
+    def _fresh_record(self, model, record_id, *, lock: bool):
+        query = self._db.query(model).filter(model.id == record_id)
+        if lock:
+            query = query.with_for_update()
+        return query.populate_existing().one_or_none()
 
     @staticmethod
     def _aware_utc(value: datetime) -> datetime:

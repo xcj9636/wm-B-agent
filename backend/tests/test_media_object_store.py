@@ -26,6 +26,7 @@ class FakeS3Client:
             "ContentLength": 4096,
             "ContentType": "image/png",
             "Metadata": {"sha256": "a" * 64},
+            "VersionId": "version-1",
         }
 
     def generate_presigned_post(self, **kwargs):
@@ -161,11 +162,14 @@ def test_presigned_download_is_short_lived_and_bound_to_asset_namespace():
 
 def test_provider_input_is_queue_lived_without_browser_download_headers():
     client = FakeS3Client()
+    client.asset_exists = True
     object_store = store(client)
 
     result = object_store.create_provider_input(
         key="assets/ba6e/asset-id",
         content_type="image/png",
+        expected_sha256="a" * 64,
+        expected_size_bytes=4096,
         expires_seconds=3600,
     )
 
@@ -180,10 +184,58 @@ def test_provider_input_is_queue_lived_without_browser_download_headers():
                 "Bucket": "media-assets",
                 "Key": "tenant-media/assets/ba6e/asset-id",
                 "ResponseContentType": "image/png",
+                "VersionId": "version-1",
             },
             "ExpiresIn": 3600,
         }
     ]
+    assert client.head_calls == [
+        {
+            "Bucket": "media-assets",
+            "Key": "tenant-media/assets/ba6e/asset-id",
+        }
+    ]
+
+
+def test_provider_input_revalidates_promoted_object_integrity_before_signing():
+    client = FakeS3Client()
+    client.asset_exists = True
+    object_store = store(client)
+
+    result = object_store.create_provider_input(
+        key="assets/ba6e/asset-id",
+        content_type="image/png",
+        expected_sha256="a" * 64,
+        expected_size_bytes=4096,
+        expires_seconds=3600,
+    )
+
+    assert result.url == "https://objects.example.test/signed-download"
+
+    client.head_response["Metadata"]["sha256"] = "b" * 64
+    with pytest.raises(ObjectStoreIntegrityError, match="checksum"):
+        object_store.create_provider_input(
+            key="assets/ba6e/asset-id",
+            content_type="image/png",
+            expected_sha256="a" * 64,
+            expected_size_bytes=4096,
+            expires_seconds=3600,
+        )
+
+
+def test_provider_input_requires_a_versioned_promoted_object():
+    client = FakeS3Client()
+    client.asset_exists = True
+    client.head_response.pop("VersionId")
+
+    with pytest.raises(ObjectStoreIntegrityError, match="version"):
+        store(client).create_provider_input(
+            key="assets/ba6e/asset-id",
+            content_type="image/png",
+            expected_sha256="a" * 64,
+            expected_size_bytes=4096,
+            expires_seconds=3600,
+        )
 
 
 @pytest.mark.parametrize(
@@ -205,6 +257,8 @@ def test_provider_input_rejects_unsafe_scope_or_expiry(
         store().create_provider_input(
             key=key,
             content_type=content_type,
+            expected_sha256="a" * 64,
+            expected_size_bytes=4096,
             expires_seconds=expires_seconds,
         )
 

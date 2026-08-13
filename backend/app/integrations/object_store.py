@@ -91,6 +91,16 @@ class MediaObjectStore(Protocol):
         expires_seconds: int = 120,
     ) -> "PresignedDownload": ...
 
+    def create_provider_input(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expires_seconds: int = 3600,
+    ) -> "PresignedProviderInput": ...
+
 
 class ObjectStoreConfigurationError(RuntimeError):
     pass
@@ -116,6 +126,15 @@ class PresignedDownload(BaseModel):
 
     url: str = Field(min_length=1, max_length=4000)
     expires_seconds: int = Field(ge=30, le=300)
+
+
+class PresignedProviderInput(BaseModel):
+    """Opaque read credential created only inside a submission worker."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: str = Field(min_length=1, max_length=4000)
+    expires_seconds: int = Field(ge=300, le=86_400)
 
 
 class S3CompatibleMediaObjectStore:
@@ -262,6 +281,65 @@ class S3CompatibleMediaObjectStore:
             ExpiresIn=expires_seconds,
         )
         return PresignedDownload(url=url, expires_seconds=expires_seconds)
+
+    def create_provider_input(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        expires_seconds: int = 3600,
+    ) -> PresignedProviderInput:
+        """Sign one promoted object for a provider without browser headers."""
+        if not 300 <= expires_seconds <= 86_400:
+            raise ObjectStoreConfigurationError(
+                "Provider input expiry must be between 300 and 86400 seconds"
+            )
+        physical_key = self._physical_asset_key(key)
+        normalized_type = content_type.strip().lower()
+        if (
+            not normalized_type
+            or "\r" in normalized_type
+            or "\n" in normalized_type
+        ):
+            raise ObjectStoreConfigurationError("Content type is invalid")
+        response = self._client.head_object(
+            Bucket=self._asset_bucket,
+            Key=physical_key,
+        )
+        metadata = self._metadata_from_response(response, logical_key=key)
+        if metadata.sha256 != expected_sha256:
+            raise ObjectStoreIntegrityError(
+                "Provider input checksum does not match the approved asset"
+            )
+        if metadata.size_bytes != expected_size_bytes:
+            raise ObjectStoreIntegrityError(
+                "Provider input size does not match the approved asset"
+            )
+        if metadata.content_type.strip().lower() != normalized_type:
+            raise ObjectStoreIntegrityError(
+                "Provider input MIME does not match the approved asset"
+            )
+        version_id = str(response.get("VersionId") or "").strip()
+        if not version_id or len(version_id) > 1024:
+            raise ObjectStoreIntegrityError(
+                "Provider input requires a versioned promoted object"
+            )
+        url = self._client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self._asset_bucket,
+                "Key": physical_key,
+                "ResponseContentType": normalized_type,
+                "VersionId": version_id,
+            },
+            ExpiresIn=expires_seconds,
+        )
+        return PresignedProviderInput(
+            url=url,
+            expires_seconds=expires_seconds,
+        )
 
     def head(self, key: str) -> StoredObjectMetadata:
         physical_key = self._physical_quarantine_key(key)
@@ -643,6 +721,14 @@ class S3CompatibleMediaObjectStore:
         logical_key: str,
     ) -> StoredObjectMetadata:
         response = self._client.head_object(Bucket=bucket, Key=physical_key)
+        return self._metadata_from_response(response, logical_key=logical_key)
+
+    @staticmethod
+    def _metadata_from_response(
+        response: dict,
+        *,
+        logical_key: str,
+    ) -> StoredObjectMetadata:
         metadata = response.get("Metadata") or {}
         sha256 = str(metadata.get("sha256") or "").strip().lower()
         if len(sha256) != 64:

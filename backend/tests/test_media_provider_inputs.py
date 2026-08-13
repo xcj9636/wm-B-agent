@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from app.models.database import MediaAsset
+from app.integrations.object_store import ObjectStoreIntegrityError
 from app.services.agent_runtime.contracts import Sensitivity
 from app.services.media.contracts import (
     AssetConsentStatus,
@@ -132,6 +133,8 @@ def test_image_to_video_resolves_one_live_promoted_asset_server_side(db_session)
         {
             "key": asset.storage_key,
             "content_type": "image/png",
+            "expected_sha256": "a" * 64,
+            "expected_size_bytes": 4096,
             "expires_seconds": 3600,
         }
     ]
@@ -153,6 +156,24 @@ def test_object_store_signing_failure_is_retryable_not_policy_denial(db_session)
     )
 
     with pytest.raises(MediaProviderInputUnavailable):
+        service.resolve(image_intent(asset_id, org_id=org_id), now=NOW)
+
+
+def test_object_store_integrity_failure_is_terminal_input_denial(db_session):
+    class ReplacedObjectStore(FakeObjectStore):
+        def create_provider_input(self, **kwargs):
+            raise ObjectStoreIntegrityError("stored object was replaced")
+
+    asset_id = uuid4()
+    org_id = uuid4()
+    promoted_asset(db_session, org_id=org_id, asset_id=asset_id)
+    service, _ = resolver(
+        db_session,
+        approved_snapshot(asset_id, org_id),
+        store=ReplacedObjectStore(),
+    )
+
+    with pytest.raises(MediaProviderInputDenied):
         service.resolve(image_intent(asset_id, org_id=org_id), now=NOW)
 
 
@@ -204,6 +225,9 @@ def test_image_to_video_fails_closed_when_live_authorization_changes(
         ("kind", "video"),
         ("storage_backend", "local"),
         ("storage_key", "quarantine/unsafe"),
+        ("storage_key", "assets/../unsafe"),
+        ("storage_key", "assets/unsafe\\object"),
+        ("storage_key", f"assets/{uuid4()}/other-org-object"),
         ("mime_type", "image/svg+xml"),
         ("quarantined", True),
         ("deleted_at", NOW.replace(tzinfo=None)),

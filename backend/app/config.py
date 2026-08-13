@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     MEDIA_S3_KEY_PREFIX: str = ""
     MEDIA_S3_KMS_KEY_ID: str = ""
     MEDIA_DOWNLOAD_TTL_SECONDS: int = Field(default=120, ge=30, le=300)
+    MEDIA_PROVIDER_INPUT_TTL_SECONDS: int = Field(
+        default=3600,
+        ge=300,
+        le=86_400,
+    )
     MEDIA_THUMBNAIL_ENABLED: bool = False
     MEDIA_FFMPEG_PATH: str = "/usr/bin/ffmpeg"
     MEDIA_THUMBNAIL_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=300)
@@ -328,6 +333,14 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "media submission requires a positive T2V reservation ceiling"
+            )
+        if (
+            self.MEDIA_SUBMIT_ENABLED
+            and self.MEDIA_PROVIDER_INPUT_TTL_SECONDS
+            < self.MEDIA_JOB_DEADLINE_SECONDS
+        ):
+            raise ValueError(
+                "media provider input credential lifetime must cover the job deadline"
             )
         if (
             self.MEDIA_CALLBACK_ENABLED

@@ -6,6 +6,7 @@ from typing import Callable
 
 from app.services.media.intent_vault import MediaIntentVaultUnavailable
 from app.services.media.policy import MediaPolicyDenied
+from app.services.media.provider_inputs import MediaProviderInputUnavailable
 from app.services.media.submission_authorizer import (
     MediaSubmissionAuthorizationDenied,
 )
@@ -106,7 +107,7 @@ async def run_media_submission_batch(
             )
             counters["failed_before_submission"] += 1
             continue
-        except MediaRuntimeUnavailable:
+        except (MediaRuntimeUnavailable, MediaProviderInputUnavailable):
             counters["deferred"] += 1
             continue
         finally:

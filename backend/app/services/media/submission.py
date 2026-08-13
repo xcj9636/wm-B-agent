@@ -22,6 +22,10 @@ from app.services.media.jobs import (
     MediaGenerationJobService,
     MediaJobLeaseConflict,
 )
+from app.services.media.provider_inputs import (
+    MediaProviderInputDenied,
+    MediaProviderInputUnavailable,
+)
 
 
 class MediaIntentMismatch(RuntimeError):
@@ -51,6 +55,32 @@ class MediaSubmitAdapter(Protocol):
     ) -> MediaSubmissionReceipt: ...
 
 
+class MediaProviderInputResolver(Protocol):
+    def resolve(
+        self,
+        intent: GenerationIntent,
+        *,
+        now: datetime,
+    ) -> Dict[str, Any]: ...
+
+
+class PromptOnlyMediaProviderInputResolver:
+    """Compatibility boundary that keeps non-T2V modes fail-closed."""
+
+    def resolve(
+        self,
+        intent: GenerationIntent,
+        *,
+        now: datetime,
+    ) -> Dict[str, Any]:
+        del now
+        if intent.mode == GenerationMode.TEXT_TO_VIDEO:
+            return {"prompt": intent.prompt}
+        raise MediaProviderInputDenied(
+            "Media mode requires a server-resolved reference asset"
+        )
+
+
 class MediaSubmissionCoordinator:
     """Verify immutable intent immediately before beginning one external effect."""
 
@@ -62,6 +92,7 @@ class MediaSubmissionCoordinator:
         vault: MediaIntentVault,
         policy: MediaPolicyVerifier,
         adapter: MediaSubmitAdapter,
+        input_resolver: MediaProviderInputResolver | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._db = db
@@ -69,6 +100,9 @@ class MediaSubmissionCoordinator:
         self._vault = vault
         self._policy = policy
         self._adapter = adapter
+        self._input_resolver = (
+            input_resolver or PromptOnlyMediaProviderInputResolver()
+        )
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     async def submit_claimed(
@@ -86,7 +120,15 @@ class MediaSubmissionCoordinator:
         generation_intent = self._vault.load(job.payload_ref)
         self._validate_envelope(job, generation_intent, principal)
         self._policy.verify(decision, generation_intent, now=checked_at)
-        arguments = self._provider_arguments(generation_intent)
+        try:
+            arguments = self._input_resolver.resolve(
+                generation_intent,
+                now=checked_at,
+            )
+        except MediaProviderInputDenied as exc:
+            raise MediaIntentMismatch("media provider input was denied") from exc
+        except MediaProviderInputUnavailable:
+            raise
 
         self._jobs.begin_submission(
             job.id,
@@ -166,14 +208,6 @@ class MediaSubmissionCoordinator:
         )
         if not expected:
             raise MediaIntentMismatch("media intent does not match the durable job")
-
-    @staticmethod
-    def _provider_arguments(intent: GenerationIntent) -> Dict[str, Any]:
-        if intent.mode == GenerationMode.TEXT_TO_VIDEO:
-            return {"prompt": intent.prompt}
-        raise MediaIntentMismatch(
-            "media mode requires a server-resolved reference asset payload"
-        )
 
     @staticmethod
     def _aware_utc(value: datetime) -> datetime:

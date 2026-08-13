@@ -25,6 +25,7 @@ from app.services.media.intent_vault import EncryptedMediaIntentVault
 from app.services.media.jobs import MediaGenerationJobService
 from app.services.media.lifecycle import MediaAssetLifecycleService
 from app.services.media.policy import MediaSubmissionPolicy
+from app.services.media.provider_inputs import MediaProviderInputResolver
 from app.services.media.reconcile_runtime import MediaReconciliationCoordinator
 from app.services.media.reconciliation import MediaReconciliationService
 from app.services.media.reconciliation_worker import (
@@ -68,6 +69,12 @@ async def _run_configured_media_submission(
         policy=policy,
         deployment_org_id=settings.AGENT_ORG_ID,
     )
+    input_resolver = MediaProviderInputResolver(
+        db,
+        object_store=_object_store(),
+        asset_authorizer=authorizer,
+        expires_seconds=settings.MEDIA_PROVIDER_INPUT_TTL_SECONDS,
+    )
     return await run_media_submission_batch(
         jobs=jobs,
         vault=vault,
@@ -79,6 +86,7 @@ async def _run_configured_media_submission(
             vault=vault,
             policy=policy,
             adapter=adapter,
+            input_resolver=input_resolver,
         ),
         worker_id=worker_id,
         now=now,

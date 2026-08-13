@@ -118,6 +118,7 @@ flowchart TB
         CACHE[("独立 Redis Cache<br/>无 AOF 的 RAG 候选缓存")]
         SECRETS["后端凭据目录<br/>0600 文件权限"]
         INTENT_VAULT["AES-GCM 意图仓<br/>不可变引用 / AAD 完整性"]
+        OBJECTS[("S3 兼容对象存储<br/>隔离桶 / 资产桶 / 短效签名")]
     end
 
     subgraph EXTERNAL["外部服务"]
@@ -159,6 +160,8 @@ flowchart TB
     SECRETS --> CELERY
     SECRETS --> INTENT_VAULT
     INTENT_VAULT --> MEDIA_SUBMIT
+    MEDIA --> OBJECTS
+    MEDIA_SUBMIT -->|"I2V 即时签名读取 / 结果隔离写入"| OBJECTS
     MEDIA --> PG
     MEDIA_SUBMIT --> PG
     MEDIA_RUNTIME --> PG
@@ -481,7 +484,7 @@ alembic current
 | AI 密钥 | `OMNIROUTE_API_KEY` 或 `OMNIROUTE_API_KEY_FILE` | 网关启用鉴权时 | 推荐生产环境使用挂载文件 |
 | 连接器 | `CONNECTOR_SECRET_DIR` | 使用 Hunter 等连接器时 | 后端连接器凭据目录 |
 | 媒体密钥 | `MEDIA_RUNTIME_SECRET_DIR` | 配置媒体 Provider 时 | 每个不可变 runtime revision 的后端凭据目录；对账 Worker 拒绝符号链接、非普通文件和组/其他用户可读文件 |
-| 媒体提交 | `MEDIA_SUBMIT_*`、`MEDIA_INTENT_VAULT_*`、`MEDIA_POLICY_*`、`MEDIA_T2V_RESERVATION_CEILING_MICROUSD` | 启用媒体外部提交时 | 控制批量、租约、轮询、短期策略签名、AES-GCM 意图仓和 T2V 预算预留上限；预留上限不是实际供应商价格，生产路径必须是后端绝对私有路径 |
+| 媒体提交 | `MEDIA_SUBMIT_*`、`MEDIA_INTENT_VAULT_*`、`MEDIA_POLICY_*`、`MEDIA_T2V_RESERVATION_CEILING_MICROUSD`、`MEDIA_PROVIDER_INPUT_TTL_SECONDS` | 启用媒体外部提交时 | 控制批量、租约、轮询、短期策略签名、AES-GCM 意图仓、T2V 预算预留上限和 I2V 供应商读取凭据寿命；预留上限不是实际供应商价格，生产路径必须是后端绝对私有路径 |
 | 媒体对账 | `MEDIA_RESULT_*`、`MEDIA_RECONCILE_*` | 启用媒体外部提交时 | 限制结果下载大小/超时、单轮任务量、租约、轮询和退避；租约最少 300 秒并长于任务硬超时 |
 | 媒体回调 | `MEDIA_CALLBACK_*`、`MEDIA_FAL_WEBHOOK_*` | 可选加速 fal 对账 | 默认关闭；Ed25519 + JWKS 验签、±300 秒防重放、账号绑定、正文限长和持久去重。回调只唤醒主动查询，不直接决定状态、产物或费用 |
 | 媒体用量 | fal `X-Fal-Billable-Units` | Provider 返回结果时 | 严格解析并持久绑定 Job、Request、Model 与 Runtime Revision；只使用该 Revision 创建时由同账户获取并固定的微美元单价核销，具体账户单价不下发浏览器 |
@@ -592,12 +595,13 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - fal API Key 按 runtime revision 写入后端 `0600` 文件，数据库与 API 只保存配置和 `api_key_configured`；对账 Worker 使用 `O_NOFOLLOW` 和打开后的文件元数据复核阻断符号链接替换。Provider 返回的控制 URL 不被信任，队列 URL 始终由固定 origin 与已批准模型 ID 构造。
 - 对账 Worker 不读取“当前激活”指针，而只使用 Job 提交时固定的 revision、能力快照 hash、模式与模型别名；逐个即时领取避免大文件下载耗尽批次中后续任务的租约。
 - 提交 Worker 的 Celery 任务没有业务参数；完整 Prompt 只存在 AES-GCM 加密意图仓，密钥与密文必须是后端私有权限。每次 effect 前会重查活跃用户、批准快照、扫描哈希、权利/同意有效期和同意证据资产，并重新签发短期策略决策。
-- 当前完整 provider arguments 只支持 `text_to_video`。`image_to_video` 与 `reference_to_video` 在服务端素材 URL 解析和供应商参数白名单完成前会以 `media_intent_mismatch` 在 effect 前终止并释放预算，不会偷偷退化成文生视频。
+- `text_to_video` 只提交服务端编译的 Prompt；`image_to_video` 只接受一个已晋级图片资产 ID。Worker 在 effect 前重新锁定并读取素材、扫描、版权、同意证据与敏感级别，强制对象键属于 `assets/{org_id}/`，再从资产桶复核 SHA-256、大小与 MIME，并把具体 S3 `VersionId` 绑定到最长 24 小时、默认 1 小时的供应商读取凭据，映射到 fal 的 `image_url`。资产桶必须启用版本化并禁止覆盖审核版本；浏览器不能提交 URL，凭据不写入数据库、事件或 API 响应。签名基础设施临时失败只延后任务，完整性/版本错误在 effect 前拒绝。
+- `reference_to_video` 和多素材 I2V 仍在 effect 前失败关闭，不会降级成文生视频；这两类模式需要单独完成模型字段白名单、人物一致性/肖像同意和组合素材策略。
 - 成功任务的成本结算器 basis 是 `pinned_provider_usage`：fal 结果响应的 `X-Fal-Billable-Units` 会先作为请求级用量凭据持久化，再乘以任务固定 Runtime Revision 中由同一账户查询并哈希锁定的微美元单价。缺失、歧义格式、Request/Model 不匹配、价格哈希变化、非整数微美元结果或超过预算预留都会失败关闭。
 - Runtime 管理 API 仅回传 `pricing_configured` 和 `pricing_snapshot_hash`，不会把账户折扣单价下发浏览器。旧 Revision 没有价格快照时不能结算，必须创建并激活新 Revision；已有任务仍坚持自己的旧 Revision，不会套用最新价格。
 - Provider 失败任务通常没有结果级单位回执，当前保持对账重试/人工核销，不擅自记 0，也不再用预算预留上限冒充实际支出。
 - `submission_unknown` 不提供直接重试操作；协调结论需要两名不同超级管理员，证据引用仅允许 `provider-audit/`、`provider-support/` 或 `billing-audit/`，API 响应与 Job Event 不回显证据路径。
-- `MEDIA_SUBMIT_ENABLED` 与 `MEDIA_CALLBACK_ENABLED` 仍默认关闭；安全提交/对账 Worker、固定运行时、实时策略复核、实际 peer 校验、S3 结果隔离、`submission_unknown` 人工协调、fal 认证回调、请求级用量凭据和成功任务的版本化账户价格核销已落地，但生产开放仍要等待失败请求账单对账、I2V/Reference 参数解析和故障注入验收。
+- `MEDIA_SUBMIT_ENABLED` 与 `MEDIA_CALLBACK_ENABLED` 仍默认关闭；安全提交/对账 Worker、固定运行时、实时策略复核、单素材 I2V 即时签名、实际 peer 校验、S3 结果隔离、`submission_unknown` 人工协调、fal 认证回调、请求级用量凭据和成功任务的版本化账户价格核销已落地，但生产开放仍要等待失败请求账单对账、Reference-to-Video/多素材参数解析和故障注入验收。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档
