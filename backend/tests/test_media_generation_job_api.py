@@ -333,3 +333,28 @@ def test_job_event_stream_hides_other_owner(api_context):
     )
 
     assert response.status_code == 404
+
+
+def test_job_event_stream_normalizes_unsafe_persisted_event_names(api_context):
+    client, db, user = api_context
+    job = stored_job(db, user.id)
+    db.add(
+        MediaGenerationEvent(
+            job_id=job.id,
+            sequence=3,
+            event_type="job.failed\nid: 999\nevent: injected",
+            data_json={"error_code": "must-not-leak"},
+        )
+    )
+    db.commit()
+
+    response = client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events/stream",
+        headers={"Last-Event-ID": "2"},
+    )
+
+    assert response.status_code == 200
+    assert "id: 3\nevent: job.updated\n" in response.text
+    assert "id: 999" not in response.text
+    assert "event: injected" not in response.text
+    assert "must-not-leak" not in response.text
