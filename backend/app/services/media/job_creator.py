@@ -10,9 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.models.database import MediaRuntimeActivation, MediaRuntimeRevision
 from app.services.agent_runtime.contracts import ExecutionPrincipal
-from app.services.idempotency import canonical_hash
+from app.services.idempotency import IdempotencyConflict, canonical_hash
 from app.services.media.contracts import GenerationIntent, GenerationMode
-from app.services.media.intent_vault import MediaIntentVaultUnavailable
+from app.services.media.intent_vault import (
+    MediaIntentVaultConflict,
+    MediaIntentVaultUnavailable,
+)
 from app.services.media.jobs import (
     MediaGenerationJobCommand,
     MediaGenerationJobService,
@@ -97,6 +100,10 @@ class MediaGenerationJobCreator:
         )
         try:
             payload_ref = self._vault.store(intent)
+        except MediaIntentVaultConflict as exc:
+            raise IdempotencyConflict(
+                "Media generation idempotency key was reused for changed input"
+            ) from exc
         except MediaIntentVaultUnavailable as exc:
             raise MediaGenerationJobUnavailable(
                 "Media generation intent storage is unavailable"
