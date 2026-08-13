@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     BigInteger, Column, Integer, String, Text, Date, DateTime, Boolean, ForeignKey, Enum,
-    JSON, Float, Index, UniqueConstraint, CheckConstraint, text
+    JSON, Float, Numeric, Index, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.dialects.postgresql import UUID
@@ -1614,6 +1614,47 @@ class MediaCallbackInbox(Base):
             name="uq_media_callback_provider_account_request",
         ),
         Index("idx_media_callback_job_received", "job_id", "received_at"),
+    )
+
+
+class MediaProviderUsageReceipt(Base):
+    """Provider-bound usage units awaiting an immutable pricing snapshot."""
+
+    __tablename__ = "media_provider_usage_receipts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    runtime_revision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("media_runtime_revisions.id"),
+        nullable=False,
+    )
+    provider = Column(String(30), nullable=False)
+    provider_request_id = Column(String(255), nullable=False)
+    model_id = Column(String(255), nullable=False)
+    billable_units = Column(Numeric(21, 9), nullable=False)
+    pricing_status = Column(String(20), nullable=False, default="unpriced")
+    unit_price_microusd = Column(BigInteger)
+    cost_microusd = Column(BigInteger)
+    receipt_hash = Column(String(64), nullable=False)
+    observed_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "billable_units >= 0",
+            name="ck_media_usage_billable_units_nonnegative",
+        ),
+        UniqueConstraint(
+            "provider",
+            "provider_request_id",
+            name="uq_media_usage_provider_request",
+        ),
+        UniqueConstraint("job_id", name="uq_media_usage_job"),
+        Index("idx_media_usage_runtime_model", "runtime_revision_id", "model_id"),
     )
 
 

@@ -38,6 +38,7 @@ from app.services.media.submission import MediaSubmissionCoordinator
 from app.services.media.submission_authorizer import MediaSubmissionAuthorizer
 from app.services.media.submission_worker import run_media_submission_batch
 from app.services.media.thumbnail import MediaThumbnailRunner, MediaThumbnailService
+from app.services.media.usage_receipts import MediaUsageReceiptService
 from app.services.media.worker_runtime import (
     PinnedMediaRuntimeFactory,
     ReservedEstimateCostResolver,
@@ -154,6 +155,7 @@ async def _run_configured_media_reconciliation(
                 reconciliation=reconciliation,
                 adapter=adapter,
                 ingestor=ingestor,
+                usage_recorder=MediaUsageReceiptService(db),
                 cost_resolver=cost_resolver,
                 poll_after_seconds=settings.MEDIA_RECONCILE_POLL_SECONDS,
                 retry_after_seconds=settings.MEDIA_RECONCILE_RETRY_SECONDS,

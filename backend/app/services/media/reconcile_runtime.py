@@ -64,6 +64,16 @@ class MediaCostResolver(Protocol):
     def actual_cost_microusd(self, job: MediaGenerationJob) -> int: ...
 
 
+class MediaUsageRecorder(Protocol):
+    def record(
+        self,
+        *,
+        job: MediaGenerationJob,
+        provider_result: MediaProviderResult,
+        now: datetime,
+    ) -> object: ...
+
+
 class MediaReconciliationCoordinator:
     """Treat provider callbacks as hints and derive truth through safe reads."""
 
@@ -74,6 +84,7 @@ class MediaReconciliationCoordinator:
         reconciliation: MediaReconciliationService,
         adapter: MediaStatusAdapter,
         ingestor: MediaResultIngestor,
+        usage_recorder: MediaUsageRecorder,
         cost_resolver: MediaCostResolver,
         poll_after_seconds: int = 15,
         retry_after_seconds: int = 30,
@@ -86,6 +97,7 @@ class MediaReconciliationCoordinator:
         self._reconciliation = reconciliation
         self._adapter = adapter
         self._ingestor = ingestor
+        self._usage_recorder = usage_recorder
         self._cost_resolver = cost_resolver
         self._poll_after_seconds = poll_after_seconds
         self._retry_after_seconds = retry_after_seconds
@@ -155,6 +167,11 @@ class MediaReconciliationCoordinator:
             provider_result = await self._adapter.result(
                 model_id=job.model_id,
                 request_id=job.provider_request_id,
+            )
+            self._usage_recorder.record(
+                job=job,
+                provider_result=provider_result,
+                now=checked_at,
             )
             receipt = await self._ingestor.ingest(
                 job=job,

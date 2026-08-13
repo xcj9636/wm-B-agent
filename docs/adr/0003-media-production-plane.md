@@ -39,6 +39,9 @@ Introduce a provider-neutral media production plane:
 - Provider/model discovery never grants approval automatically.
 - Provider callbacks are authenticated, deduplicated hints only; terminal state,
   quarantined output, and cost are derived through server-side provider reads.
+- Provider billable units are stored as request-bound, unpriced evidence. They
+  cannot become monetary cost until combined with an immutable account-specific
+  pricing snapshot pinned to the same runtime revision.
 - The system can distinguish business planning from expensive external effects.
 - Later steps must add quarantined object storage and durable submission attempts
   before `MEDIA_SUBMIT_ENABLED` can be enabled in any deployed environment.

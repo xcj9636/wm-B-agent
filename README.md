@@ -484,6 +484,7 @@ alembic current
 | 媒体提交 | `MEDIA_SUBMIT_*`、`MEDIA_INTENT_VAULT_*`、`MEDIA_POLICY_*`、`MEDIA_T2V_RESERVATION_CEILING_MICROUSD` | 启用媒体外部提交时 | 控制批量、租约、轮询、短期策略签名、AES-GCM 意图仓和 T2V 预算预留上限；预留上限不是实际供应商价格，生产路径必须是后端绝对私有路径 |
 | 媒体对账 | `MEDIA_RESULT_*`、`MEDIA_RECONCILE_*` | 启用媒体外部提交时 | 限制结果下载大小/超时、单轮任务量、租约、轮询和退避；租约最少 300 秒并长于任务硬超时 |
 | 媒体回调 | `MEDIA_CALLBACK_*`、`MEDIA_FAL_WEBHOOK_*` | 可选加速 fal 对账 | 默认关闭；Ed25519 + JWKS 验签、±300 秒防重放、账号绑定、正文限长和持久去重。回调只唤醒主动查询，不直接决定状态、产物或费用 |
+| 媒体用量 | fal `X-Fal-Billable-Units` | Provider 返回结果时 | 严格解析并持久绑定 Job、Request、Model 与 Runtime Revision；先记录为 `unpriced`，没有版本化单价快照时不换算或展示为实际美元成本 |
 | 邮箱 | `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET` | 连接 Gmail 时 | Google OAuth 客户端 |
 | 邮箱 | `OUTLOOK_CLIENT_ID`、`OUTLOOK_CLIENT_SECRET`、`OUTLOOK_TENANT_ID` | 连接 Microsoft 时 | Microsoft OAuth 客户端与租户 |
 | 邮箱 | `GMAIL_REDIRECT_URI`、`OUTLOOK_REDIRECT_URI`、`FRONTEND_BASE_URL` | 使用邮箱 OAuth 时 | 服务端回调和完成后的前端地址 |
@@ -593,8 +594,9 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - 提交 Worker 的 Celery 任务没有业务参数；完整 Prompt 只存在 AES-GCM 加密意图仓，密钥与密文必须是后端私有权限。每次 effect 前会重查活跃用户、批准快照、扫描哈希、权利/同意有效期和同意证据资产，并重新签发短期策略决策。
 - 当前完整 provider arguments 只支持 `text_to_video`。`image_to_video` 与 `reference_to_video` 在服务端素材 URL 解析和供应商参数白名单完成前会以 `media_intent_mismatch` 在 effect 前终止并释放预算，不会偷偷退化成文生视频。
 - 当前成本结算器的 basis 是 `reserved_estimate_ceiling`：它使用任务预留估算上限，不代表 fal 实际账单。可信 Provider 成本回执及差额核销完成前，界面和报表不得展示为“实际成本”。
+- fal 结果响应的 `X-Fal-Billable-Units` 已作为请求级用量凭据持久化；缺失、歧义格式、Request/Model 不匹配或重复请求单位变化都会失败关闭。该凭据保持 `unpriced`，必须与任务固定 Runtime Revision 中的版本化账户单价快照结合后，才能形成可信金额。
 - `submission_unknown` 不提供直接重试操作；协调结论需要两名不同超级管理员，证据引用仅允许 `provider-audit/`、`provider-support/` 或 `billing-audit/`，API 响应与 Job Event 不回显证据路径。
-- `MEDIA_SUBMIT_ENABLED` 与 `MEDIA_CALLBACK_ENABLED` 仍默认关闭；安全提交/对账 Worker、固定运行时、实时策略复核、实际 peer 校验、S3 结果隔离、`submission_unknown` 人工协调和 fal 认证回调收件箱已落地，但生产开放仍要等待可信成本回执、I2V/Reference 参数解析和故障注入验收。
+- `MEDIA_SUBMIT_ENABLED` 与 `MEDIA_CALLBACK_ENABLED` 仍默认关闭；安全提交/对账 Worker、固定运行时、实时策略复核、实际 peer 校验、S3 结果隔离、`submission_unknown` 人工协调、fal 认证回调收件箱和请求级用量凭据已落地，但生产开放仍要等待版本化账户单价、差额核销、I2V/Reference 参数解析和故障注入验收。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档

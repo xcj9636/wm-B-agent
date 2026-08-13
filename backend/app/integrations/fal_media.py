@@ -1,6 +1,7 @@
 """Strict fal queue adapter with secret-safe errors and validated media outputs."""
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 import json
 import re
@@ -70,6 +71,17 @@ class MediaOutput(BaseModel):
 class MediaProviderResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider_request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    model_id: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._/-]+$",
+    )
+    billable_units: Decimal = Field(ge=0, max_digits=21, decimal_places=9)
     outputs: List[MediaOutput] = Field(min_length=1, max_length=20)
 
 
@@ -272,6 +284,7 @@ class FalMediaAdapter:
             self._request_path(model_id, request_id),
         )
         body = self._json_object(response)
+        billable_units = self._billable_units(response)
         outputs: List[MediaOutput] = []
         candidates: List[Any] = []
         images = body.get("images")
@@ -300,7 +313,12 @@ class FalMediaAdapter:
                 raise self._invalid_response() from exc
         if not outputs:
             raise self._invalid_response()
-        return MediaProviderResult(outputs=outputs)
+        return MediaProviderResult(
+            provider_request_id=request_id,
+            model_id=model_id,
+            billable_units=billable_units,
+            outputs=outputs,
+        )
 
     async def cancel(
         self,
@@ -478,6 +496,28 @@ class FalMediaAdapter:
         if isinstance(value, str) and value in self.SAFE_ERROR_TYPES:
             return value
         return "provider_request_failed"
+
+    @staticmethod
+    def _billable_units(response: httpx.Response) -> Decimal:
+        raw = response.headers.get("X-Fal-Billable-Units")
+        if raw is None or not re.fullmatch(
+            r"(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?",
+            raw,
+        ):
+            raise MediaProviderError(
+                error_code="invalid_provider_billing_receipt",
+                retryable=False,
+                status_code=response.status_code,
+            )
+        try:
+            value = Decimal(raw)
+        except InvalidOperation as exc:
+            raise MediaProviderError(
+                error_code="invalid_provider_billing_receipt",
+                retryable=False,
+                status_code=response.status_code,
+            ) from exc
+        return value
 
     @staticmethod
     def _invalid_response() -> MediaProviderError:
