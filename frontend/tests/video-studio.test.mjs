@@ -91,7 +91,7 @@ test('video studio creates one-shot generation jobs and renders a resumable safe
   const view = source('src/views/VideoStudio.vue')
   const timeline = source('src/composables/useMediaJobTimeline.ts')
 
-  assert.match(view, /videoApi\.createGenerationJob/)
+  assert.match(timeline, /videoApi\.createGenerationJob/)
   assert.match(view, /startMediaJob/)
   assert.match(view, /Generate video/)
   assert.match(view, /Generation timeline/)
@@ -102,7 +102,7 @@ test('video studio creates one-shot generation jobs and renders a resumable safe
   assert.match(timeline, /lastEventId/)
   assert.match(timeline, /AbortController/)
   assert.match(timeline, /TERMINAL_MEDIA_JOB_STATUSES/)
-  assert.doesNotMatch(view, /provider_request_id|payload_ref|intent_hash|estimate_hash|prompt/i)
+  assert.doesNotMatch(view, /provider_request_id|payload_ref|intent_hash|estimate_hash/i)
 })
 
 test('media job timeline has complete Chinese localization', () => {

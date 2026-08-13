@@ -240,15 +240,28 @@
                       <strong>{{ shot.purpose }}</strong>
                       <small>{{ $t(shot.workflow_mode) }} · {{ shot.duration_seconds }}s</small>
                     </div>
-                    <el-button
+                    <div
                       v-if="storyboard.status === 'approved' && shot.shot_id"
-                      class="compile-button"
-                      size="small"
-                      text
-                      @click="compileShot(storyboard.version_id, shot.shot_id)"
+                      class="shot-actions"
                     >
-                      {{ $t('Compile shot') }}
-                    </el-button>
+                      <el-button
+                        class="compile-button"
+                        size="small"
+                        text
+                        @click="compileShot(storyboard.version_id, shot.shot_id)"
+                      >
+                        {{ $t('Compile shot') }}
+                      </el-button>
+                      <el-button
+                        v-if="shot.workflow_mode === 'text_to_video'"
+                        type="primary"
+                        size="small"
+                        :loading="generationSubmittingShotId === shot.shot_id"
+                        @click="startShotGeneration(storyboard.version_id, shot.shot_id)"
+                      >
+                        {{ $t('Generate video') }}
+                      </el-button>
+                    </div>
                   </div>
                 </div>
               </article>
@@ -259,6 +272,94 @@
             >
               <strong>{{ $t('No storyboard revisions') }}</strong>
               <span>{{ $t('Add a storyboard to turn the approved brief into shots.') }}</span>
+            </div>
+          </section>
+
+          <section class="detail-section generation-section">
+            <div class="section-heading generation-heading">
+              <div>
+                <h3>{{ $t('Generation timeline') }}</h3>
+                <span>{{ $t('Durable, resumable and filtered for this browser.') }}</span>
+              </div>
+              <div class="generation-heading-actions">
+                <span
+                  class="live-indicator"
+                  :class="`is-${liveState}`"
+                >
+                  {{ $t(liveStateLabel) }}
+                </span>
+                <el-button
+                  v-if="liveState === 'paused'"
+                  size="small"
+                  @click="resumeMediaJob"
+                >
+                  {{ $t('Resume live updates') }}
+                </el-button>
+              </div>
+            </div>
+
+            <el-alert
+              v-if="streamError"
+              type="warning"
+              :closable="false"
+              :title="$t('Live updates paused')"
+              :description="$t('The job is safe. Resume to continue from the last durable event.')"
+              show-icon
+            />
+
+            <div
+              v-if="visibleMediaJob"
+              class="job-summary"
+            >
+              <div>
+                <span>{{ $t('Job status') }}</span>
+                <el-tag
+                  size="small"
+                  effect="plain"
+                  :type="statusType(visibleMediaJob.status)"
+                >
+                  {{ $t(visibleMediaJob.status) }}
+                </el-tag>
+              </div>
+              <div>
+                <span>{{ $t('Generation mode') }}</span>
+                <strong>{{ $t(visibleMediaJob.mode) }}</strong>
+              </div>
+              <div>
+                <span>{{ $t('Model') }}</span>
+                <strong>{{ visibleMediaJob.model_id }}</strong>
+              </div>
+              <div>
+                <span>{{ $t('Budget reservation ceiling') }}</span>
+                <strong>{{ formatReservation(visibleMediaJob.reservation_ceiling_microusd) }}</strong>
+              </div>
+            </div>
+
+            <ol
+              v-if="visibleMediaJob && mediaJobEvents.length"
+              class="generation-timeline"
+              :aria-label="$t('Generation timeline')"
+            >
+              <li
+                v-for="event in mediaJobEvents"
+                :key="event.sequence"
+              >
+                <span class="timeline-dot" />
+                <div>
+                  <strong>{{ $t(mediaEventLabel(event.event_type)) }}</strong>
+                  <small>{{ formatDate(event.created_at) }}</small>
+                  <p v-if="event.data.error_code">
+                    {{ $t('Error code') }}: {{ event.data.error_code }}
+                  </p>
+                </div>
+              </li>
+            </ol>
+            <div
+              v-else
+              class="empty-state compact-empty"
+            >
+              <strong>{{ $t('No generation events yet') }}</strong>
+              <span>{{ $t('Generate an approved text-to-video shot to start a durable job.') }}</span>
             </div>
           </section>
 
@@ -797,6 +898,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { videoApi } from '@/api/video'
+import { useMediaJobTimeline } from '@/composables/useMediaJobTimeline'
 import { translate } from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
 import type {
@@ -824,7 +926,17 @@ const selectedProject = ref<VideoProjectDetail | null>(null)
 const selectedPersona = ref<VideoPersonaRevision | null>(null)
 const personaVersions = ref<VideoPersonaRevision[]>([])
 const compiledReceipt = ref<CompiledShotReceipt | null>(null)
+const generationSubmittingShotId = ref<string | null>(null)
 const authStore = useAuthStore()
+const {
+  mediaJob,
+  mediaJobEvents,
+  liveState,
+  streamError,
+  startMediaJob,
+  restoreMediaJob,
+  resumeMediaJob,
+} = useMediaJobTimeline()
 
 const workflowOptions: VideoWorkflowMode[] = [
   'auto',
@@ -887,6 +999,18 @@ const approvedStoryboardCount = computed(
 const approvedPersonas = computed(
   () => personaResult.value.items.filter((item) => item.status === 'approved'),
 )
+const visibleMediaJob = computed(
+  () => mediaJob.value?.project_id === selectedProject.value?.id
+    ? mediaJob.value
+    : null,
+)
+const liveStateLabel = computed(() => {
+  if (liveState.value === 'connecting') return 'Connecting live updates'
+  if (liveState.value === 'live') return 'Live updates active'
+  if (liveState.value === 'paused') return 'Live updates paused'
+  if (liveState.value === 'complete') return 'Generation complete'
+  return 'No active generation'
+})
 
 async function loadWorkspace() {
   loading.value = true
@@ -1131,6 +1255,22 @@ async function compileShot(storyboardVersionId: string, shotId: string) {
   }
 }
 
+async function startShotGeneration(storyboardVersionId: string, shotId: string) {
+  if (!selectedProject.value) return
+  const confirmed = await confirmAction(
+    translate('Start this approved shot? This can submit work to the configured media provider.'),
+    translate('Generate video'),
+  )
+  if (!confirmed) return
+  generationSubmittingShotId.value = shotId
+  try {
+    await startMediaJob(selectedProject.value.id, storyboardVersionId, shotId)
+    ElMessage.success(translate('Generation job created.'))
+  } finally {
+    generationSubmittingShotId.value = null
+  }
+}
+
 function splitValues(value: string) {
   return value
     .split(/[\n,]/)
@@ -1156,17 +1296,46 @@ async function confirmAction(message: string, title: string) {
 }
 
 function statusType(value: string): TagType {
-  if (value === 'approved') return 'success'
-  if (value === 'draft') return 'warning'
-  if (value === 'retired') return 'info'
+  if (['approved', 'succeeded'].includes(value)) return 'success'
+  if (['draft', 'queued', 'running', 'submitting', 'submitted'].includes(value)) return 'warning'
+  if (['failed', 'submission_unknown'].includes(value)) return 'danger'
+  if (['retired', 'cancelled', 'cancel_requested'].includes(value)) return 'info'
   return 'info'
+}
+
+function mediaEventLabel(eventType: string) {
+  const labels: Record<string, string> = {
+    'job.created': 'Generation job created',
+    'job.claimed': 'Generation job claimed',
+    'job.requeued': 'Generation job requeued',
+    'job.cancelled': 'Generation cancelled',
+    'job.cancel_requested': 'Cancellation requested',
+    'job.succeeded': 'Generation succeeded',
+    'job.failed': 'Generation failed',
+    'submission.started': 'Provider submission started',
+    'submission.accepted': 'Provider submission accepted',
+    'submission.unknown': 'Provider submission needs review',
+    'submission.manually_confirmed': 'Provider submission manually confirmed',
+    'submission.not_created_confirmed': 'Provider submission confirmed absent',
+  }
+  return labels[eventType] || 'Generation state updated'
+}
+
+function formatReservation(microusd: number) {
+  return `$${(microusd / 1_000_000).toFixed(2)} USD`
 }
 
 function formatDate(value: string) {
   return dayjs(value).format('YYYY-MM-DD HH:mm')
 }
 
-onMounted(loadWorkspace)
+onMounted(async () => {
+  await loadWorkspace()
+  const restored = await restoreMediaJob()
+  if (restored && restored.project_id !== selectedProject.value?.id) {
+    await selectProject(restored.project_id)
+  }
+})
 </script>
 
 <style lang="scss" scoped>
@@ -1451,6 +1620,134 @@ onMounted(loadWorkspace)
   font-size: 11px;
 }
 
+.shot-actions,
+.generation-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generation-heading > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.live-indicator::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  content: '';
+}
+
+.live-indicator.is-live::before,
+.live-indicator.is-complete::before {
+  background: var(--el-color-success);
+}
+
+.live-indicator.is-connecting::before {
+  background: var(--el-color-warning);
+}
+
+.live-indicator.is-paused::before {
+  background: var(--el-color-danger);
+}
+
+.job-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: var(--border-hairline);
+}
+
+.job-summary > div {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface-elevated);
+}
+
+.job-summary span,
+.generation-timeline small {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.job-summary strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-timeline {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.generation-timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 58px;
+}
+
+.generation-timeline li:not(:last-child)::before {
+  position: absolute;
+  top: 13px;
+  bottom: -1px;
+  left: 4px;
+  width: 1px;
+  background: var(--border-hairline);
+  content: '';
+}
+
+.timeline-dot {
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border: 2px solid var(--surface-elevated);
+  border-radius: 999px;
+  background: var(--text-secondary);
+  box-shadow: 0 0 0 1px var(--border-hairline);
+}
+
+.generation-timeline li > div {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 14px;
+}
+
+.generation-timeline strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.generation-timeline p {
+  margin: 2px 0 0;
+  color: var(--el-color-danger);
+  font-size: 11px;
+}
+
 .evidence-grid,
 .persona-language {
   display: grid;
@@ -1628,6 +1925,10 @@ onMounted(loadWorkspace)
   .brief-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .job-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -1662,6 +1963,20 @@ onMounted(loadWorkspace)
   .two-column-form,
   .receipt-grid {
     grid-template-columns: 1fr;
+  }
+
+
+  .job-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .shot-item {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .shot-actions {
+    grid-column: 2;
+    flex-wrap: wrap;
   }
 
   .two-column-form .full-field,

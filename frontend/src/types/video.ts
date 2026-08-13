@@ -131,3 +131,51 @@ export interface CompiledShotReceipt {
   prompt_hash: string
   evidence_snapshot_hash: string
 }
+
+export type MediaGenerationJobStatus =
+  | 'queued'
+  | 'running'
+  | 'submitting'
+  | 'submitted'
+  | 'cancel_requested'
+  | 'submission_unknown'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+
+export interface MediaGenerationJob {
+  id: string
+  project_id: string
+  storyboard_version_id: string
+  shot_id: string
+  mode: string
+  provider: string
+  model_id: string
+  sensitivity: string
+  status: MediaGenerationJobStatus
+  effect_state: string
+  reservation_ceiling_microusd: number
+  provider_state: string | null
+  error_code: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface MediaGenerationEvent {
+  sequence: number
+  event_type: string
+  data: Record<string, string | number | boolean>
+  created_at: string
+}
+
+export interface MediaGenerationEventPage {
+  items: MediaGenerationEvent[]
+  next_sequence: number
+}
+
+export interface MediaGenerationStreamEvent {
+  id?: number
+  event: string
+  data: Record<string, string | number | boolean>
+}
