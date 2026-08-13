@@ -41,8 +41,10 @@
 - 已完成 AES-GCM 加密不可变意图仓：专用 32 字节密钥文件、`0600` 密文、`0700` 目录、`O_NOFOLLOW`、UUID 引用、AAD 引用绑定、原子首次写入和 attempt 幂等冲突检测；Job 与 Celery payload 均不保存完整 Prompt。
 - 已完成安全提交 Worker：每次只领取一个 Job，现场重查用户、Persona/Storyboard 快照、扫描 hash、权利/同意有效期与同意证据文件，签发并立即验证短期 `PolicyDecision`；固定 runtime 客户端逐 Job 创建/关闭，网络调用前后使用新鲜时间与 fencing。
 - effect 前的意图/策略/授权失败会原子终止并释放预算；runtime 暂时不可用只等待租约恢复；effect 开始后的所有不确定异常继续进入 `submission_unknown`，不自动重发。当前完整 provider arguments 只开放 T2V，I2V/Reference 在服务端解析受控素材 URL 前安全终止。
-- 当前验证证据：后端全量 `588 passed, 2 skipped`；加密意图仓、现场授权器和提交 Worker 覆盖率分别为 83%、88%、96%；`0027 → 0028 → 0027 → 0028` 迁移往返与 Compose 配置校验通过。两个 PostgreSQL 行锁并发用例在本地无测试库时跳过，必须在 CI/预生产执行。
-- **下一阶段**：完成认证 callback inbox、可信成本回执和 I2V/Reference 素材参数解析，再开放 Job API/SSE、人工协调 UI 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
+- 已完成认证 Job 创建、详情和事件游标 API：浏览器不能传组织、Prompt、模型、价格或敏感级别；服务端稳定派生 attempt ID，固定 active runtime/model，使用管理员配置的 `configured_reservation_ceiling` 原子预留预算。首次创建 202，幂等回放 200，冲突 409。
+- Job 详情和 `after_sequence` 事件按组织/owner 隔离，同组织超级管理员可审计；事件 read model 仅保留事件类型白名单字段，provider request ID、Prompt、vault 引用、estimate hash 和证据路径不会返回。分钟级媒体任务先使用增量轮询，SSE 可直接复用同一游标服务。
+- 当前验证证据：后端全量 `608 passed, 2 skipped`；加密意图仓、现场授权器、提交 Worker、Job 创建和 Job 访问服务覆盖率分别为 83%、88%、96%、91%、100%；`0027 → 0028 → 0027 → 0028` 迁移往返与 Compose 配置校验通过。两个 PostgreSQL 行锁并发用例在本地无测试库时跳过，必须在 CI/预生产执行。
+- **下一阶段**：完成认证 callback inbox、可信成本回执和 I2V/Reference 素材参数解析，再接 Job SSE/前端状态时间线、人工协调 UI 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
 
 ## 1. 执行摘要
 

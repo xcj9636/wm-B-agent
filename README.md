@@ -53,6 +53,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **媒体 Provider Runtime**：fal 能力白名单、不可变运行时 revision、逐版本 `0600` 密钥、健康探测与显式激活；队列适配器支持 submit/status/result/cancel，拒绝重定向、未知模型、超限响应和非批准媒体域名。
 - **持久媒体生成任务**：Generation Job/Attempt/Event、月度微美元预算预留与 append-only 账本、提交与对账双 fencing、运行时版本固定、终态单调转换，以及禁止自动重发的 `submission_unknown` 协调边界；provider 完成后必须先获得隔离摄取回执才能结算成功。
 - **安全媒体提交 Worker**：AES-GCM 加密不可变 GenerationIntent，Celery 仅扫描 Job ID；Worker 逐条领取后从实时用户、Persona、Storyboard、扫描、权利、同意及其证据重新授权，使用任务固定 runtime 提交，并在网络调用前后重新检查租约时间。
+- **媒体 Job API**：认证用户可用只含幂等键与 Storyboard version 的请求创建单 Shot Job；服务端编译 Prompt、固定 runtime/model、写入加密意图仓并预留管理员配置的预算上限。详情与 `after_sequence` 事件游标按组织/所有者隔离并过滤内部请求 ID 和证据引用。
 - **Provider 结果隔离摄取**：对 fal 输出重新执行允许域和 DNS 校验，并核对实际 socket peer；拒绝重定向、私网地址、未知 MIME、超限和截断响应，使用 `0600` 临时文件计算 SHA-256 后幂等写入 S3 quarantine，生成资产保持待扫描/版权/同意复核状态。
 - **媒体对账 Worker**：Celery Beat 按配置唤醒 submitted Job；Worker 逐个即时领取、递增 fencing，严格重建任务固定的 runtime revision，安全读取逐版本密钥，查询 fal 状态并把完成结果摄取到隔离区。读取失败只退避重试，不重发生成请求。
 - **提交不确定态人工协调**：`submission_unknown` 只能由两名不同超级管理员基于白名单证据引用确认；确认已提交时绑定全局唯一 provider request ID 并进入安全对账，确认未提交时终止任务并仅释放预留预算，两个路径都不会自动重发。
@@ -64,7 +65,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 |---|---|
 | 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
 | 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime、加密意图仓、安全提交/对账 Worker、持久 Generation Job/Attempt/Event 与原子预算账本 |
-| 后续产品化重点 | 认证回调 inbox、可信成本回执解析、I2V/Reference 服务端素材解析、Job API/SSE、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
+| 后续产品化重点 | 认证回调 inbox、可信成本回执解析、I2V/Reference 服务端素材解析、Job SSE/前端状态时间线、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -479,7 +480,7 @@ alembic current
 | AI 密钥 | `OMNIROUTE_API_KEY` 或 `OMNIROUTE_API_KEY_FILE` | 网关启用鉴权时 | 推荐生产环境使用挂载文件 |
 | 连接器 | `CONNECTOR_SECRET_DIR` | 使用 Hunter 等连接器时 | 后端连接器凭据目录 |
 | 媒体密钥 | `MEDIA_RUNTIME_SECRET_DIR` | 配置媒体 Provider 时 | 每个不可变 runtime revision 的后端凭据目录；对账 Worker 拒绝符号链接、非普通文件和组/其他用户可读文件 |
-| 媒体提交 | `MEDIA_SUBMIT_*`、`MEDIA_INTENT_VAULT_*`、`MEDIA_POLICY_*` | 启用媒体外部提交时 | 控制批量、租约、轮询、短期策略签名及 AES-GCM 意图仓；生产路径必须是后端绝对私有路径，Celery payload 不含 Prompt |
+| 媒体提交 | `MEDIA_SUBMIT_*`、`MEDIA_INTENT_VAULT_*`、`MEDIA_POLICY_*`、`MEDIA_T2V_RESERVATION_CEILING_MICROUSD` | 启用媒体外部提交时 | 控制批量、租约、轮询、短期策略签名、AES-GCM 意图仓和 T2V 预算预留上限；预留上限不是实际供应商价格，生产路径必须是后端绝对私有路径 |
 | 媒体对账 | `MEDIA_RESULT_*`、`MEDIA_RECONCILE_*` | 启用媒体外部提交时 | 限制结果下载大小/超时、单轮任务量、租约、轮询和退避；租约最少 300 秒并长于任务硬超时 |
 | 邮箱 | `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET` | 连接 Gmail 时 | Google OAuth 客户端 |
 | 邮箱 | `OUTLOOK_CLIENT_ID`、`OUTLOOK_CLIENT_SECRET`、`OUTLOOK_TENANT_ID` | 连接 Microsoft 时 | Microsoft OAuth 客户端与租户 |
@@ -517,6 +518,9 @@ http://localhost:8000/api/v1/mailboxes/oauth/callback/outlook
 | 连接器 | `/api/v1/connectors` | 管理员连接器目录、测试和启停 |
 | 运维 | `/api/v1/admin` | 网关状态、可靠执行、死信与双人审批 |
 | 媒体运行时 | `/api/v1/admin/media/runtime` | 管理员查看能力目录、创建 revision、探测并对新任务激活 |
+| 媒体 Job 创建 | `/api/v1/video/projects/{project_id}/shots/{shot_id}/generation-jobs` | 只接收幂等键与 Storyboard version；服务端派生组织、Prompt、模型、敏感级别和预算预留 |
+| 媒体 Job 状态 | `/api/v1/video/generation-jobs/{job_id}` | 所有者或同组织超级管理员读取安全字段白名单 |
+| 媒体 Job 事件 | `/api/v1/video/generation-jobs/{job_id}/events?after_sequence=` | 增量事件游标；过滤 provider request ID、Prompt、vault 与内部证据字段 |
 | 媒体异常协调 | `/api/v1/admin/media/jobs/{job_id}/submission-unknown/resolution-approvals` | 两名不同超级管理员基于受限证据引用确认未知提交是否真实发生 |
 
 接口字段和当前响应模型以运行中的 <http://localhost:8000/docs> 为准。
@@ -533,7 +537,7 @@ npm run lint:check
 npm run build
 ```
 
-最近的完整工程验证基线（2026-08-13，`b-agent-enterprise-platform`）：后端 `588 passed, 2 skipped`；前端最近基线 `47 passed`；`docker compose config --quiet` 通过。加密意图仓、现场授权器和提交 Worker 的独立覆盖率分别为 83%、88% 和 96%；两个跳过项需要 PostgreSQL 测试库执行行锁并发验证。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
+最近的完整工程验证基线（2026-08-13，`b-agent-enterprise-platform`）：后端 `608 passed, 2 skipped`；前端最近基线 `47 passed`；`docker compose config --quiet` 通过。加密意图仓、现场授权器、提交 Worker、Job 创建服务和 Job 访问服务的独立覆盖率分别为 83%、88%、96%、91% 和 100%；两个跳过项需要 PostgreSQL 测试库执行行锁并发验证。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
