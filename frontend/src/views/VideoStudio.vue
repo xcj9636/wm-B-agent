@@ -256,6 +256,7 @@
                         v-if="shot.workflow_mode === 'text_to_video'"
                         type="primary"
                         size="small"
+                        :disabled="hasActiveMediaJob"
                         :loading="generationSubmittingShotId === shot.shot_id"
                         @click="startShotGeneration(storyboard.version_id, shot.shot_id)"
                       >
@@ -1011,6 +1012,12 @@ const liveStateLabel = computed(() => {
   if (liveState.value === 'complete') return 'Generation complete'
   return 'No active generation'
 })
+const hasActiveMediaJob = computed(
+  () => Boolean(
+    mediaJob.value
+    && !['succeeded', 'failed', 'cancelled'].includes(mediaJob.value.status),
+  ),
+)
 
 async function loadWorkspace() {
   loading.value = true

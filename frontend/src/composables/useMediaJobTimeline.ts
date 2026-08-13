@@ -141,6 +141,20 @@ export function useMediaJobTimeline() {
     shotId: string,
   ) {
     const existing = readPendingMediaJob()
+    if (
+      existing?.jobId
+      && (
+        !mediaJob.value
+        || !TERMINAL_MEDIA_JOB_STATUSES.has(mediaJob.value.status)
+      )
+      && (
+        existing.projectId !== projectId
+        || existing.storyboardVersionId !== storyboardVersionId
+        || existing.shotId !== shotId
+      )
+    ) {
+      throw new Error('A media generation job is already active')
+    }
     pending = existing
       && existing.projectId === projectId
       && existing.storyboardVersionId === storyboardVersionId
