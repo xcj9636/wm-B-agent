@@ -160,6 +160,19 @@ def install_live_submission(db_session, *, consent_required=False):
         )
         db_session.add(evidence)
         db_session.flush()
+        evidence_scan = MediaScanReport(
+            org_id=org_id,
+            asset_id=evidence.id,
+            scanner="clamav",
+            scanner_version="1.4.2",
+            status="passed",
+            asset_sha256=evidence.sha256,
+            findings_json={},
+            created_by_user_id=user.id,
+        )
+        db_session.add(evidence_scan)
+        db_session.flush()
+        evidence.scan_report_id = evidence_scan.id
         consent = MediaConsentRecord(
             org_id=org_id,
             asset_id=asset.id,
@@ -228,6 +241,7 @@ def install_live_submission(db_session, *, consent_required=False):
         "rights": rights,
         "consent": consent,
         "consent_evidence": evidence if consent_required else None,
+        "consent_evidence_scan": evidence_scan if consent_required else None,
         "intent": intent,
         "job": job,
     }
@@ -327,6 +341,28 @@ def test_consent_evidence_must_remain_live_scanned_and_same_org(db_session):
         service.authorize(state["job"], state["intent"], now=NOW)
 
     assert "asset_consent_invalid" in exc.value.reason_codes
+
+
+def test_consent_evidence_scan_must_match_current_content(db_session):
+    state = install_live_submission(db_session, consent_required=True)
+    state["consent_evidence_scan"].asset_sha256 = "0" * 64
+    db_session.commit()
+    service, _ = authorizer(db_session, state["org_id"])
+
+    with pytest.raises(MediaPolicyDenied) as exc:
+        service.authorize(state["job"], state["intent"], now=NOW)
+
+    assert "asset_consent_invalid" in exc.value.reason_codes
+
+
+def test_inactive_project_cannot_start_new_external_effect(db_session):
+    state = install_live_submission(db_session)
+    state["project"].status = "archived"
+    db_session.commit()
+    service, _ = authorizer(db_session, state["org_id"])
+
+    with pytest.raises(MediaSubmissionAuthorizationDenied):
+        service.authorize(state["job"], state["intent"], now=NOW)
 
     service, _ = authorizer(db_session, state["org_id"])
     state["project"].persona_spec_hash = "0" * 64
