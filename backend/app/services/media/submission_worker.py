@@ -9,6 +9,7 @@ from app.services.media.policy import MediaPolicyDenied
 from app.services.media.submission_authorizer import (
     MediaSubmissionAuthorizationDenied,
 )
+from app.services.media.submission import MediaIntentMismatch
 from app.services.media.worker_runtime import MediaRuntimeUnavailable
 
 
@@ -91,6 +92,16 @@ async def run_media_submission_batch(
                 worker_id=worker_id,
                 now=checked_at,
                 error_code="media_policy_denied",
+            )
+            counters["failed_before_submission"] += 1
+            continue
+        except MediaIntentMismatch:
+            _fail_before_submission(
+                jobs,
+                job,
+                worker_id=worker_id,
+                now=checked_at,
+                error_code="media_intent_mismatch",
             )
             counters["failed_before_submission"] += 1
             continue
