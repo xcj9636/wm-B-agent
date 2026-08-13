@@ -154,6 +154,49 @@ def test_factory_uses_job_pinned_revision_not_current_activation(
     assert "active-secret" not in repr(observed["catalog"])
 
 
+def test_factory_injects_only_server_owned_webhook_configuration(
+    db_session,
+    tmp_path,
+):
+    org_id = uuid4()
+    pinned = runtime(
+        db_session,
+        org_id=org_id,
+        revision=1,
+        model_id="fal-ai/pinned-model",
+    )
+    secret_dir = tmp_path / "runtime-secrets"
+    write_key(secret_dir, pinned.id, "pinned-secret")
+    generation = job(
+        db_session,
+        org_id=org_id,
+        revision_id=pinned.id,
+        model_id="fal-ai/pinned-model",
+    )
+    observed = {}
+
+    def build_adapter(api_key, **kwargs):
+        observed.update(kwargs)
+        return object()
+
+    configured = Settings(
+        _env_file=None,
+        MEDIA_RUNTIME_SECRET_DIR=str(secret_dir),
+        MEDIA_CALLBACK_ENABLED=True,
+        MEDIA_FAL_WEBHOOK_USER_ID="fal-user-123",
+        MEDIA_FAL_WEBHOOK_URL=(
+            "https://agent.example.com/api/v1/webhooks/media/fal"
+        ),
+    )
+    PinnedMediaRuntimeFactory(
+        db_session,
+        configured,
+        adapter_builder=build_adapter,
+    ).build(generation)
+
+    assert observed["webhook_url"] == configured.MEDIA_FAL_WEBHOOK_URL
+
+
 @pytest.mark.parametrize("mutation", ["hash", "model", "provider"])
 def test_factory_fails_closed_for_tampered_snapshot_or_job(
     db_session,

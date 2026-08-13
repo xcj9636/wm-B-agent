@@ -153,6 +153,25 @@ def test_media_callback_requires_bound_fal_user_id():
         Settings(_env_file=None, MEDIA_CALLBACK_ENABLED=True)
 
 
+@pytest.mark.parametrize(
+    "webhook_url",
+    [
+        "",
+        "http://agent.example.com/api/v1/webhooks/media/fal",
+        "https://user:pass@agent.example.com/api/v1/webhooks/media/fal",
+        "https://agent.example.com/api/v1/webhooks/media/fal?token=secret",
+    ],
+)
+def test_media_callback_requires_safe_https_url(webhook_url):
+    with pytest.raises(ValidationError, match="webhook URL"):
+        Settings(
+            _env_file=None,
+            MEDIA_CALLBACK_ENABLED=True,
+            MEDIA_FAL_WEBHOOK_USER_ID="fal-user-123",
+            MEDIA_FAL_WEBHOOK_URL=webhook_url,
+        )
+
+
 def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
     config = Settings(
         _env_file=None,

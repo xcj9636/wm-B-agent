@@ -13,6 +13,7 @@ from app.models.database import (
     MediaGenerationJob,
 )
 from app.services.media.callbacks import (
+    MediaCallbackConflict,
     FalWebhookHeaders,
     FalWebhookVerificationError,
     FalWebhookVerifier,
@@ -141,6 +142,38 @@ def test_callback_retry_is_idempotent_and_does_not_append_a_second_event(
     assert first.created is True
     assert second.created is False
     assert first.receipt_id == second.receipt_id
+    assert db_session.query(MediaCallbackInbox).count() == 1
+    assert db_session.query(MediaGenerationEvent).count() == 1
+
+
+def test_same_request_id_with_different_signed_body_is_not_a_retry(
+    db_session,
+    signing_material,
+):
+    private_key, jwk = signing_material
+    job = submitted_job(db_session)
+    verifier = FalWebhookVerifier(EXPECTED_USER_ID)
+    service = MediaCallbackInboxService(db_session)
+    ok_body, ok_headers = signed_callback(private_key, job.provider_request_id)
+    error_body, error_headers = signed_callback(
+        private_key, job.provider_request_id, status="ERROR"
+    )
+    service.accept(
+        verifier.verify(body=ok_body, headers=ok_headers, jwks=[jwk], now=NOW),
+        now=NOW,
+    )
+
+    with pytest.raises(MediaCallbackConflict):
+        service.accept(
+            verifier.verify(
+                body=error_body,
+                headers=error_headers,
+                jwks=[jwk],
+                now=NOW,
+            ),
+            now=NOW,
+        )
+
     assert db_session.query(MediaCallbackInbox).count() == 1
     assert db_session.query(MediaGenerationEvent).count() == 1
 

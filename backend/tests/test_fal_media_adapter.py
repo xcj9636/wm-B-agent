@@ -45,6 +45,52 @@ def adapter(handler, *, resolver=None, max_response_bytes=1_000_000):
 
 
 @pytest.mark.asyncio
+async def test_fal_submit_adds_only_the_server_configured_webhook_query():
+    observed = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["url"] = str(request.url)
+        observed["payload"] = json.loads(request.content)
+        return httpx.Response(200, json={"request_id": "request-1"})
+
+    client = FalMediaAdapter(
+        "provider-secret",
+        catalog=capability_catalog(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        webhook_url="https://agent.example.com/api/v1/webhooks/media/fal",
+        media_url_resolver=lambda _host: ["93.184.216.34"],
+    )
+    try:
+        await client.submit(model_id=MODEL_ID, arguments={"prompt": "safe prompt"})
+    finally:
+        await client.aclose()
+
+    assert observed["url"] == (
+        f"https://queue.fal.run/{MODEL_ID}"
+        "?fal_webhook=https%3A%2F%2Fagent.example.com%2Fapi%2Fv1%2Fwebhooks%2Fmedia%2Ffal"
+    )
+    assert observed["payload"] == {"prompt": "safe prompt"}
+
+
+@pytest.mark.parametrize(
+    "webhook_url",
+    [
+        "http://agent.example.com/webhook",
+        "https://user:pass@agent.example.com/webhook",
+        "https://agent.example.com/webhook?token=secret",
+        "https://agent.example.com/webhook#fragment",
+    ],
+)
+def test_fal_adapter_rejects_unsafe_webhook_urls(webhook_url):
+    with pytest.raises(ValueError, match="webhook URL"):
+        FalMediaAdapter(
+            "provider-secret",
+            catalog=capability_catalog(),
+            webhook_url=webhook_url,
+        )
+
+
+@pytest.mark.asyncio
 async def test_fal_submit_uses_fixed_queue_origin_and_ignores_provider_urls():
     observed = {}
 
