@@ -39,9 +39,9 @@ from app.services.media.submission_authorizer import MediaSubmissionAuthorizer
 from app.services.media.submission_worker import run_media_submission_batch
 from app.services.media.thumbnail import MediaThumbnailRunner, MediaThumbnailService
 from app.services.media.usage_receipts import MediaUsageReceiptService
+from app.services.media.usage_receipts import MediaUsagePricingService
 from app.services.media.worker_runtime import (
     PinnedMediaRuntimeFactory,
-    ReservedEstimateCostResolver,
 )
 from app.tasks.celery_worker import celery
 
@@ -145,7 +145,7 @@ async def _run_configured_media_reconciliation(
         ),
         max_bytes=settings.MEDIA_RESULT_MAX_BYTES,
     )
-    cost_resolver = ReservedEstimateCostResolver()
+    cost_resolver = MediaUsagePricingService(db)
     try:
         return await run_media_reconciliation_batch(
             reconciliation=reconciliation,

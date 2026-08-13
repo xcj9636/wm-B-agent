@@ -42,6 +42,9 @@ Introduce a provider-neutral media production plane:
 - Provider billable units are stored as request-bound, unpriced evidence. They
   cannot become monetary cost until combined with an immutable account-specific
   pricing snapshot pinned to the same runtime revision.
+- Successful request cost is settled only when units times pinned micro-USD price
+  is exact and remains within the reservation. Failed requests without a result
+  receipt stay unresolved instead of being reported as zero or as the estimate.
 - The system can distinguish business planning from expensive external effects.
 - Later steps must add quarantined object storage and durable submission attempts
   before `MEDIA_SUBMIT_ENABLED` can be enabled in any deployed environment.

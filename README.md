@@ -66,7 +66,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 |---|---|
 | 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
 | 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime、加密意图仓、安全提交/对账 Worker、持久 Generation Job/Attempt/Event 与原子预算账本 |
-| 后续产品化重点 | 认证回调 inbox、可信成本回执解析、I2V/Reference 服务端素材解析、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
+| 后续产品化重点 | I2V/Reference 服务端素材解析、失败请求账单对账、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -484,7 +484,7 @@ alembic current
 | 媒体提交 | `MEDIA_SUBMIT_*`、`MEDIA_INTENT_VAULT_*`、`MEDIA_POLICY_*`、`MEDIA_T2V_RESERVATION_CEILING_MICROUSD` | 启用媒体外部提交时 | 控制批量、租约、轮询、短期策略签名、AES-GCM 意图仓和 T2V 预算预留上限；预留上限不是实际供应商价格，生产路径必须是后端绝对私有路径 |
 | 媒体对账 | `MEDIA_RESULT_*`、`MEDIA_RECONCILE_*` | 启用媒体外部提交时 | 限制结果下载大小/超时、单轮任务量、租约、轮询和退避；租约最少 300 秒并长于任务硬超时 |
 | 媒体回调 | `MEDIA_CALLBACK_*`、`MEDIA_FAL_WEBHOOK_*` | 可选加速 fal 对账 | 默认关闭；Ed25519 + JWKS 验签、±300 秒防重放、账号绑定、正文限长和持久去重。回调只唤醒主动查询，不直接决定状态、产物或费用 |
-| 媒体用量 | fal `X-Fal-Billable-Units` | Provider 返回结果时 | 严格解析并持久绑定 Job、Request、Model 与 Runtime Revision；先记录为 `unpriced`，没有版本化单价快照时不换算或展示为实际美元成本 |
+| 媒体用量 | fal `X-Fal-Billable-Units` | Provider 返回结果时 | 严格解析并持久绑定 Job、Request、Model 与 Runtime Revision；只使用该 Revision 创建时由同账户获取并固定的微美元单价核销，具体账户单价不下发浏览器 |
 | 邮箱 | `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET` | 连接 Gmail 时 | Google OAuth 客户端 |
 | 邮箱 | `OUTLOOK_CLIENT_ID`、`OUTLOOK_CLIENT_SECRET`、`OUTLOOK_TENANT_ID` | 连接 Microsoft 时 | Microsoft OAuth 客户端与租户 |
 | 邮箱 | `GMAIL_REDIRECT_URI`、`OUTLOOK_REDIRECT_URI`、`FRONTEND_BASE_URL` | 使用邮箱 OAuth 时 | 服务端回调和完成后的前端地址 |
@@ -593,10 +593,11 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - 对账 Worker 不读取“当前激活”指针，而只使用 Job 提交时固定的 revision、能力快照 hash、模式与模型别名；逐个即时领取避免大文件下载耗尽批次中后续任务的租约。
 - 提交 Worker 的 Celery 任务没有业务参数；完整 Prompt 只存在 AES-GCM 加密意图仓，密钥与密文必须是后端私有权限。每次 effect 前会重查活跃用户、批准快照、扫描哈希、权利/同意有效期和同意证据资产，并重新签发短期策略决策。
 - 当前完整 provider arguments 只支持 `text_to_video`。`image_to_video` 与 `reference_to_video` 在服务端素材 URL 解析和供应商参数白名单完成前会以 `media_intent_mismatch` 在 effect 前终止并释放预算，不会偷偷退化成文生视频。
-- 当前成本结算器的 basis 是 `reserved_estimate_ceiling`：它使用任务预留估算上限，不代表 fal 实际账单。可信 Provider 成本回执及差额核销完成前，界面和报表不得展示为“实际成本”。
-- fal 结果响应的 `X-Fal-Billable-Units` 已作为请求级用量凭据持久化；缺失、歧义格式、Request/Model 不匹配或重复请求单位变化都会失败关闭。该凭据保持 `unpriced`，必须与任务固定 Runtime Revision 中的版本化账户单价快照结合后，才能形成可信金额。
+- 成功任务的成本结算器 basis 是 `pinned_provider_usage`：fal 结果响应的 `X-Fal-Billable-Units` 会先作为请求级用量凭据持久化，再乘以任务固定 Runtime Revision 中由同一账户查询并哈希锁定的微美元单价。缺失、歧义格式、Request/Model 不匹配、价格哈希变化、非整数微美元结果或超过预算预留都会失败关闭。
+- Runtime 管理 API 仅回传 `pricing_configured` 和 `pricing_snapshot_hash`，不会把账户折扣单价下发浏览器。旧 Revision 没有价格快照时不能结算，必须创建并激活新 Revision；已有任务仍坚持自己的旧 Revision，不会套用最新价格。
+- Provider 失败任务通常没有结果级单位回执，当前保持对账重试/人工核销，不擅自记 0，也不再用预算预留上限冒充实际支出。
 - `submission_unknown` 不提供直接重试操作；协调结论需要两名不同超级管理员，证据引用仅允许 `provider-audit/`、`provider-support/` 或 `billing-audit/`，API 响应与 Job Event 不回显证据路径。
-- `MEDIA_SUBMIT_ENABLED` 与 `MEDIA_CALLBACK_ENABLED` 仍默认关闭；安全提交/对账 Worker、固定运行时、实时策略复核、实际 peer 校验、S3 结果隔离、`submission_unknown` 人工协调、fal 认证回调收件箱和请求级用量凭据已落地，但生产开放仍要等待版本化账户单价、差额核销、I2V/Reference 参数解析和故障注入验收。
+- `MEDIA_SUBMIT_ENABLED` 与 `MEDIA_CALLBACK_ENABLED` 仍默认关闭；安全提交/对账 Worker、固定运行时、实时策略复核、实际 peer 校验、S3 结果隔离、`submission_unknown` 人工协调、fal 认证回调、请求级用量凭据和成功任务的版本化账户价格核销已落地，但生产开放仍要等待失败请求账单对账、I2V/Reference 参数解析和故障注入验收。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档

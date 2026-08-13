@@ -1322,6 +1322,12 @@ class MediaRuntimeRevision(Base):
     model_aliases = Column(JSON, nullable=False, default=dict)
     capability_snapshot = Column(JSON, nullable=False, default=dict)
     capability_snapshot_hash = Column(String(64), nullable=False)
+    pricing_snapshot = Column(JSON, nullable=False, default=dict)
+    pricing_snapshot_hash = Column(
+        String(64),
+        nullable=False,
+        default="44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    )
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -1641,6 +1647,7 @@ class MediaProviderUsageReceipt(Base):
     unit_price_microusd = Column(BigInteger)
     cost_microusd = Column(BigInteger)
     receipt_hash = Column(String(64), nullable=False)
+    pricing_snapshot_hash = Column(String(64))
     observed_at = Column(DateTime, nullable=False)
 
     __table_args__ = (

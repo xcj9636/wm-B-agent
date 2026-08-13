@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Protocol
@@ -71,6 +72,35 @@ class MediaProviderProbe(BaseModel):
     issues: List[str] = Field(default_factory=list, max_length=20)
 
 
+class MediaProviderPrice(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    endpoint_id: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-zA-Z0-9._/-]+$",
+    )
+    unit_price: Decimal = Field(gt=0, max_digits=18, decimal_places=9)
+    unit: str = Field(min_length=1, max_length=40, pattern=r"^[a-z_]+$")
+    currency: Literal["USD"]
+
+
+class MediaPricingModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    unit: str = Field(min_length=1, max_length=40, pattern=r"^[a-z_]+$")
+    unit_price_microusd: int = Field(gt=0, le=1_000_000_000_000)
+
+
+class MediaPricingSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["fal-pricing-v1"]
+    provider: Literal["fal"]
+    currency: Literal["USD"]
+    models: Dict[str, MediaPricingModel] = Field(min_length=1, max_length=200)
+
+
 class MediaProviderControl(Protocol):
     def get_capabilities(self) -> MediaCapabilityCatalog: ...
 
@@ -82,6 +112,13 @@ class MediaProviderControl(Protocol):
         api_key: str,
         model_ids: List[str],
     ) -> MediaProviderProbe: ...
+
+    async def discover_pricing(
+        self,
+        *,
+        api_key: str,
+        model_ids: List[str],
+    ) -> List[MediaProviderPrice]: ...
 
 
 class UnavailableMediaProviderControl:
@@ -104,6 +141,14 @@ class UnavailableMediaProviderControl:
             reachable=False,
             issues=["media_provider_adapter_unavailable"],
         )
+
+    async def discover_pricing(
+        self,
+        *,
+        api_key: str,
+        model_ids: List[str],
+    ) -> List[MediaProviderPrice]:
+        raise RuntimeError("media_provider_adapter_unavailable")
 
 
 class MediaRuntimeRevisionCreate(BaseModel):
@@ -145,6 +190,8 @@ class MediaRuntimeRevisionResponse(BaseModel):
     model_aliases: Dict[MediaWorkflowMode, str]
     capability_snapshot: MediaCapabilityCatalog
     capability_snapshot_hash: str
+    pricing_configured: bool
+    pricing_snapshot_hash: str
     api_key_configured: bool
     latest_probe: Optional[MediaRuntimeProbeResponse] = None
     created_at: datetime
@@ -214,8 +261,15 @@ class MediaRuntimeService:
             command.model_aliases,
             catalog,
         )
+        pricing = await self._provider_control.discover_pricing(
+            api_key=api_key,
+            model_ids=sorted(set(aliases.values())),
+        )
+        pricing_snapshot = self._pricing_snapshot(aliases, pricing)
         catalog_json = catalog.model_dump(mode="json")
         snapshot_hash = canonical_hash(catalog_json)
+        pricing_json = pricing_snapshot.model_dump(mode="json")
+        pricing_hash = canonical_hash(pricing_json)
         next_revision = (
             self._db.query(func.max(MediaRuntimeRevision.revision))
             .filter(MediaRuntimeRevision.org_id == self._settings.AGENT_ORG_ID)
@@ -230,6 +284,8 @@ class MediaRuntimeService:
             model_aliases=aliases,
             capability_snapshot=catalog_json,
             capability_snapshot_hash=snapshot_hash,
+            pricing_snapshot=pricing_json,
+            pricing_snapshot_hash=pricing_hash,
             created_by_user_id=created_by_user_id,
         )
         self._db.add(row)
@@ -362,6 +418,8 @@ class MediaRuntimeService:
                 row.capability_snapshot
             ),
             capability_snapshot_hash=row.capability_snapshot_hash,
+            pricing_configured=bool((row.pricing_snapshot or {}).get("models")),
+            pricing_snapshot_hash=row.pricing_snapshot_hash,
             api_key_configured=self._secret_path(row.id).is_file(),
             latest_probe=self._probe_response(probe) if probe else None,
             created_at=self._as_utc(row.created_at),
@@ -416,6 +474,33 @@ class MediaRuntimeService:
                 raise ValueError("media model does not support the configured mode")
             normalized[mode.value] = model_id
         return normalized
+
+    @staticmethod
+    def _pricing_snapshot(
+        aliases: Dict[str, str],
+        prices: List[MediaProviderPrice],
+    ) -> MediaPricingSnapshot:
+        selected = sorted(set(aliases.values()))
+        by_model = {price.endpoint_id: price for price in prices}
+        if len(by_model) != len(prices) or set(by_model) != set(selected):
+            raise ValueError("media provider pricing is incomplete")
+        models: Dict[str, MediaPricingModel] = {}
+        multiplier = Decimal(1_000_000)
+        for model_id in selected:
+            price = by_model[model_id]
+            microusd = price.unit_price * multiplier
+            if microusd != microusd.to_integral_value():
+                raise ValueError("media provider pricing exceeds micro-USD precision")
+            models[model_id] = MediaPricingModel(
+                unit=price.unit,
+                unit_price_microusd=int(microusd),
+            )
+        return MediaPricingSnapshot(
+            schema_version="fal-pricing-v1",
+            provider="fal",
+            currency="USD",
+            models=models,
+        )
 
     def _secret_path(self, revision_id: UUID) -> Path:
         return Path(self._settings.MEDIA_RUNTIME_SECRET_DIR) / f"{revision_id}.key"

@@ -16,6 +16,7 @@ from app.services.media.runtime import (
     MediaCapabilityCatalog,
     MediaModelCapability,
     MediaProviderProbe,
+    MediaProviderPrice,
     MediaWorkflowMode,
 )
 
@@ -568,6 +569,55 @@ class FalMediaProviderControl:
         if not api_key.strip():
             raise ValueError("fal API key is required")
         return self.get_capabilities()
+
+    async def discover_pricing(
+        self,
+        *,
+        api_key: str,
+        model_ids: List[str],
+    ) -> List[MediaProviderPrice]:
+        if not api_key.strip() or not 1 <= len(model_ids) <= 50:
+            raise ValueError("fal pricing request is invalid")
+        if len(set(model_ids)) != len(model_ids):
+            raise ValueError("fal pricing model IDs must be unique")
+        for model_id in model_ids:
+            if model_id not in {model.id for model in self._catalog.models}:
+                raise ValueError("fal pricing model is not approved")
+        params = [("endpoint_id", model_id) for model_id in model_ids]
+        try:
+            async with httpx.AsyncClient(
+                base_url="https://api.fal.ai/v1",
+                timeout=15.0,
+                follow_redirects=False,
+            ) as client:
+                response = await client.get(
+                    "https://api.fal.ai/v1/models/pricing",
+                    params=params,
+                    headers={
+                        "Authorization": f"Key {api_key}",
+                        "Accept": "application/json",
+                    },
+                )
+        except httpx.HTTPError as exc:
+            raise RuntimeError("media_provider_pricing_unavailable") from exc
+        if response.status_code != 200 or len(response.content) > 262_144:
+            raise RuntimeError("media_provider_pricing_unavailable")
+        try:
+            payload = response.json()
+            prices = payload["prices"]
+            if (
+                not isinstance(prices, list)
+                or payload.get("has_more") is not False
+                or payload.get("next_cursor") is not None
+            ):
+                raise ValueError
+            parsed = [MediaProviderPrice.model_validate(item) for item in prices]
+            endpoint_ids = [price.endpoint_id for price in parsed]
+            if len(set(endpoint_ids)) != len(endpoint_ids):
+                raise ValueError
+            return parsed
+        except Exception as exc:
+            raise RuntimeError("media_provider_pricing_invalid") from exc
 
     async def probe(
         self,

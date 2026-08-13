@@ -6,6 +6,7 @@ import pytest
 
 from app.integrations.fal_media import (
     FalMediaAdapter,
+    FalMediaProviderControl,
     MediaProviderError,
     MediaQueueState,
 )
@@ -401,6 +402,85 @@ async def test_fal_probe_treats_documented_queue_404_as_authenticated_reachabili
     assert probe.reachable is True
     assert denied.ready is False
     assert denied.issues == ["provider_authentication_failed"]
+
+
+@pytest.mark.asyncio
+async def test_fal_pricing_uses_fixed_platform_origin_and_account_key(monkeypatch):
+    observed = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["url"] = str(request.url)
+        observed["authorization"] = request.headers["Authorization"]
+        return httpx.Response(
+            200,
+            json={
+                "prices": [
+                    {
+                        "endpoint_id": MODEL_ID,
+                        "unit_price": 0.4,
+                        "unit": "second",
+                        "currency": "USD",
+                    }
+                ],
+                "next_cursor": None,
+                "has_more": False,
+            },
+        )
+
+    real_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "app.integrations.fal_media.httpx.AsyncClient",
+        lambda **_kwargs: real_client,
+    )
+
+    prices = await FalMediaProviderControl(capability_catalog()).discover_pricing(
+        api_key="provider-secret",
+        model_ids=[MODEL_ID],
+    )
+
+    assert observed["url"] == (
+        "https://api.fal.ai/v1/models/pricing?endpoint_id="
+        "fal-ai%2Facme-video%2Ftext-to-video"
+    )
+    assert observed["authorization"] == "Key provider-secret"
+    assert prices[0].endpoint_id == MODEL_ID
+    assert prices[0].unit_price == Decimal("0.4")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["pagination", "duplicate", "oversized"])
+async def test_fal_pricing_rejects_ambiguous_or_oversized_responses(
+    monkeypatch,
+    mutation,
+):
+    price = {
+        "endpoint_id": MODEL_ID,
+        "unit_price": 0.4,
+        "unit": "second",
+        "currency": "USD",
+    }
+    payload = {
+        "prices": [price, price] if mutation == "duplicate" else [price],
+        "next_cursor": "more" if mutation == "pagination" else None,
+        "has_more": mutation == "pagination",
+    }
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        if mutation == "oversized":
+            return httpx.Response(200, content=b"{" + b"x" * 262_145 + b"}")
+        return httpx.Response(200, json=payload)
+
+    real_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "app.integrations.fal_media.httpx.AsyncClient",
+        lambda **_kwargs: real_client,
+    )
+
+    with pytest.raises(RuntimeError, match="pricing"):
+        await FalMediaProviderControl(capability_catalog()).discover_pricing(
+            api_key="provider-secret",
+            model_ids=[MODEL_ID],
+        )
 
 
 @pytest.mark.asyncio

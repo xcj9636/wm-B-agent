@@ -10,8 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.integrations.fal_media import MediaProviderResult
-from app.models.database import MediaGenerationJob, MediaProviderUsageReceipt
+from app.models.database import (
+    MediaGenerationJob,
+    MediaProviderUsageReceipt,
+    MediaRuntimeRevision,
+)
 from app.services.idempotency import canonical_hash
+from app.services.media.runtime import MediaPricingSnapshot
 
 
 class MediaUsageReceiptConflict(RuntimeError):
@@ -115,3 +120,59 @@ class MediaUsageReceiptService:
         if value.tzinfo is None:
             return value
         return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+class MediaUsagePricingService:
+    """Convert provider units using only the job's immutable price snapshot."""
+
+    basis = "pinned_provider_usage"
+
+    def __init__(self, db: Session):
+        self._db = db
+
+    def actual_cost_microusd(self, job: MediaGenerationJob) -> int:
+        receipt = (
+            self._db.query(MediaProviderUsageReceipt)
+            .filter(MediaProviderUsageReceipt.job_id == job.id)
+            .with_for_update()
+            .one_or_none()
+        )
+        revision = self._db.get(MediaRuntimeRevision, job.runtime_revision_id)
+        if receipt is None or revision is None:
+            raise MediaUsageReceiptConflict("media pricing evidence is missing")
+        try:
+            raw_snapshot = dict(revision.pricing_snapshot or {})
+            if canonical_hash(raw_snapshot) != revision.pricing_snapshot_hash:
+                raise MediaUsageReceiptConflict("media pricing snapshot changed")
+            snapshot = MediaPricingSnapshot.model_validate(raw_snapshot)
+            price = snapshot.models.get(job.model_id)
+            if price is None:
+                raise MediaUsageReceiptConflict("media model price is missing")
+            exact_cost = receipt.billable_units * price.unit_price_microusd
+            integral = exact_cost.to_integral_value()
+            if exact_cost != integral:
+                raise MediaUsageReceiptConflict("media cost precision is unsafe")
+            cost = int(integral)
+            if cost < 0 or cost > job.reserved_cost_microusd:
+                raise MediaUsageReceiptConflict("media cost exceeds reservation")
+            if receipt.pricing_status == "priced":
+                if (
+                    receipt.pricing_snapshot_hash
+                    != revision.pricing_snapshot_hash
+                    or receipt.unit_price_microusd != price.unit_price_microusd
+                    or receipt.cost_microusd != cost
+                ):
+                    raise MediaUsageReceiptConflict("priced media receipt changed")
+                return cost
+            if receipt.pricing_status != "unpriced":
+                raise MediaUsageReceiptConflict("media pricing state is invalid")
+        except MediaUsageReceiptConflict:
+            raise
+        except Exception as exc:
+            raise MediaUsageReceiptConflict("media pricing evidence is invalid") from exc
+        receipt.pricing_status = "priced"
+        receipt.pricing_snapshot_hash = revision.pricing_snapshot_hash
+        receipt.unit_price_microusd = price.unit_price_microusd
+        receipt.cost_microusd = cost
+        self._db.commit()
+        return cost

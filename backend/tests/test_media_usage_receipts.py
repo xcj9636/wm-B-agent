@@ -172,17 +172,32 @@ def test_pinned_pricing_fails_closed_for_untrusted_or_unsafe_amount(
     if mutation == "hash":
         revision.pricing_snapshot_hash = "0" * 64
     elif mutation == "missing":
-        revision.pricing_snapshot["models"] = {}
+        revision.pricing_snapshot = {
+            **revision.pricing_snapshot,
+            "models": {},
+        }
     elif mutation == "fraction":
-        revision.pricing_snapshot["models"][job.model_id][
-            "unit_price_microusd"
-        ] = 333_333
+        revision.pricing_snapshot = {
+            **revision.pricing_snapshot,
+            "models": {
+                job.model_id: {
+                    "unit": "second",
+                    "unit_price_microusd": 333_333,
+                }
+            },
+        }
         receipt = db_session.query(MediaProviderUsageReceipt).one()
         receipt.billable_units = Decimal("0.000000001")
     else:
-        revision.pricing_snapshot["models"][job.model_id][
-            "unit_price_microusd"
-        ] = 600_000
+        revision.pricing_snapshot = {
+            **revision.pricing_snapshot,
+            "models": {
+                job.model_id: {
+                    "unit": "second",
+                    "unit_price_microusd": 600_000,
+                }
+            },
+        }
     db_session.commit()
 
     with pytest.raises(MediaUsageReceiptConflict):

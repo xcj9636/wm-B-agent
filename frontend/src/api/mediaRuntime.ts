@@ -33,6 +33,8 @@ export interface MediaRuntimeRevision {
   model_aliases: Partial<Record<MediaWorkflowMode, string>>
   capability_snapshot: MediaCapabilityCatalog
   capability_snapshot_hash: string
+  pricing_configured: boolean
+  pricing_snapshot_hash: string
   api_key_configured: boolean
   latest_probe?: MediaRuntimeProbe
   created_at: string
