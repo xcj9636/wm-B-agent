@@ -227,6 +227,7 @@ def install_live_submission(db_session, *, consent_required=False):
         "scan": scan,
         "rights": rights,
         "consent": consent,
+        "consent_evidence": evidence if consent_required else None,
         "intent": intent,
         "job": job,
     }
@@ -314,6 +315,18 @@ def test_cross_deployment_org_and_tampered_project_snapshot_are_rejected(db_sess
     service, _ = authorizer(db_session, uuid4())
     with pytest.raises(MediaSubmissionAuthorizationDenied):
         service.authorize(state["job"], state["intent"], now=NOW)
+
+
+def test_consent_evidence_must_remain_live_scanned_and_same_org(db_session):
+    state = install_live_submission(db_session, consent_required=True)
+    state["consent_evidence"].deleted_at = NOW.replace(tzinfo=None)
+    db_session.commit()
+    service, _ = authorizer(db_session, state["org_id"])
+
+    with pytest.raises(MediaPolicyDenied) as exc:
+        service.authorize(state["job"], state["intent"], now=NOW)
+
+    assert "asset_consent_invalid" in exc.value.reason_codes
 
     service, _ = authorizer(db_session, state["org_id"])
     state["project"].persona_spec_hash = "0" * 64
