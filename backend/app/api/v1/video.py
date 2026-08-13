@@ -972,7 +972,7 @@ async def get_media_generation_job(
 )
 async def list_media_generation_job_events(
     job_id: UUID,
-    after_sequence: int = Query(default=0, ge=0),
+    after_sequence: int = Query(default=0, ge=0, le=2**63 - 1),
     limit: int = Query(default=50, ge=1, le=100),
     current_user: User = Depends(get_current_active_user),
     access: MediaGenerationJobAccessService = Depends(
@@ -1018,7 +1018,7 @@ async def stream_media_generation_job_events(
 ):
     try:
         cursor = int(last_event_id) if last_event_id is not None else 0
-        if cursor < 0:
+        if cursor < 0 or cursor > 2**63 - 1:
             raise ValueError
         job = access.get(
             job_id,
