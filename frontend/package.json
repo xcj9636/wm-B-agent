@@ -1,6 +1,7 @@
 {
   "name": "trade-ai-agent-frontend",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "Trade AI Agent - Frontend Management Panel",
   "type": "module",
   "scripts": {

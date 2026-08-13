@@ -1,13 +1,6 @@
-# Third-party notices
-
-## OmniRoute
-
-Source: https://github.com/diegosouzapw/OmniRoute
-Candidate integration line: `release/v3.8.50`
-
 MIT License
 
-Copyright (c) 2026 diegosouzapw
+Copyright (c) 2026 EricHong123
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-## B-agent project license
-
-B-agent is licensed under the MIT License:
-
-Copyright (c) 2026 EricHong123
-
-The complete project-level license is included in the repository root at
-`LICENSE`. These notices do not replace or modify the licenses and terms that
-apply to third-party dependencies, models, data, fonts, media assets, or hosted
-services.

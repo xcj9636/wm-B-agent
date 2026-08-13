@@ -620,4 +620,6 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 
 ## 许可证
 
-许可证和商业分发方式尚待项目所有者确认。在许可证明确前，请勿将本仓库视为已授予公开再分发权。
+本项目采用 [MIT License](LICENSE)，Copyright (c) 2026 EricHong123。
+
+MIT 许可证允许商业使用、修改、分发、再许可和销售，但复制或分发本软件及其重要部分时必须保留版权声明和许可证声明。软件按“原样”提供，不附带任何明示或暗示担保。第三方组件、模型、数据、字体、媒体资产和服务仍分别受其自身许可证及服务条款约束，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
