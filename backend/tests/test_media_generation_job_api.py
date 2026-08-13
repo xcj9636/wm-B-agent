@@ -274,3 +274,62 @@ def test_event_cursor_is_strictly_bounded(api_context):
         f"/api/v1/video/generation-jobs/{job.id}/events",
         params={"limit": 101},
     ).status_code == 422
+
+
+def test_job_event_stream_replays_safe_events_from_last_event_id(api_context):
+    client, db, user = api_context
+    job = stored_job(db, user.id)
+
+    response = client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events/stream",
+        headers={"Accept": "text/event-stream", "Last-Event-ID": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache, no-store"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.headers["x-media-job-status"] == "queued"
+    assert "id: 2\n" in response.text
+    assert "event: job.failed\n" in response.text
+    assert 'data: {"error_code":"provider_failed","created_at":' in response.text
+    assert "id: 1\n" not in response.text
+    assert "private-request-id" not in response.text
+    assert "private-prompt" not in response.text
+
+
+def test_job_event_stream_heartbeats_and_validates_resume_cursor(api_context):
+    client, db, user = api_context
+    job = stored_job(db, user.id)
+    stream_url = f"/api/v1/video/generation-jobs/{job.id}/events/stream"
+
+    heartbeat = client.get(stream_url, headers={"Last-Event-ID": "2"})
+    invalid = client.get(stream_url, headers={"Last-Event-ID": "not-a-number"})
+    negative = client.get(stream_url, headers={"Last-Event-ID": "-1"})
+
+    assert heartbeat.status_code == 200
+    assert "event: heartbeat\n" in heartbeat.text
+    assert 'data: {"status":"queued","next_sequence":2}' in heartbeat.text
+    assert invalid.status_code == 422
+    assert negative.status_code == 422
+    assert "Last-Event-ID must be a non-negative integer" in invalid.text
+
+
+def test_job_event_stream_hides_other_owner(api_context):
+    client, db, owner = api_context
+    job = stored_job(db, owner.id)
+    other = User(
+        username=f"stream-other-{uuid4()}",
+        email=f"stream-other-{uuid4()}@example.com",
+        hashed_password="unused",
+        is_active=True,
+    )
+    db.add(other)
+    db.commit()
+    app.dependency_overrides[get_current_active_user] = lambda: other
+
+    response = client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events/stream"
+    )
+
+    assert response.status_code == 404
