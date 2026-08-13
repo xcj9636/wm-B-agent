@@ -48,6 +48,8 @@ class FakeMediaRuntimeService:
             },
             capability_snapshot=self.catalog,
             capability_snapshot_hash="a" * 64,
+            pricing_configured=True,
+            pricing_snapshot_hash="b" * 64,
             api_key_configured=True,
             created_at=datetime(2026, 8, 11, tzinfo=timezone.utc),
         )
@@ -131,6 +133,9 @@ def test_media_runtime_admin_can_create_probe_and_activate_revision(api_context)
     assert capabilities.json()["schema_version"] == "curated-2026-08-11"
     assert created.status_code == 201
     assert "write-only-secret" not in created.text
+    assert created.json()["pricing_configured"] is True
+    assert created.json()["pricing_snapshot_hash"] == "b" * 64
+    assert "unit_price" not in created.text
     assert runtime.created[1] == user.id
     assert probed.json()["ready"] is True
     assert runtime.probed == (runtime.revision_id, user.id)

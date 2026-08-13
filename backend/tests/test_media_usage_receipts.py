@@ -5,8 +5,14 @@ from uuid import uuid4
 import pytest
 
 from app.integrations.fal_media import MediaOutput, MediaProviderResult
-from app.models.database import MediaGenerationJob, MediaProviderUsageReceipt
+from app.models.database import (
+    MediaGenerationJob,
+    MediaProviderUsageReceipt,
+    MediaRuntimeRevision,
+)
+from app.services.idempotency import canonical_hash
 from app.services.media.usage_receipts import (
+    MediaUsagePricingService,
     MediaUsageReceiptConflict,
     MediaUsageReceiptService,
 )
@@ -16,13 +22,42 @@ NOW = datetime(2026, 8, 13, 16, 0, tzinfo=timezone.utc)
 
 
 def submitted_job(db_session):
-    job = MediaGenerationJob(
+    pricing = {
+        "schema_version": "fal-pricing-v1",
+        "provider": "fal",
+        "currency": "USD",
+        "models": {
+            "fal-ai/veo3/fast": {
+                "unit": "second",
+                "unit_price_microusd": 400_000,
+            }
+        },
+    }
+    revision = MediaRuntimeRevision(
         org_id=uuid4(),
+        revision=1,
+        provider="fal",
+        enabled_modes=["text_to_video"],
+        model_aliases={"text_to_video": "fal-ai/veo3/fast"},
+        capability_snapshot={
+            "provider": "fal",
+            "schema_version": "fixture-v1",
+            "models": [],
+        },
+        capability_snapshot_hash="a" * 64,
+        pricing_snapshot=pricing,
+        pricing_snapshot_hash=canonical_hash(pricing),
+        created_by_user_id=7,
+    )
+    db_session.add(revision)
+    db_session.flush()
+    job = MediaGenerationJob(
+        org_id=revision.org_id,
         owner_user_id=7,
         project_id=uuid4(),
         storyboard_version_id=uuid4(),
         shot_id=uuid4(),
-        runtime_revision_id=uuid4(),
+        runtime_revision_id=revision.id,
         idempotency_key=f"media-usage:{uuid4()}",
         input_hash="a" * 64,
         intent_hash="b" * 64,
@@ -100,6 +135,58 @@ def test_usage_receipt_replay_is_idempotent_but_conflict_fails_closed(db_session
             now=NOW,
         )
     assert db_session.query(MediaProviderUsageReceipt).count() == 1
+
+
+def test_pinned_pricing_converts_usage_to_exact_cost_once(db_session):
+    job = submitted_job(db_session)
+    MediaUsageReceiptService(db_session).record(
+        job=job,
+        provider_result=provider_result(units="5.25"),
+        now=NOW,
+    )
+
+    cost = MediaUsagePricingService(db_session).actual_cost_microusd(job)
+    replay = MediaUsagePricingService(db_session).actual_cost_microusd(job)
+
+    receipt = db_session.query(MediaProviderUsageReceipt).one()
+    assert cost == 2_100_000
+    assert replay == cost
+    assert receipt.pricing_status == "priced"
+    assert receipt.unit_price_microusd == 400_000
+    assert receipt.cost_microusd == cost
+    assert receipt.pricing_snapshot_hash is not None
+
+
+@pytest.mark.parametrize("mutation", ["hash", "missing", "fraction", "ceiling"])
+def test_pinned_pricing_fails_closed_for_untrusted_or_unsafe_amount(
+    db_session,
+    mutation,
+):
+    job = submitted_job(db_session)
+    MediaUsageReceiptService(db_session).record(
+        job=job,
+        provider_result=provider_result(units="5"),
+        now=NOW,
+    )
+    revision = db_session.get(MediaRuntimeRevision, job.runtime_revision_id)
+    if mutation == "hash":
+        revision.pricing_snapshot_hash = "0" * 64
+    elif mutation == "missing":
+        revision.pricing_snapshot["models"] = {}
+    elif mutation == "fraction":
+        revision.pricing_snapshot["models"][job.model_id][
+            "unit_price_microusd"
+        ] = 333_333
+        receipt = db_session.query(MediaProviderUsageReceipt).one()
+        receipt.billable_units = Decimal("0.000000001")
+    else:
+        revision.pricing_snapshot["models"][job.model_id][
+            "unit_price_microusd"
+        ] = 600_000
+    db_session.commit()
+
+    with pytest.raises(MediaUsageReceiptConflict):
+        MediaUsagePricingService(db_session).actual_cost_microusd(job)
 
 
 @pytest.mark.parametrize("mutation", ["request", "model", "provider", "status"])

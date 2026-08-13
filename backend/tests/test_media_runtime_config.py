@@ -1,4 +1,5 @@
 import stat
+from decimal import Decimal
 
 import pytest
 
@@ -6,6 +7,7 @@ from app.config import Settings
 from app.services.media.runtime import (
     MediaCapabilityCatalog,
     MediaModelCapability,
+    MediaProviderPrice,
     MediaProviderProbe,
     MediaRuntimeRevisionCreate,
     MediaRuntimeService,
@@ -17,6 +19,7 @@ class FakeMediaProviderControl:
     def __init__(self) -> None:
         self.discover_calls: list[str] = []
         self.probe_ready = True
+        self.pricing_calls = []
 
     async def discover_capabilities(self, api_key: str) -> MediaCapabilityCatalog:
         self.discover_calls.append(api_key)
@@ -53,6 +56,22 @@ class FakeMediaProviderControl:
             reachable=True,
             issues=[] if self.probe_ready else ["provider_probe_failed"],
         )
+
+    async def discover_pricing(self, *, api_key, model_ids):
+        self.pricing_calls.append((api_key, tuple(model_ids)))
+        prices = {
+            "fal-ai/acme-image": (Decimal("0.025"), "image"),
+            "fal-ai/acme-video": (Decimal("0.40"), "second"),
+        }
+        return [
+            MediaProviderPrice(
+                endpoint_id=model_id,
+                unit_price=prices[model_id][0],
+                unit=prices[model_id][1],
+                currency="USD",
+            )
+            for model_id in model_ids
+        ]
 
 
 def runtime_settings(tmp_path, **overrides) -> Settings:
@@ -142,14 +161,59 @@ async def test_media_runtime_revisions_are_immutable_and_activation_is_explicit(
         MediaWorkflowMode.IMAGE_TO_VIDEO: "fal-ai/acme-video"
     }
     assert first.capability_snapshot_hash == second.capability_snapshot_hash
+    assert first.pricing_configured is True
+    assert len(first.pricing_snapshot_hash) == 64
     assert provider.discover_calls == ["write-only-secret", "write-only-secret"]
+    assert provider.pricing_calls == [
+        (
+            "write-only-secret",
+            ("fal-ai/acme-image", "fal-ai/acme-video"),
+        ),
+        ("write-only-secret", ("fal-ai/acme-video",)),
+    ]
 
     secret_files = list((tmp_path / "media-runtime").glob("*.key"))
     assert len(secret_files) == 2
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in secret_files)
     serialized = first.model_dump_json() + second.model_dump_json()
     assert "write-only-secret" not in serialized
+    assert "unit_price" not in serialized
+    assert "400000" not in serialized
     assert str(tmp_path) not in serialized
+
+
+@pytest.mark.asyncio
+async def test_runtime_creation_fails_closed_when_account_pricing_is_incomplete(
+    api_context,
+    tmp_path,
+):
+    _, db, user = api_context
+    provider = FakeMediaProviderControl()
+
+    async def incomplete(**_kwargs):
+        return [
+            MediaProviderPrice(
+                endpoint_id="fal-ai/acme-image",
+                unit_price=Decimal("0.025"),
+                unit="image",
+                currency="USD",
+            )
+        ]
+
+    provider.discover_pricing = incomplete
+    service = MediaRuntimeService(
+        db,
+        runtime_settings(tmp_path),
+        provider_control=provider,
+    )
+
+    with pytest.raises(ValueError, match="pricing"):
+        await service.create_revision(
+            revision_command(),
+            created_by_user_id=user.id,
+        )
+
+    assert service.list_revisions() == []
 
 
 @pytest.mark.asyncio
