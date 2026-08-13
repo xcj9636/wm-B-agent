@@ -254,6 +254,31 @@ class MediaGenerationJobService:
         self._db.refresh(attempt)
         return attempt
 
+    def fail_before_submission(
+        self,
+        job_id: UUID,
+        *,
+        worker_id: str,
+        fencing_token: int,
+        error_code: str,
+        now: datetime,
+    ) -> MediaGenerationJob:
+        """Fail a leased job only while no external effect can have occurred."""
+        now = self._naive_utc(now)
+        job = self._leased_job(job_id, worker_id, fencing_token, now)
+        if job.effect_state != "none" or job.attempts:
+            raise MediaJobLeaseConflict("media submission effect already started")
+        safe_code = self._safe_error_code(error_code)
+        job.status = "failed"
+        job.error_code = safe_code
+        job.completed_at = now
+        job.updated_at = now
+        self._release_budget(job, now)
+        self._clear_lease(job)
+        self._append_event(job, "job.failed", {"error_code": safe_code}, now)
+        self._db.commit()
+        return job
+
     def record_submitted(
         self,
         job_id: UUID,
