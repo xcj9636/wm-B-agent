@@ -7,7 +7,16 @@ import json
 from typing import Callable, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -996,6 +1005,78 @@ async def list_media_generation_job_events(
             status_code=404,
             detail="Media generation job not found",
         ) from exc
+
+
+@router.get("/generation-jobs/{job_id}/events/stream")
+async def stream_media_generation_job_events(
+    job_id: UUID,
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+    current_user: User = Depends(get_current_active_user),
+    access: MediaGenerationJobAccessService = Depends(
+        get_media_generation_job_access
+    ),
+):
+    try:
+        cursor = int(last_event_id) if last_event_id is not None else 0
+        if cursor < 0:
+            raise ValueError
+        job = access.get(
+            job_id,
+            org_id=settings.AGENT_ORG_ID,
+            user_id=current_user.id,
+            is_admin=bool(current_user.is_superuser),
+        )
+        events, next_sequence = access.list_events(
+            job_id,
+            org_id=settings.AGENT_ORG_ID,
+            user_id=current_user.id,
+            is_admin=bool(current_user.is_superuser),
+            after_sequence=cursor,
+            limit=100,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Last-Event-ID must be a non-negative integer",
+        ) from exc
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Media generation job not found",
+        ) from exc
+
+    def replay():
+        if not events:
+            payload = json.dumps(
+                {"status": job.status, "next_sequence": next_sequence},
+                separators=(",", ":"),
+            )
+            yield f"event: heartbeat\ndata: {payload}\n\n"
+            return
+        for event in events:
+            payload = json.dumps(
+                {
+                    **event.data,
+                    "created_at": event.created_at.isoformat(),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            yield (
+                f"id: {event.sequence}\n"
+                f"event: {event.event_type}\n"
+                f"data: {payload}\n\n"
+            )
+
+    return StreamingResponse(
+        replay(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "X-Accel-Buffering": "no",
+            "X-Media-Job-Status": job.status,
+        },
+    )
 
 
 @router.post(
