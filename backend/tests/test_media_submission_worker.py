@@ -9,6 +9,7 @@ from app.services.media.policy import MediaPolicyDenied
 from app.services.media.submission_authorizer import (
     MediaSubmissionAuthorizationDenied,
 )
+from app.services.media.submission import MediaIntentMismatch
 from app.services.media.submission_worker import run_media_submission_batch
 from app.services.media.worker_runtime import MediaRuntimeUnavailable
 
@@ -86,13 +87,16 @@ class FakeRuntimeFactory:
 
 
 class FakeCoordinator:
-    def __init__(self, adapter, results, calls):
+    def __init__(self, adapter, results, calls, *, failure=None):
         self.adapter = adapter
         self.results = results
         self.calls = calls
+        self.failure = failure
 
     async def submit_claimed(self, job_id, **kwargs):
         self.calls.append((job_id, kwargs, self.adapter.job_id))
+        if self.failure is not None:
+            raise self.failure
         return self.results.get(
             job_id,
             SimpleNamespace(status="submitted"),
@@ -234,6 +238,35 @@ async def test_runtime_unavailable_is_deferred_without_false_terminal_failure():
     assert result["deferred"] == 1
     assert result["claimed"] == 1
     assert "secret" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_unsupported_or_mismatched_intent_fails_before_effect():
+    target = job(7)
+    service = FakeJobs([target])
+    closed = []
+
+    result = await run_media_submission_batch(
+        jobs=service,
+        vault=FakeVault(),
+        authorizer=FakeAuthorizer(),
+        runtime_factory=FakeRuntimeFactory(closed),
+        coordinator_builder=lambda adapter: FakeCoordinator(
+            adapter,
+            {},
+            [],
+            failure=MediaIntentMismatch("prompt must not leak"),
+        ),
+        worker_id="media-submit-a",
+        now=NOW,
+        batch_size=1,
+        lease_seconds=300,
+    )
+
+    assert service.failures[0][1]["error_code"] == "media_intent_mismatch"
+    assert result["failed_before_submission"] == 1
+    assert closed == [target.id]
+    assert "prompt" not in repr(result)
 
 
 @pytest.mark.asyncio
