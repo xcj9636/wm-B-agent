@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -140,12 +141,23 @@ class FakeCostResolver:
         return 2_000_000
 
 
+class FakeUsageRecorder:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def record(self, *, job, provider_result, now):
+        self.calls.append(
+            ("usage.record", str(job.id), provider_result.billable_units)
+        )
+
+
 def coordinator(db_session, calls, *, status, result=None, ingest_failure=None):
     return MediaReconciliationCoordinator(
         db_session,
         reconciliation=FakeReconciliation(db_session, calls),
         adapter=FakeAdapter(calls, status=status, result=result),
         ingestor=FakeIngestor(calls, failure=ingest_failure),
+        usage_recorder=FakeUsageRecorder(calls),
         cost_resolver=FakeCostResolver(calls),
         poll_after_seconds=15,
         retry_after_seconds=30,
@@ -177,6 +189,9 @@ async def test_completed_result_is_ingested_before_terminal_settlement(db_sessio
     calls = []
     job = claimed_job(db_session)
     provider_result = MediaProviderResult(
+        provider_request_id=job.provider_request_id,
+        model_id=job.model_id,
+        billable_units=Decimal("8"),
         outputs=[
             MediaOutput(
                 url="https://v3.fal.media/files/output.mp4",
@@ -201,6 +216,7 @@ async def test_completed_result_is_ingested_before_terminal_settlement(db_sessio
     assert [call[0] for call in calls] == [
         "provider.status",
         "provider.result",
+        "usage.record",
         "quarantine.ingest",
         "cost.resolve",
         "jobs.succeeded",

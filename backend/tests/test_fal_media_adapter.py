@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -197,6 +198,7 @@ async def test_fal_result_returns_only_validated_provider_media_urls():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
+            headers={"X-Fal-Billable-Units": "5.25"},
             json={
                 "video": {
                     "url": "https://v3.fal.media/files/video.mp4",
@@ -218,7 +220,34 @@ async def test_fal_result_returns_only_validated_provider_media_urls():
     assert len(result.outputs) == 1
     assert result.outputs[0].url == "https://v3.fal.media/files/video.mp4"
     assert result.outputs[0].content_type == "video/mp4"
+    assert result.provider_request_id == "request-1"
+    assert result.model_id == MODEL_ID
+    assert result.billable_units == Decimal("5.25")
     assert "prompt" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_units",
+    [None, "", "-1", "+1", "01", "1e3", "nan", "1.1234567890"],
+)
+async def test_fal_result_rejects_missing_or_ambiguous_billable_units(raw_units):
+    def handler(_request: httpx.Request) -> httpx.Response:
+        headers = {} if raw_units is None else {"X-Fal-Billable-Units": raw_units}
+        return httpx.Response(
+            200,
+            headers=headers,
+            json={"video": {"url": "https://v3.fal.media/files/video.mp4"}},
+        )
+
+    client = adapter(handler)
+    try:
+        with pytest.raises(MediaProviderError) as invalid:
+            await client.result(model_id=MODEL_ID, request_id="request-1")
+    finally:
+        await client.aclose()
+
+    assert invalid.value.error_code == "invalid_provider_billing_receipt"
 
 
 @pytest.mark.asyncio
@@ -234,7 +263,11 @@ async def test_fal_result_fails_closed_for_unapproved_or_private_media_urls(
     resolver,
 ):
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"video": {"url": url}})
+        return httpx.Response(
+            200,
+            headers={"X-Fal-Billable-Units": "1"},
+            json={"video": {"url": url}},
+        )
 
     client = adapter(handler, resolver=resolver)
     try:
@@ -325,6 +358,7 @@ async def test_fal_completed_status_keeps_only_safe_metrics():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
+            headers={"X-Fal-Billable-Units": "1"},
             json={
                 "status": "COMPLETED",
                 "metrics": {"inference_time": 3.42, "private_metric": "drop"},
