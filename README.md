@@ -54,6 +54,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **持久媒体生成任务**：Generation Job/Attempt/Event、月度微美元预算预留与 append-only 账本、提交与对账双 fencing、运行时版本固定、终态单调转换，以及禁止自动重发的 `submission_unknown` 协调边界；provider 完成后必须先获得隔离摄取回执才能结算成功。
 - **Provider 结果隔离摄取**：对 fal 输出重新执行允许域和 DNS 校验，并核对实际 socket peer；拒绝重定向、私网地址、未知 MIME、超限和截断响应，使用 `0600` 临时文件计算 SHA-256 后幂等写入 S3 quarantine，生成资产保持待扫描/版权/同意复核状态。
 - **媒体对账 Worker**：Celery Beat 按配置唤醒 submitted Job；Worker 逐个即时领取、递增 fencing，严格重建任务固定的 runtime revision，安全读取逐版本密钥，查询 fal 状态并把完成结果摄取到隔离区。读取失败只退避重试，不重发生成请求。
+- **提交不确定态人工协调**：`submission_unknown` 只能由两名不同超级管理员基于白名单证据引用确认；确认已提交时绑定全局唯一 provider request ID 并进入安全对账，确认未提交时终止任务并仅释放预留预算，两个路径都不会自动重发。
 - **Video Studio**：中英文创建 Persona、项目和单 Shot 分镜，查看版本与证据，执行管理员审批；所有请求自动使用设置页可热切换的后端地址。
 
 ### 当前能力边界
@@ -62,7 +63,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 |---|---|
 | 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
 | 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime、fal 异步队列适配器、持久 Generation Job/Attempt/Event 与原子预算账本 |
-| 后续产品化重点 | 媒体提交 Worker、回调 inbox、人工处理 `submission_unknown`、可信成本回执解析、Job API/SSE、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
+| 后续产品化重点 | 媒体提交 Worker、认证回调 inbox、可信成本回执解析、Job API/SSE、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -508,6 +509,7 @@ http://localhost:8000/api/v1/mailboxes/oauth/callback/outlook
 | 连接器 | `/api/v1/connectors` | 管理员连接器目录、测试和启停 |
 | 运维 | `/api/v1/admin` | 网关状态、可靠执行、死信与双人审批 |
 | 媒体运行时 | `/api/v1/admin/media/runtime` | 管理员查看能力目录、创建 revision、探测并对新任务激活 |
+| 媒体异常协调 | `/api/v1/admin/media/jobs/{job_id}/submission-unknown/resolution-approvals` | 两名不同超级管理员基于受限证据引用确认未知提交是否真实发生 |
 
 接口字段和当前响应模型以运行中的 <http://localhost:8000/docs> 为准。
 
@@ -523,7 +525,7 @@ npm run lint:check
 npm run build
 ```
 
-最近的完整工程验证基线（2026-08-12，`b-agent-enterprise-platform`）：后端 `542 passed, 1 skipped`；前端最近基线 `47 passed`；`docker compose config --quiet` 通过。新增 pinned runtime 与 reconciliation worker 两个核心模块的合并覆盖率为 89%。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
+最近的完整工程验证基线（2026-08-13，`b-agent-enterprise-platform`）：后端 `548 passed, 2 skipped`；前端最近基线 `47 passed`；`docker compose config --quiet` 通过。新增提交不确定态协调服务覆盖率为 97%；两个跳过项需要 PostgreSQL 测试库执行行锁并发验证。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
@@ -574,7 +576,8 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - fal API Key 按 runtime revision 写入后端 `0600` 文件，数据库与 API 只保存配置和 `api_key_configured`；对账 Worker 使用 `O_NOFOLLOW` 和打开后的文件元数据复核阻断符号链接替换。Provider 返回的控制 URL 不被信任，队列 URL 始终由固定 origin 与已批准模型 ID 构造。
 - 对账 Worker 不读取“当前激活”指针，而只使用 Job 提交时固定的 revision、能力快照 hash、模式与模型别名；逐个即时领取避免大文件下载耗尽批次中后续任务的租约。
 - 当前成本结算器的 basis 是 `reserved_estimate_ceiling`：它使用任务预留估算上限，不代表 fal 实际账单。可信 Provider 成本回执及差额核销完成前，界面和报表不得展示为“实际成本”。
-- `MEDIA_SUBMIT_ENABLED` 仍默认关闭；对账 Worker、固定运行时装配、fenced poll、实际 peer 校验和 S3 结果隔离已落地，但生产开放仍要等待提交 Worker、回调认证、可信成本回执、`submission_unknown` 人工协调和故障注入验收。
+- `submission_unknown` 不提供直接重试操作；协调结论需要两名不同超级管理员，证据引用仅允许 `provider-audit/`、`provider-support/` 或 `billing-audit/`，API 响应与 Job Event 不回显证据路径。
+- `MEDIA_SUBMIT_ENABLED` 仍默认关闭；对账 Worker、固定运行时装配、fenced poll、实际 peer 校验、S3 结果隔离和 `submission_unknown` 人工协调已落地，但生产开放仍要等待提交 Worker、回调认证、可信成本回执和故障注入验收。
 - 不要提交 `.env`、OAuth 凭据、导出客户数据或 `data/secrets` 内容。
 
 ## 相关文档

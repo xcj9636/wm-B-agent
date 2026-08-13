@@ -1,7 +1,7 @@
 # B-agent 视频生成 Persona 与媒体生产链路蓝图
 
-> 状态：Step 1-4 已实现；Step 5 持久 Job、预算、安全提交、pinned runtime 对账 Worker 与 S3 结果隔离已实现，提交 Worker/回调待完成
-> 日期：2026-08-12
+> 状态：Step 1-4 已实现；Step 5 持久 Job、预算、安全提交、pinned runtime 对账 Worker、S3 结果隔离与未知提交人工协调已实现，提交 Worker/回调待完成
+> 日期：2026-08-13
 > 范围：视频 Persona、文生图、图生视频、文生视频、参考素材生成、媒体资产、异步任务、成本与并发、安全合规、前端视频工坊  
 > 实施原则：业务核心 provider-neutral；模型能力动态发现并固定快照；先建资产与安全边界，再开放生成；每一步可独立发布、灰度和回滚。
 
@@ -36,8 +36,10 @@
 - `PinnedMediaRuntimeFactory` 只查询 Job 固定的 revision，不读取当前 activation；它复核组织、provider、能力快照 hash、mode、model alias 和模型能力，并为每个 Job 单独创建/关闭 fal Adapter。密钥使用 `O_NOFOLLOW` 打开并复核普通文件、`0600` 类权限和大小，符号链接或异常文件 fail closed。
 - Worker 对 provider queued/running 做有界轮询，runtime 暂时不可用或读取失败只安排安全重试，不自动重发生成请求；完成结果仍须先通过隔离摄取才能结算成功。
 - 当前 `ReservedEstimateCostResolver` 的证据基础是 `reserved_estimate_ceiling`。它是冻结的预算预留上限，不是供应商实际账单；可信成本回执和差额核销完成前不得对外宣称“实际成本”。
-- 当前验证证据：后端全量 `542 passed, 1 skipped`；pinned runtime 与 reconciliation worker 合并覆盖率 89%；Compose 配置校验通过。此前 `0027 → 0026 → 0027` 迁移往返保持通过。
-- **下一阶段**：完成安全提交 Worker、callback inbox、可信成本回执与人工处理 `submission_unknown`，再开放 Job API/SSE 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
+- 已新增 `0028_media_submission_resolution`、双管理员审批服务和管理 API。`submission_unknown` 不能直接重发：两名不同超级管理员基于供应商审计、支持工单或账单审计引用确认；确认已提交会绑定唯一 request ID 并唤醒对账，确认未提交会取消任务并幂等释放预算。
+- 人工协调按 Job 的 unknown version 固定结论，同一管理员不能重复审批，冲突证据与已被其他 Job 使用的 provider request ID 会让第二次审批事务回滚；响应和审计事件不保存或回显自由文本证据内容。
+- 当前验证证据：后端全量 `548 passed, 2 skipped`；人工协调服务覆盖率 97%；`0027 → 0028 → 0027 → 0028` 迁移往返与 Compose 配置校验通过。两个 PostgreSQL 行锁并发用例在本地无测试库时跳过，必须在 CI/预生产执行。
+- **下一阶段**：完成安全提交 Worker、认证 callback inbox 与可信成本回执，再开放 Job API/SSE、人工协调 UI 与单 Shot 生成编排。字段级数据库加密、真实 fal/S3/FFmpeg 并发、故障注入和容量验收仍属于发布门禁。
 
 ## 1. 执行摘要
 
@@ -503,7 +505,7 @@ AI Chat 增加“创建视频项目”Tool：对话负责收集目标和生成 B
 
 ### Step 5 — 持久化媒体 Job、成本与恢复
 
-- **状态**：核心 Job/Attempt/Event、原子预算、提交/对账双 fencing、PolicyDecision 前置校验、`submission_unknown`、poll fallback、实际 peer 校验与 S3 quarantine 摄取已完成；生产 Worker 装配、回调 inbox 和人工核对待完成
+- **状态**：核心 Job/Attempt/Event、原子预算、提交/对账双 fencing、PolicyDecision 前置校验、`submission_unknown` 双管理员协调、poll fallback、实际 peer 校验与 S3 quarantine 摄取已完成；安全提交 Worker与认证回调 inbox 待完成
 - **分支**：`feature/durable-media-jobs`
 - **依赖**：Step 2 + Step 4
 - **主要文件**：
