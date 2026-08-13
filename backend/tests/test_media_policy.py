@@ -82,6 +82,9 @@ def test_media_features_are_default_off():
     assert config.MEDIA_SUBMIT_BATCH_SIZE == 5
     assert config.MEDIA_SUBMIT_LEASE_SECONDS == 300
     assert config.MEDIA_SUBMIT_POLL_SECONDS == 10
+    assert config.MEDIA_CALLBACK_ENABLED is False
+    assert config.MEDIA_CALLBACK_MAX_BODY_BYTES == 262_144
+    assert config.MEDIA_FAL_WEBHOOK_USER_ID == ""
     assert config.MEDIA_RECONCILE_LEASE_SECONDS == 300
 
 
@@ -143,6 +146,11 @@ def test_settings_reject_media_submission_without_prerequisites():
             MEDIA_SUBMIT_ENABLED=True,
             MEDIA_POLICY_SIGNING_KEY="too-short",
         )
+
+
+def test_media_callback_requires_bound_fal_user_id():
+    with pytest.raises(ValidationError, match="Fal webhook user"):
+        Settings(_env_file=None, MEDIA_CALLBACK_ENABLED=True)
 
 
 def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
