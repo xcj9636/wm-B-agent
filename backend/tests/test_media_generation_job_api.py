@@ -274,6 +274,10 @@ def test_event_cursor_is_strictly_bounded(api_context):
         f"/api/v1/video/generation-jobs/{job.id}/events",
         params={"limit": 101},
     ).status_code == 422
+    assert client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events",
+        params={"after_sequence": 2**63},
+    ).status_code == 422
 
 
 def test_job_event_stream_replays_safe_events_from_last_event_id(api_context):
@@ -306,12 +310,17 @@ def test_job_event_stream_heartbeats_and_validates_resume_cursor(api_context):
     heartbeat = client.get(stream_url, headers={"Last-Event-ID": "2"})
     invalid = client.get(stream_url, headers={"Last-Event-ID": "not-a-number"})
     negative = client.get(stream_url, headers={"Last-Event-ID": "-1"})
+    oversized = client.get(
+        stream_url,
+        headers={"Last-Event-ID": str(2**63)},
+    )
 
     assert heartbeat.status_code == 200
     assert "event: heartbeat\n" in heartbeat.text
     assert 'data: {"status":"queued","next_sequence":2}' in heartbeat.text
     assert invalid.status_code == 422
     assert negative.status_code == 422
+    assert oversized.status_code == 422
     assert "Last-Event-ID must be a non-negative integer" in invalid.text
 
 
