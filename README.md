@@ -53,6 +53,7 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 - **媒体 Provider Runtime**：fal 能力白名单、不可变运行时 revision、逐版本 `0600` 密钥、健康探测与显式激活；队列适配器支持 submit/status/result/cancel，拒绝重定向、未知模型、超限响应和非批准媒体域名。
 - **持久媒体生成任务**：Generation Job/Attempt/Event、月度微美元预算预留与 append-only 账本、提交与对账双 fencing、运行时版本固定、终态单调转换，以及禁止自动重发的 `submission_unknown` 协调边界；provider 完成后必须先获得隔离摄取回执才能结算成功。
 - **安全媒体提交 Worker**：AES-GCM 加密不可变 GenerationIntent，Celery 仅扫描 Job ID；Worker 逐条领取后从实时用户、Persona、Storyboard、扫描、权利、同意及其证据重新授权，使用任务固定 runtime 提交，并在网络调用前后重新检查租约时间。
+- **单素材图生视频（I2V）**：浏览器只提交已审核素材 ID；Worker 在外部 effect 前重新锁定合规证据，强制 `assets/{org_id}/` 组织命名空间，复核对象 SHA-256、大小、MIME 与 S3 `VersionId`，随后生成仅供 fal `image_url` 使用的短效读取凭据。签名 URL 不落库、不写事件、不返回前端。
 - **媒体 Job API**：认证用户可用只含幂等键与 Storyboard version 的请求创建单 Shot Job；服务端编译 Prompt、固定 runtime/model、写入加密意图仓并预留管理员配置的预算上限。详情与 `after_sequence` 事件游标按组织/所有者隔离并过滤内部请求 ID 和证据引用。
 - **可恢复媒体时间线**：认证 SSE 使用 `Last-Event-ID` 从持久事件游标续传，heartbeat 返回安全 Job 状态后主动结束本轮连接；视频工作室用稳定幂等键恢复创建中断，展示任务状态、模式、模型、预算预留上限和脱敏事件，刷新或断网不会自动重发供应商请求。同一浏览器会话在活动 Job 终态前禁止切换到另一 Shot，避免任务继续计费却丢失跟踪。
 - **Provider 结果隔离摄取**：对 fal 输出重新执行允许域和 DNS 校验，并核对实际 socket peer；拒绝重定向、私网地址、未知 MIME、超限和截断响应，使用 `0600` 临时文件计算 SHA-256 后幂等写入 S3 quarantine，生成资产保持待扫描/版权/同意复核状态。
@@ -64,9 +65,9 @@ AI 对话通过 B-agent 后端提交 detached run，并使用持久事件游标�
 
 | 状态 | 范围 |
 |---|---|
-| 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置和视频规划审批 |
-| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime、加密意图仓、安全提交/对账 Worker、持久 Generation Job/Attempt/Event 与原子预算账本 |
-| 后续产品化重点 | I2V/Reference 服务端素材解析、失败请求账单对账、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 压测、开放多租户前的隔离改造 |
+| 已贯通主链路 | AI Chat detached run、durable SSE、fast/deep、DLP 脱敏、并发租约、LLM 审计、企业调研、获客、ICP、审批投递、Outbox、死信处置、视频规划审批、T2V 与单素材 I2V 安全提交/对账 |
+| 已实现工程底座 | 三层持久记忆、版本化知识库、RAG ACL、安全缓存、durable Tool Runtime、Prompt/上下文预算、媒体资产与合规门禁、Persona/项目/Storyboard 快照、媒体 Provider Runtime、加密意图仓、认证回调 inbox、Provider 用量回执、固定账户价格快照、持久 Generation Job/Attempt/Event 与原子预算账本 |
+| 后续产品化重点 | Reference-to-Video/多素材一致性、失败请求账单对账、人工协调 UI、预算管理 UI、数据库字段级加密、Provider/S3 故障注入与压测、开放多租户前的隔离改造 |
 
 当前通用 AI Chat 主链路默认装配 System Prompt 与会话历史。记忆与 RAG 已具备持久化服务、API、迁移和测试，但仍需按调研、报价、跟进等业务流明确接入策略，README 不把“底座存在”等同于“所有对话已自动使用”。
 
@@ -544,7 +545,7 @@ npm run lint:check
 npm run build
 ```
 
-最近的完整工程验证基线（2026-08-13，`b-agent-enterprise-platform`）：后端 `613 passed, 2 skipped`；前端 `49 passed`，ESLint、Vue/TypeScript 检查和 Vite 生产构建通过；`docker compose config --quiet` 通过。加密意图仓、现场授权器、提交 Worker、Job 创建服务和 Job 访问服务的独立覆盖率分别为 83%、88%、96%、91% 和 100%；两个跳过项需要 PostgreSQL 测试库执行行锁并发验证。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
+最近的完整工程验证基线（2026-08-13，`b-agent-enterprise-platform`）：后端 `698 passed, 2 skipped`；前端 `49 passed`，ESLint、Vue/TypeScript 检查和 Vite 生产构建通过；Python 全量编译与 `docker compose config --quiet` 通过。两个跳过项需要 PostgreSQL 测试库执行行锁并发验证。这里的数量是版本验证记录，不替代 GitHub Actions、真实 Provider/S3 并发压测或目标环境验收。
 
 ### Agent 性能与发布门禁
 
@@ -591,6 +592,7 @@ PYTHONPATH=. python scripts/load_test_agent_chat.py \
 - 调研、文案和发送保留人工审批点；死信结论需要两名不同管理员批准。
 - 当前部署模型是单组织信任边界，不应在未完成租户隔离审计前作为开放式多租户 SaaS 运行。
 - 媒体下载只对已晋级且扫描、版权、同意证据完整的资产签发最长 300 秒凭据；隔离区、软删除和越权资产不会获得签名。
+- I2V 生产环境的资产桶必须启用对象版本化，并通过 Bucket/IAM 策略禁止覆盖或提前删除审核版本；缺失 `VersionId`、组织命名空间不匹配或对象完整性漂移都会在外部 effect 前失败关闭。
 - 缩略图参数完全由服务端固定，媒体二进制不进入 API/Celery payload；派生资产继承敏感级别并保存血缘。对象清理默认关闭，启用后仍需真实超级管理员维护身份与保留期。
 - fal API Key 按 runtime revision 写入后端 `0600` 文件，数据库与 API 只保存配置和 `api_key_configured`；对账 Worker 使用 `O_NOFOLLOW` 和打开后的文件元数据复核阻断符号链接替换。Provider 返回的控制 URL 不被信任，队列 URL 始终由固定 origin 与已批准模型 ID 构造。
 - 对账 Worker 不读取“当前激活”指针，而只使用 Job 提交时固定的 revision、能力快照 hash、模式与模型别名；逐个即时领取避免大文件下载耗尽批次中后续任务的租约。
