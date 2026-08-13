@@ -303,15 +303,18 @@ async def test_each_claim_uses_fresh_time_and_operational_bounds():
         [
             datetime(2026, 8, 13, 10, 0, 1),
             datetime(2026, 8, 13, 10, 0, 2),
+            datetime(2026, 8, 13, 10, 0, 3),
+            datetime(2026, 8, 13, 10, 0, 4),
         ]
     )
     service = FakeJobs(jobs)
+    calls = []
     await run_media_submission_batch(
         jobs=service,
         vault=FakeVault(),
         authorizer=FakeAuthorizer(),
         runtime_factory=FakeRuntimeFactory([]),
-        coordinator_builder=lambda adapter: FakeCoordinator(adapter, {}, []),
+        coordinator_builder=lambda adapter: FakeCoordinator(adapter, {}, calls),
         worker_id="media-submit-a",
         now=NOW,
         batch_size=10,
@@ -320,7 +323,11 @@ async def test_each_claim_uses_fresh_time_and_operational_bounds():
     )
     assert [claim["now"] for claim in service.claims[:2]] == [
         NOW,
+        datetime(2026, 8, 13, 10, 0, 2),
+    ]
+    assert [call[1]["now"] for call in calls] == [
         datetime(2026, 8, 13, 10, 0, 1),
+        datetime(2026, 8, 13, 10, 0, 3),
     ]
 
     for batch_size, lease_seconds in [(0, 300), (101, 300), (1, 299), (1, 901)]:
