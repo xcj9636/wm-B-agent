@@ -21,7 +21,10 @@ from app.services.agent_runtime.contracts import ExecutionPrincipal
 from app.services.media.assets import MediaAssetForbidden
 from app.services.media.inspection import MediaInspectionRunner
 from app.services.media.inspection_service import MediaInspectionService
+from app.services.media.intent_vault import EncryptedMediaIntentVault
+from app.services.media.jobs import MediaGenerationJobService
 from app.services.media.lifecycle import MediaAssetLifecycleService
+from app.services.media.policy import MediaSubmissionPolicy
 from app.services.media.reconcile_runtime import MediaReconciliationCoordinator
 from app.services.media.reconciliation import MediaReconciliationService
 from app.services.media.reconciliation_worker import (
@@ -31,12 +34,94 @@ from app.services.media.result_ingestion import (
     HttpxMediaRemoteFetcher,
     ProviderResultIngestor,
 )
+from app.services.media.submission import MediaSubmissionCoordinator
+from app.services.media.submission_authorizer import MediaSubmissionAuthorizer
+from app.services.media.submission_worker import run_media_submission_batch
 from app.services.media.thumbnail import MediaThumbnailRunner, MediaThumbnailService
 from app.services.media.worker_runtime import (
     PinnedMediaRuntimeFactory,
     ReservedEstimateCostResolver,
 )
 from app.tasks.celery_worker import celery
+
+
+async def _run_configured_media_submission(
+    db: Session,
+    *,
+    worker_id: str,
+    now: datetime,
+) -> dict[str, int]:
+    jobs = MediaGenerationJobService(db)
+    vault = EncryptedMediaIntentVault(
+        root=settings.MEDIA_INTENT_VAULT_DIR,
+        key_file=settings.MEDIA_INTENT_VAULT_KEY_FILE,
+    )
+    policy = MediaSubmissionPolicy(
+        submission_enabled=settings.MEDIA_SUBMIT_ENABLED,
+        policy_version=settings.MEDIA_POLICY_VERSION,
+        signing_key=settings.MEDIA_POLICY_SIGNING_KEY.encode("utf-8"),
+        decision_ttl_seconds=settings.MEDIA_POLICY_DECISION_TTL_SECONDS,
+    )
+    authorizer = MediaSubmissionAuthorizer(
+        db,
+        policy=policy,
+        deployment_org_id=settings.AGENT_ORG_ID,
+    )
+    return await run_media_submission_batch(
+        jobs=jobs,
+        vault=vault,
+        authorizer=authorizer,
+        runtime_factory=PinnedMediaRuntimeFactory(db),
+        coordinator_builder=lambda adapter: MediaSubmissionCoordinator(
+            db,
+            jobs=jobs,
+            vault=vault,
+            policy=policy,
+            adapter=adapter,
+        ),
+        worker_id=worker_id,
+        now=now,
+        batch_size=settings.MEDIA_SUBMIT_BATCH_SIZE,
+        lease_seconds=settings.MEDIA_SUBMIT_LEASE_SECONDS,
+    )
+
+
+@celery.task(
+    bind=True,
+    name="app.tasks.media_tasks.submit_media_jobs_task",
+    acks_late=True,
+    max_retries=0,
+    soft_time_limit=240,
+    time_limit=270,
+)
+def submit_media_jobs_task(self):
+    """Submit queued jobs without accepting identity or prompt task arguments."""
+    if not settings.MEDIA_SUBMIT_ENABLED:
+        return {
+            "claimed": 0,
+            "submitted": 0,
+            "submission_unknown": 0,
+            "failed_before_submission": 0,
+            "deferred": 0,
+            "status": "disabled",
+        }
+    db = SessionLocal()
+    try:
+        hostname = str(getattr(self.request, "hostname", "media-submitter"))[
+            :100
+        ]
+        return asyncio.run(
+            _run_configured_media_submission(
+                db,
+                worker_id=hostname,
+                now=datetime.utcnow(),
+            )
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 async def _run_configured_media_reconciliation(

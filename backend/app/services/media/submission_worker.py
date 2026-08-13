@@ -57,13 +57,14 @@ async def run_media_submission_batch(
             intent = vault.load(job.payload_ref)
             authorization = authorizer.authorize(job, intent, now=checked_at)
             adapter = runtime_factory.build(job)
+            effect_checked_at = clock()
             result = await coordinator_builder(adapter).submit_claimed(
                 job.id,
                 worker_id=worker_id,
                 fencing_token=job.fencing_token,
                 principal=authorization.principal,
                 decision=authorization.decision,
-                now=checked_at,
+                now=effect_checked_at,
             )
         except MediaIntentVaultUnavailable:
             _fail_before_submission(
