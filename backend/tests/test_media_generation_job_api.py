@@ -5,7 +5,10 @@ from uuid import uuid4
 import pytest
 
 from app.api.v1.video import get_media_generation_job_creator
+from app.api.v1.auth import get_current_active_user
+from app.config import settings
 from app.main import app
+from app.models.database import MediaGenerationEvent, MediaGenerationJob, User
 from app.services.idempotency import IdempotencyConflict
 from app.services.media.job_creator import MediaGenerationJobUnavailable
 
@@ -134,3 +137,108 @@ def test_creation_errors_are_sanitized_and_hide_resource_existence(
     assert "secret path" not in response.text
     assert "private hash" not in response.text
     assert "cross organization" not in response.text
+
+
+def stored_job(db, user_id):
+    job = MediaGenerationJob(
+        org_id=settings.AGENT_ORG_ID,
+        owner_user_id=user_id,
+        project_id=uuid4(),
+        storyboard_version_id=uuid4(),
+        shot_id=uuid4(),
+        runtime_revision_id=uuid4(),
+        idempotency_key=f"api-read-{uuid4()}",
+        input_hash="a" * 64,
+        intent_hash="b" * 64,
+        payload_ref=f"vault://media-intents/{uuid4()}",
+        mode="text_to_video",
+        provider="fal",
+        model_id="fal-ai/t2v",
+        sensitivity="internal",
+        status="queued",
+        effect_state="none",
+        event_sequence=2,
+        reserved_cost_microusd=2_500_000,
+        estimate_hash="c" * 64,
+        budget_period_start=datetime(2026, 8, 1).date(),
+        deadline_at=datetime(2026, 8, 13, 12, 0),
+    )
+    db.add(job)
+    db.flush()
+    db.add_all(
+        [
+            MediaGenerationEvent(
+                job_id=job.id,
+                sequence=1,
+                event_type="submission.accepted",
+                data_json={"provider_request_id": "private-request-id"},
+            ),
+            MediaGenerationEvent(
+                job_id=job.id,
+                sequence=2,
+                event_type="job.failed",
+                data_json={
+                    "error_code": "provider_failed",
+                    "prompt": "private-prompt",
+                },
+            ),
+        ]
+    )
+    db.commit()
+    return job
+
+
+def test_owner_reads_job_and_incremental_events_without_internal_fields(api_context):
+    client, db, user = api_context
+    job = stored_job(db, user.id)
+
+    detail = client.get(f"/api/v1/video/generation-jobs/{job.id}")
+    events = client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events",
+        params={"after_sequence": 0, "limit": 10},
+    )
+
+    assert detail.status_code == 200
+    assert detail.json()["reservation_ceiling_microusd"] == 2_500_000
+    assert events.status_code == 200
+    assert events.json()["next_sequence"] == 2
+    assert [item["sequence"] for item in events.json()["items"]] == [1, 2]
+    assert events.json()["items"][0]["data"] == {}
+    assert events.json()["items"][1]["data"] == {
+        "error_code": "provider_failed"
+    }
+    assert "private-request-id" not in events.text
+    assert "private-prompt" not in events.text
+
+
+def test_job_read_hides_other_owner_and_allows_same_org_superuser(api_context):
+    client, db, owner = api_context
+    job = stored_job(db, owner.id)
+    other = User(
+        username=f"other-{uuid4()}",
+        email=f"other-{uuid4()}@example.com",
+        hashed_password="unused",
+        is_active=True,
+    )
+    db.add(other)
+    db.commit()
+    app.dependency_overrides[get_current_active_user] = lambda: other
+    assert client.get(f"/api/v1/video/generation-jobs/{job.id}").status_code == 404
+
+    other.is_superuser = True
+    db.commit()
+    assert client.get(f"/api/v1/video/generation-jobs/{job.id}").status_code == 200
+
+
+def test_event_cursor_is_strictly_bounded(api_context):
+    client, db, user = api_context
+    job = stored_job(db, user.id)
+
+    assert client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events",
+        params={"after_sequence": -1},
+    ).status_code == 422
+    assert client.get(
+        f"/api/v1/video/generation-jobs/{job.id}/events",
+        params={"limit": 101},
+    ).status_code == 422
