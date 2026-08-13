@@ -17,6 +17,7 @@ from app.services.media.contracts import (
 from app.services.media.provider_inputs import (
     MediaProviderInputDenied,
     MediaProviderInputResolver,
+    MediaProviderInputUnavailable,
 )
 
 
@@ -42,8 +43,8 @@ class FakeAssetAuthorizer:
         self.snapshot = snapshot
         self.calls = []
 
-    def asset_snapshot(self, asset_id, org_id, now):
-        self.calls.append((asset_id, org_id, now))
+    def asset_snapshot(self, asset_id, org_id, now, *, lock=False):
+        self.calls.append((asset_id, org_id, now, lock))
         return self.snapshot
 
 
@@ -134,6 +135,25 @@ def test_image_to_video_resolves_one_live_promoted_asset_server_side(db_session)
             "expires_seconds": 3600,
         }
     ]
+    assert service._asset_authorizer.calls == [(asset_id, org_id, NOW, True)]
+
+
+def test_object_store_signing_failure_is_retryable_not_policy_denial(db_session):
+    class UnavailableObjectStore(FakeObjectStore):
+        def create_provider_input(self, **kwargs):
+            raise RuntimeError("storage endpoint unavailable")
+
+    asset_id = uuid4()
+    org_id = uuid4()
+    promoted_asset(db_session, org_id=org_id, asset_id=asset_id)
+    service, _ = resolver(
+        db_session,
+        approved_snapshot(asset_id, org_id),
+        store=UnavailableObjectStore(),
+    )
+
+    with pytest.raises(MediaProviderInputUnavailable):
+        service.resolve(image_intent(asset_id, org_id=org_id), now=NOW)
 
 
 @pytest.mark.parametrize(

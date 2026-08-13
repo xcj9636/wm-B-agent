@@ -6,6 +6,7 @@ import pytest
 
 from app.services.media.intent_vault import MediaIntentVaultUnavailable
 from app.services.media.policy import MediaPolicyDenied
+from app.services.media.provider_inputs import MediaProviderInputUnavailable
 from app.services.media.submission_authorizer import (
     MediaSubmissionAuthorizationDenied,
 )
@@ -238,6 +239,35 @@ async def test_runtime_unavailable_is_deferred_without_false_terminal_failure():
     assert result["deferred"] == 1
     assert result["claimed"] == 1
     assert "secret" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_provider_input_infrastructure_failure_is_deferred_and_closed():
+    target = job(6)
+    service = FakeJobs([target])
+    closed = []
+
+    result = await run_media_submission_batch(
+        jobs=service,
+        vault=FakeVault(),
+        authorizer=FakeAuthorizer(),
+        runtime_factory=FakeRuntimeFactory(closed),
+        coordinator_builder=lambda adapter: FakeCoordinator(
+            adapter,
+            {},
+            [],
+            failure=MediaProviderInputUnavailable("private storage failure"),
+        ),
+        worker_id="media-submit-a",
+        now=NOW,
+        batch_size=1,
+        lease_seconds=300,
+    )
+
+    assert service.failures == []
+    assert result["deferred"] == 1
+    assert closed == [target.id]
+    assert "private" not in repr(result)
 
 
 @pytest.mark.asyncio
