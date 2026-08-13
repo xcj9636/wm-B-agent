@@ -79,6 +79,9 @@ def test_media_features_are_default_off():
     assert config.MEDIA_PLANNING_ENABLED is False
     assert config.MEDIA_SUBMIT_ENABLED is False
     assert config.MEDIA_INSPECTION_ENABLED is False
+    assert config.MEDIA_SUBMIT_BATCH_SIZE == 5
+    assert config.MEDIA_SUBMIT_LEASE_SECONDS == 300
+    assert config.MEDIA_SUBMIT_POLL_SECONDS == 10
     assert config.MEDIA_RECONCILE_LEASE_SECONDS == 300
 
 
@@ -87,6 +90,12 @@ def test_settings_reject_media_reconciliation_lease_shorter_than_task_timeout():
         Settings(
             _env_file=None,
             MEDIA_RECONCILE_LEASE_SECONDS=299,
+        )
+
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_SUBMIT_LEASE_SECONDS=299,
         )
 
 
@@ -147,10 +156,41 @@ def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
         MEDIA_PLANNING_ENABLED=True,
         MEDIA_SUBMIT_ENABLED=True,
         MEDIA_POLICY_SIGNING_KEY="m" * 32,
+        MEDIA_INTENT_VAULT_DIR="/run/private/media-intents",
+        MEDIA_INTENT_VAULT_KEY_FILE="/run/secrets/media-intent.key",
     )
 
     assert config.DEPLOYMENT_TENANCY == "single_organization"
     assert config.MEDIA_SUBMIT_ENABLED is True
+
+
+@pytest.mark.parametrize(
+    ("vault_dir", "key_file"),
+    [
+        ("./data/media-intents", "/run/secrets/media-intent.key"),
+        ("/run/private/media-intents", "./data/secrets/media-intent.key"),
+        ("", "/run/secrets/media-intent.key"),
+        ("/run/private/media-intents", ""),
+    ],
+)
+def test_enabled_submission_requires_absolute_private_vault_paths(
+    vault_dir,
+    key_file,
+):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            MEDIA_UPLOAD_ENABLED=True,
+            MEDIA_INSPECTION_ENABLED=True,
+            MEDIA_OBJECT_STORE_BACKEND="s3",
+            MEDIA_S3_QUARANTINE_BUCKET="media-quarantine",
+            MEDIA_S3_ASSET_BUCKET="media-assets",
+            MEDIA_PLANNING_ENABLED=True,
+            MEDIA_SUBMIT_ENABLED=True,
+            MEDIA_POLICY_SIGNING_KEY="m" * 32,
+            MEDIA_INTENT_VAULT_DIR=vault_dir,
+            MEDIA_INTENT_VAULT_KEY_FILE=key_file,
+        )
 
 
 def test_submission_policy_fails_closed_when_feature_is_disabled():
