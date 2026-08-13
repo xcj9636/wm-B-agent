@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Protocol
+from typing import Any, Callable, Dict, Protocol
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -62,12 +62,14 @@ class MediaSubmissionCoordinator:
         vault: MediaIntentVault,
         policy: MediaPolicyVerifier,
         adapter: MediaSubmitAdapter,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._db = db
         self._jobs = jobs
         self._vault = vault
         self._policy = policy
         self._adapter = adapter
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     async def submit_claimed(
         self,
@@ -103,7 +105,7 @@ class MediaSubmissionCoordinator:
                 worker_id=worker_id,
                 fencing_token=fencing_token,
                 error_code=exc.error_code,
-                now=checked_at,
+                now=self._completed_at(),
             )
         except Exception:
             return self._jobs.mark_submission_unknown(
@@ -111,15 +113,19 @@ class MediaSubmissionCoordinator:
                 worker_id=worker_id,
                 fencing_token=fencing_token,
                 error_code="provider_submission_failed",
-                now=checked_at,
+                now=self._completed_at(),
             )
         return self._jobs.record_submitted(
             job.id,
             worker_id=worker_id,
             fencing_token=fencing_token,
             provider_request_id=receipt.request_id,
-            now=checked_at,
+            now=self._completed_at(),
         )
+
+    def _completed_at(self) -> datetime:
+        """Read time after the network effect so stale leases fail closed."""
+        return self._aware_utc(self._clock())
 
     def _current_claim(
         self,
