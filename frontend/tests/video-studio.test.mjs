@@ -25,6 +25,9 @@ test('video studio exposes the complete governed planning API contract', () => {
     'createStoryboard',
     'approveStoryboard',
     'compileShot',
+    'createGenerationJob',
+    'getGenerationJob',
+    'streamGenerationJobEvents',
   ]) {
     assert.match(api, new RegExp(`async ${method}\\(`))
   }
@@ -33,6 +36,10 @@ test('video studio exposes the complete governed planning API contract', () => {
   assert.match(api, /\/api\/v1\/video\/projects/)
   assert.match(api, /\/approve/)
   assert.match(api, /\/compile/)
+  assert.match(api, /\/generation-jobs/)
+  assert.match(api, /Last-Event-ID/)
+  assert.match(api, /Authorization/)
+  assert.match(api, /resolveBackendApiUrl/)
 })
 
 test('video studio is routed, localized, and visible in primary navigation', () => {
@@ -78,4 +85,37 @@ test('video studio drives the approval-gated planning workflow from the browser'
   assert.match(view, /storyboardDialogOpen/)
   assert.match(view, /compiledReceipt/)
   assert.doesNotMatch(view, /compiledReceipt\.prompt(?!_hash)|prompt:\s*compiledReceipt/i)
+})
+
+test('video studio creates one-shot generation jobs and renders a resumable safe timeline', () => {
+  const view = source('src/views/VideoStudio.vue')
+  const timeline = source('src/composables/useMediaJobTimeline.ts')
+
+  assert.match(view, /videoApi\.createGenerationJob/)
+  assert.match(view, /startMediaJob/)
+  assert.match(view, /Generate video/)
+  assert.match(view, /Generation timeline/)
+  assert.match(view, /mediaJobEvents/)
+  assert.match(view, /restoreMediaJob/)
+  assert.match(timeline, /streamGenerationJobEvents/)
+  assert.match(timeline, /sessionStorage/)
+  assert.match(timeline, /lastEventId/)
+  assert.match(timeline, /AbortController/)
+  assert.match(timeline, /TERMINAL_MEDIA_JOB_STATUSES/)
+  assert.doesNotMatch(view, /provider_request_id|payload_ref|intent_hash|estimate_hash|prompt/i)
+})
+
+test('media job timeline has complete Chinese localization', () => {
+  const i18n = source('src/i18n/index.ts')
+
+  for (const phrase of [
+    'Generate video',
+    'Generation timeline',
+    'Generation job created.',
+    'Live updates paused',
+    'Resume live updates',
+    'No generation events yet',
+  ]) {
+    assert.match(i18n, new RegExp(`'${phrase}':`))
+  }
 })
