@@ -12,9 +12,12 @@ from app.models.database import (
     MediaRuntimeRevision,
 )
 from app.services.agent_runtime.contracts import ExecutionPrincipal, Sensitivity
-from app.services.idempotency import canonical_hash
+from app.services.idempotency import IdempotencyConflict, canonical_hash
 from app.services.media.contracts import GenerationIntent, GenerationMode
-from app.services.media.intent_vault import MediaIntentVaultUnavailable
+from app.services.media.intent_vault import (
+    MediaIntentVaultConflict,
+    MediaIntentVaultUnavailable,
+)
 from app.services.media.job_creator import (
     MediaGenerationJobCreateRequest,
     MediaGenerationJobCreator,
@@ -55,6 +58,11 @@ class FakeVault:
             raise self.failure
         self.values.append(intent)
         return f"vault://media-intents/{intent.attempt_id}"
+
+
+class ConflictingVault(FakeVault):
+    def store(self, intent):
+        raise MediaIntentVaultConflict("changed prompt must not leak")
 
 
 def install_runtime_and_budget(db_session, org_id, *, model_id="fal-ai/t2v"):
@@ -197,6 +205,25 @@ def test_vault_failure_never_creates_job_or_reserves_budget(db_session):
     assert db_session.query(MediaBudgetLedgerEntry).count() == 0
     account = db_session.query(MediaBudgetAccount).one()
     assert account.reserved_microusd == 0
+
+
+def test_vault_conflict_is_reported_as_idempotency_conflict_without_budget_change(
+    db_session,
+):
+    org_id = uuid4()
+    install_runtime_and_budget(db_session, org_id)
+    intent = base_intent(org_id)
+
+    with pytest.raises(IdempotencyConflict):
+        creator(
+            db_session,
+            FakeCompiler(intent),
+            ConflictingVault(),
+        ).create(request(intent), principal(org_id), now=NOW)
+
+    assert db_session.query(MediaGenerationJob).count() == 0
+    assert db_session.query(MediaBudgetLedgerEntry).count() == 0
+    assert db_session.query(MediaBudgetAccount).one().reserved_microusd == 0
 
 
 def test_missing_ceiling_or_tampered_runtime_fails_before_vault_write(db_session):
