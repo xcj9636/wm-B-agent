@@ -61,10 +61,11 @@ def test_authenticated_job_create_is_server_owned_and_secret_free(api_context):
     client, _, _ = api_context
     project_id = uuid4()
     shot_id = uuid4()
+    request_body = payload()
     service = FakeCreator()
     app.dependency_overrides[get_media_generation_job_creator] = lambda: service
 
-    response = client.post(endpoint(project_id, shot_id), json=payload())
+    response = client.post(endpoint(project_id, shot_id), json=request_body)
 
     assert response.status_code == 202
     body = response.json()
@@ -86,7 +87,7 @@ def test_authenticated_job_create_is_server_owned_and_secret_free(api_context):
     request, principal, now = service.calls[0]
     assert request.project_id == project_id
     assert request.shot_id == shot_id
-    assert request.storyboard_version_id == payload()["storyboard_version_id"]
+    assert str(request.storyboard_version_id) == request_body["storyboard_version_id"]
     assert principal.user_id > 0
     assert now.tzinfo is not None
 

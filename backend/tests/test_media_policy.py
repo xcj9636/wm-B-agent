@@ -156,6 +156,7 @@ def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
         MEDIA_PLANNING_ENABLED=True,
         MEDIA_SUBMIT_ENABLED=True,
         MEDIA_POLICY_SIGNING_KEY="m" * 32,
+        MEDIA_T2V_RESERVATION_CEILING_MICROUSD=2_500_000,
         MEDIA_INTENT_VAULT_DIR="/run/private/media-intents",
         MEDIA_INTENT_VAULT_KEY_FILE="/run/secrets/media-intent.key",
     )
@@ -188,6 +189,7 @@ def test_enabled_submission_requires_absolute_private_vault_paths(
             MEDIA_PLANNING_ENABLED=True,
             MEDIA_SUBMIT_ENABLED=True,
             MEDIA_POLICY_SIGNING_KEY="m" * 32,
+            MEDIA_T2V_RESERVATION_CEILING_MICROUSD=2_500_000,
             MEDIA_INTENT_VAULT_DIR=vault_dir,
             MEDIA_INTENT_VAULT_KEY_FILE=key_file,
         )

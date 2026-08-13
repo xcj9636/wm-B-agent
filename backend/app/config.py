@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     MEDIA_SUBMIT_BATCH_SIZE: int = Field(default=5, ge=1, le=100)
     MEDIA_SUBMIT_LEASE_SECONDS: int = Field(default=300, ge=300, le=900)
     MEDIA_SUBMIT_POLL_SECONDS: int = Field(default=10, ge=1, le=900)
+    MEDIA_JOB_DEADLINE_SECONDS: int = Field(default=3600, ge=60, le=86_400)
+    MEDIA_T2V_RESERVATION_CEILING_MICROUSD: int = Field(
+        default=0,
+        ge=0,
+        le=1_000_000_000_000,
+    )
     MEDIA_INTENT_VAULT_DIR: str = "./data/private/media-intents"
     MEDIA_INTENT_VAULT_KEY_FILE: str = "./data/secrets/media-intent.key"
     MEDIA_POLICY_VERSION: str = Field(default="media-policy-v1", min_length=1)
@@ -300,6 +306,13 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "media submission requires absolute private intent vault paths"
+            )
+        if (
+            self.MEDIA_SUBMIT_ENABLED
+            and self.MEDIA_T2V_RESERVATION_CEILING_MICROUSD <= 0
+        ):
+            raise ValueError(
+                "media submission requires a positive T2V reservation ceiling"
             )
         return self
 

@@ -1,13 +1,13 @@
 """Authenticated video studio asset APIs."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from hashlib import sha256
 import json
 from typing import Callable, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.models.database import (
     VideoProject,
     VideoProjectEvidence,
     VideoStoryboardVersion,
+    MediaGenerationJob,
 )
 from app.services.agent_runtime.contracts import (
     ExecutionPrincipal,
@@ -49,6 +50,7 @@ from app.services.media.access import MediaAssetAccessService
 from app.services.media.contracts import (
     AssetConsentStatus,
     AssetRightsStatus,
+    GenerationMode,
     MediaAssetKind,
     Storyboard,
     VideoPersonaSpec,
@@ -82,6 +84,12 @@ from app.services.media.review import (
 )
 from app.services.media.thumbnail import MediaThumbnailService
 from app.services.media.lifecycle import MediaAssetLifecycleService
+from app.services.media.intent_vault import EncryptedMediaIntentVault
+from app.services.media.job_creator import (
+    MediaGenerationJobCreateRequest,
+    MediaGenerationJobCreator,
+    MediaGenerationJobUnavailable,
+)
 from app.tasks.media_tasks import (
     generate_media_thumbnail_task,
     inspect_media_asset_task,
@@ -336,6 +344,32 @@ class CompileShotResponse(BaseModel):
     evidence_snapshot_hash: str
 
 
+class CreateGenerationJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=8, max_length=255)
+    storyboard_version_id: UUID
+
+
+class MediaGenerationJobResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    storyboard_version_id: UUID
+    shot_id: UUID
+    mode: str
+    provider: str
+    model_id: str
+    sensitivity: str
+    status: str
+    effect_state: str
+    reservation_ceiling_microusd: int
+    provider_state: Optional[str]
+    error_code: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime]
+
+
 def get_media_asset_service(db: Session = Depends(get_db)) -> MediaAssetService:
     return MediaAssetService(db, upload_enabled=settings.MEDIA_UPLOAD_ENABLED)
 
@@ -386,6 +420,35 @@ def get_video_prompt_compiler(
     return VideoPromptCompiler(
         db,
         planning_enabled=settings.MEDIA_PLANNING_ENABLED,
+    )
+
+
+def get_media_generation_job_creator(
+    db: Session = Depends(get_db),
+) -> MediaGenerationJobCreator:
+    if not settings.MEDIA_SUBMIT_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Media generation is unavailable",
+        )
+    compiler = VideoPromptCompiler(
+        db,
+        planning_enabled=settings.MEDIA_PLANNING_ENABLED,
+    )
+    vault = EncryptedMediaIntentVault(
+        root=settings.MEDIA_INTENT_VAULT_DIR,
+        key_file=settings.MEDIA_INTENT_VAULT_KEY_FILE,
+    )
+    return MediaGenerationJobCreator(
+        db,
+        compiler=compiler,
+        vault=vault,
+        reservation_ceilings={
+            GenerationMode.TEXT_TO_VIDEO: (
+                settings.MEDIA_T2V_RESERVATION_CEILING_MICROUSD
+            )
+        },
+        deadline_seconds=settings.MEDIA_JOB_DEADLINE_SECONDS,
     )
 
 
@@ -520,6 +583,29 @@ def _project_response(
         ],
         created_at=project.created_at,
         updated_at=project.updated_at,
+    )
+
+
+def _media_generation_job_response(
+    job: MediaGenerationJob,
+) -> MediaGenerationJobResponse:
+    return MediaGenerationJobResponse(
+        id=job.id,
+        project_id=job.project_id,
+        storyboard_version_id=job.storyboard_version_id,
+        shot_id=job.shot_id,
+        mode=job.mode,
+        provider=job.provider,
+        model_id=job.model_id,
+        sensitivity=job.sensitivity,
+        status=job.status,
+        effect_state=job.effect_state,
+        reservation_ceiling_microusd=job.reserved_cost_microusd,
+        provider_state=job.provider_state,
+        error_code=job.error_code,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        completed_at=job.completed_at,
     )
 
 
@@ -790,6 +876,40 @@ async def compile_video_shot(
         )
     except Exception as exc:
         _raise_video_planning_http_error(exc, "generation")
+
+
+@router.post(
+    "/projects/{project_id}/shots/{shot_id}/generation-jobs",
+    response_model=MediaGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_media_generation_job(
+    project_id: UUID,
+    shot_id: UUID,
+    request: CreateGenerationJobRequest,
+    response: Response,
+    current_user: User = Depends(get_current_active_user),
+    creator: MediaGenerationJobCreator = Depends(
+        get_media_generation_job_creator
+    ),
+):
+    try:
+        job, created = creator.create(
+            MediaGenerationJobCreateRequest(
+                idempotency_key=request.idempotency_key,
+                project_id=project_id,
+                storyboard_version_id=request.storyboard_version_id,
+                shot_id=shot_id,
+            ),
+            _principal(current_user),
+            now=datetime.now(timezone.utc),
+        )
+        response.status_code = (
+            status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
+        )
+        return _media_generation_job_response(job)
+    except Exception as exc:
+        _raise_media_generation_http_error(exc)
 
 
 @router.post(
@@ -1156,3 +1276,22 @@ def _raise_video_planning_http_error(exc: Exception, resource: str) -> None:
             detail=f"Video {resource} request conflicts with current state",
         ) from exc
     raise exc
+
+
+def _raise_media_generation_http_error(exc: Exception) -> None:
+    if isinstance(exc, (PermissionError, LookupError)):
+        raise HTTPException(
+            status_code=404,
+            detail="Media generation resource not found",
+        ) from exc
+    if isinstance(exc, IdempotencyConflict):
+        raise HTTPException(
+            status_code=409,
+            detail="Media generation request conflicts with current state",
+        ) from exc
+    if isinstance(exc, MediaGenerationJobUnavailable):
+        raise HTTPException(
+            status_code=503,
+            detail="Media generation is unavailable",
+        ) from exc
+    _raise_video_planning_http_error(exc, "generation")
