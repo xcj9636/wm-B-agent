@@ -82,6 +82,7 @@ def test_media_features_are_default_off():
     assert config.MEDIA_SUBMIT_BATCH_SIZE == 5
     assert config.MEDIA_SUBMIT_LEASE_SECONDS == 300
     assert config.MEDIA_SUBMIT_POLL_SECONDS == 10
+    assert config.MEDIA_PROVIDER_INPUT_TTL_SECONDS == 3600
     assert config.MEDIA_CALLBACK_ENABLED is False
     assert config.MEDIA_CALLBACK_MAX_BODY_BYTES == 262_144
     assert config.MEDIA_FAL_WEBHOOK_USER_ID == ""
@@ -190,6 +191,26 @@ def test_settings_allow_explicitly_enabled_media_pipeline_with_strong_key():
 
     assert config.DEPLOYMENT_TENANCY == "single_organization"
     assert config.MEDIA_SUBMIT_ENABLED is True
+
+
+def test_enabled_submission_requires_input_credential_to_cover_job_deadline():
+    with pytest.raises(ValidationError, match="credential lifetime"):
+        Settings(
+            _env_file=None,
+            MEDIA_UPLOAD_ENABLED=True,
+            MEDIA_INSPECTION_ENABLED=True,
+            MEDIA_OBJECT_STORE_BACKEND="s3",
+            MEDIA_S3_QUARANTINE_BUCKET="media-quarantine",
+            MEDIA_S3_ASSET_BUCKET="media-assets",
+            MEDIA_PLANNING_ENABLED=True,
+            MEDIA_SUBMIT_ENABLED=True,
+            MEDIA_POLICY_SIGNING_KEY="m" * 32,
+            MEDIA_T2V_RESERVATION_CEILING_MICROUSD=2_500_000,
+            MEDIA_INTENT_VAULT_DIR="/run/private/media-intents",
+            MEDIA_INTENT_VAULT_KEY_FILE="/run/secrets/media-intent.key",
+            MEDIA_JOB_DEADLINE_SECONDS=3601,
+            MEDIA_PROVIDER_INPUT_TTL_SECONDS=3600,
+        )
 
 
 @pytest.mark.parametrize(
