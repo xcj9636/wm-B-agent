@@ -73,6 +73,19 @@ class FakeAdapter:
         return MediaSubmissionReceipt(request_id="fal-request-1")
 
 
+class FakeInputResolver:
+    def __init__(self, calls, *, arguments=None, failure=None):
+        self.calls = calls
+        self.arguments = arguments or {"prompt": "resolved"}
+        self.failure = failure
+
+    def resolve(self, generation_intent, *, now):
+        self.calls.append(("input.resolve", generation_intent.mode.value))
+        if self.failure is not None:
+            raise self.failure
+        return self.arguments
+
+
 class FakeJobs:
     def __init__(self, db_session, calls):
         self.db = db_session
@@ -177,6 +190,86 @@ async def test_policy_is_verified_before_effect_and_provider_submission(db_sessi
         "jobs.record_submitted",
     ]
     assert calls[3][2] == {"prompt": "Approved export product film"}
+
+
+@pytest.mark.asyncio
+async def test_server_resolves_provider_input_after_policy_before_effect(db_session):
+    calls = []
+    generation_intent = intent(org_id=uuid4()).model_copy(
+        update={
+            "mode": GenerationMode.IMAGE_TO_VIDEO,
+            "reference_asset_ids": [uuid4()],
+        }
+    )
+    job = stored_job(db_session, generation_intent)
+    job.mode = GenerationMode.IMAGE_TO_VIDEO.value
+    db_session.commit()
+    arguments = {
+        "prompt": generation_intent.prompt,
+        "image_url": "https://objects.example.test/provider-input",
+    }
+    coordinator = MediaSubmissionCoordinator(
+        db_session,
+        jobs=FakeJobs(db_session, calls),
+        vault=FakeVault(generation_intent, calls),
+        policy=FakePolicy(calls),
+        input_resolver=FakeInputResolver(calls, arguments=arguments),
+        adapter=FakeAdapter(calls),
+    )
+
+    await coordinator.submit_claimed(
+        job.id,
+        worker_id="worker-a",
+        fencing_token=3,
+        principal=principal(generation_intent.org_id),
+        decision=SimpleNamespace(decision_id=uuid4()),
+        now=NOW,
+    )
+
+    assert [call[0] for call in calls] == [
+        "vault.load",
+        "policy.verify",
+        "input.resolve",
+        "jobs.begin_submission",
+        "provider.submit",
+        "jobs.record_submitted",
+    ]
+    assert calls[4][2] == arguments
+
+
+@pytest.mark.asyncio
+async def test_provider_input_failure_happens_before_effect(db_session):
+    calls = []
+    generation_intent = intent(org_id=uuid4())
+    job = stored_job(db_session, generation_intent)
+    coordinator = MediaSubmissionCoordinator(
+        db_session,
+        jobs=FakeJobs(db_session, calls),
+        vault=FakeVault(generation_intent, calls),
+        policy=FakePolicy(calls),
+        input_resolver=FakeInputResolver(
+            calls,
+            failure=MediaIntentMismatch("provider input denied"),
+        ),
+        adapter=FakeAdapter(calls),
+    )
+
+    with pytest.raises(MediaIntentMismatch):
+        await coordinator.submit_claimed(
+            job.id,
+            worker_id="worker-a",
+            fencing_token=3,
+            principal=principal(generation_intent.org_id),
+            decision=SimpleNamespace(decision_id=uuid4()),
+            now=NOW,
+        )
+
+    assert [call[0] for call in calls] == [
+        "vault.load",
+        "policy.verify",
+        "input.resolve",
+    ]
+    assert db_session.query(MediaGenerationAttempt).count() == 0
 
 
 @pytest.mark.asyncio

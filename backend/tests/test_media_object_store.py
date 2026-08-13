@@ -8,6 +8,7 @@ from app.integrations.object_store import (
     ObjectStoreConfigurationError,
     ObjectStoreIntegrityError,
     PresignedDownload,
+    PresignedProviderInput,
     PresignedUpload,
     S3CompatibleMediaObjectStore,
 )
@@ -156,6 +157,56 @@ def test_presigned_download_is_short_lived_and_bound_to_asset_namespace():
             "ExpiresIn": 120,
         }
     ]
+
+
+def test_provider_input_is_queue_lived_without_browser_download_headers():
+    client = FakeS3Client()
+    object_store = store(client)
+
+    result = object_store.create_provider_input(
+        key="assets/ba6e/asset-id",
+        content_type="image/png",
+        expires_seconds=3600,
+    )
+
+    assert result == PresignedProviderInput(
+        url="https://objects.example.test/signed-download",
+        expires_seconds=3600,
+    )
+    assert client.presign_calls == [
+        {
+            "operation": "get_object",
+            "Params": {
+                "Bucket": "media-assets",
+                "Key": "tenant-media/assets/ba6e/asset-id",
+                "ResponseContentType": "image/png",
+            },
+            "ExpiresIn": 3600,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "content_type", "expires_seconds"),
+    [
+        ("quarantine/ba6e/asset-id", "image/png", 3600),
+        ("assets/../asset-id", "image/png", 3600),
+        ("assets/ba6e/asset-id", "image/png\r\nX-Bad: true", 3600),
+        ("assets/ba6e/asset-id", "image/png", 299),
+        ("assets/ba6e/asset-id", "image/png", 86_401),
+    ],
+)
+def test_provider_input_rejects_unsafe_scope_or_expiry(
+    key,
+    content_type,
+    expires_seconds,
+):
+    with pytest.raises(ObjectStoreConfigurationError):
+        store().create_provider_input(
+            key=key,
+            content_type=content_type,
+            expires_seconds=expires_seconds,
+        )
 
 
 @pytest.mark.parametrize(
