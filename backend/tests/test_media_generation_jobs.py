@@ -278,3 +278,84 @@ def test_cancelling_before_submission_releases_budget_exactly_once(db_session):
     assert account.reserved_microusd == 0
     entries = db_session.query(MediaBudgetLedgerEntry).all()
     assert [entry.entry_type for entry in entries] == ["reservation", "release"]
+
+
+def test_fenced_pre_submission_failure_releases_budget_without_attempt(db_session):
+    org_id = uuid4()
+    runtime = install_runtime(db_session, org_id=org_id)
+    service = MediaGenerationJobService(db_session)
+    job, _ = service.create(
+        command(org_id=org_id, runtime_revision_id=runtime.id),
+        now=NOW,
+    )
+    claim = service.claim_one(
+        job.id,
+        worker_id="worker-a",
+        now=NOW,
+        lease_seconds=60,
+    )
+
+    failed = service.fail_before_submission(
+        job.id,
+        worker_id="worker-a",
+        fencing_token=claim.fencing_token,
+        error_code="media_policy_denied",
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert failed.status == "failed"
+    assert failed.effect_state == "none"
+    assert failed.error_code == "media_policy_denied"
+    assert failed.completed_at == NOW + timedelta(seconds=1)
+    assert failed.leased_by is None
+    assert db_session.query(MediaGenerationAttempt).count() == 0
+    account = db_session.query(MediaBudgetAccount).one()
+    assert account.reserved_microusd == 0
+    assert [
+        entry.entry_type
+        for entry in db_session.query(MediaBudgetLedgerEntry).order_by(
+            MediaBudgetLedgerEntry.created_at
+        )
+    ] == ["reservation", "release"]
+    assert failed.events[-1].event_type == "job.failed"
+    assert failed.events[-1].data_json == {"error_code": "media_policy_denied"}
+
+
+def test_pre_submission_failure_rejects_stale_or_started_effect(db_session):
+    org_id = uuid4()
+    runtime = install_runtime(db_session, org_id=org_id)
+    service = MediaGenerationJobService(db_session)
+    job, _ = service.create(
+        command(org_id=org_id, runtime_revision_id=runtime.id),
+        now=NOW,
+    )
+    claim = service.claim_one(
+        job.id,
+        worker_id="worker-a",
+        now=NOW,
+        lease_seconds=60,
+    )
+
+    with pytest.raises(MediaJobLeaseConflict):
+        service.fail_before_submission(
+            job.id,
+            worker_id="worker-b",
+            fencing_token=claim.fencing_token,
+            error_code="media_policy_denied",
+            now=NOW + timedelta(seconds=1),
+        )
+
+    service.begin_submission(
+        job.id,
+        worker_id="worker-a",
+        fencing_token=claim.fencing_token,
+        now=NOW + timedelta(seconds=2),
+    )
+    with pytest.raises(MediaJobLeaseConflict):
+        service.fail_before_submission(
+            job.id,
+            worker_id="worker-a",
+            fencing_token=claim.fencing_token,
+            error_code="media_policy_denied",
+            now=NOW + timedelta(seconds=3),
+        )
