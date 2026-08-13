@@ -96,7 +96,12 @@ class MediaGenerationJobAccessService:
 
     @staticmethod
     def _safe_event(row: MediaGenerationEvent) -> SafeMediaGenerationEvent:
-        allowed = _SAFE_EVENT_FIELDS.get(row.event_type, frozenset())
+        event_type = (
+            row.event_type
+            if row.event_type in _SAFE_EVENT_FIELDS
+            else "job.updated"
+        )
+        allowed = _SAFE_EVENT_FIELDS.get(event_type, frozenset())
         source = row.data_json if isinstance(row.data_json, dict) else {}
         data = {
             key: source[key]
@@ -106,7 +111,7 @@ class MediaGenerationJobAccessService:
         }
         return SafeMediaGenerationEvent(
             sequence=row.sequence,
-            event_type=row.event_type,
+            event_type=event_type,
             data=data,
             created_at=row.created_at,
         )
